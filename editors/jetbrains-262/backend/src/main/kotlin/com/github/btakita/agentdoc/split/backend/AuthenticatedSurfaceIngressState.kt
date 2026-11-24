@@ -58,6 +58,14 @@ internal class ControllerSurfaceIngressFactory : SurfaceIngressFactory {
                 .isSuccess
         }
 
+    override fun selectedFrontendReleasePackageUrl() =
+        runCatching { FrontendImplementationReleaseSource.packageUrl() }.getOrNull()
+
+    override fun selectedFrontendRelease() =
+        runCatching { FrontendImplementationReleaseSource.current() }
+            .onFailure { LOG.warn("[frontend-impl] frontend release handoff unreadable", it) }
+            .getOrNull()
+
     private companion object {
         val LOG = Logger.getInstance(ControllerSurfaceIngressFactory::class.java)
     }

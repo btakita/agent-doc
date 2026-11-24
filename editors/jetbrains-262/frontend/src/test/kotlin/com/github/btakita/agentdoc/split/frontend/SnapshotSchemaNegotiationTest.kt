@@ -1,7 +1,9 @@
 package com.github.btakita.agentdoc.split.frontend
 
 import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
-import com.github.btakita.agentdoc.split.FrontendImplementationReleaseIdentity
+import com.github.btakita.agentdoc.split.FrontendReleaseGeneration
+import com.github.btakita.agentdoc.split.FrontendReleaseOffer
+import com.github.btakita.agentdoc.split.FrontendShellCompatibility
 import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
 import kotlin.test.Test
@@ -65,8 +67,8 @@ class SnapshotSchemaNegotiationTest {
         val poll = FrontendReleasePoll()
         val active = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_FRONTEND)
             .copy(implSha256 = "a".repeat(64), epoch = 3)
-        val same = FrontendImplementationReleaseIdentity("a".repeat(64), 3)
-        val next = FrontendImplementationReleaseIdentity("b".repeat(64), 4)
+        val same = releaseIdentity("a", 3)
+        val next = releaseIdentity("b", 4)
 
         assertFalse(poll.shouldFetch(null, active, nowMs = 0), "a shell-only backend has nothing to send")
         assertFalse(poll.shouldFetch(same, active, nowMs = 0), "the active generation is never re-downloaded")
@@ -77,13 +79,13 @@ class SnapshotSchemaNegotiationTest {
     fun aRefusedGenerationIsRefetchedOnlyAfterTheBackoff() {
         val poll = FrontendReleasePoll()
         val active = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_FRONTEND)
-        val refused = FrontendImplementationReleaseIdentity("c".repeat(64), 5)
+        val refused = releaseIdentity("c", 5)
 
         assertTrue(poll.shouldFetch(refused, active, nowMs = 1_000))
         poll.refused(refused, nowMs = 1_000)
         assertFalse(poll.shouldFetch(refused, active, nowMs = 1_000 + FRONTEND_REFUSED_RELEASE_REFETCH_MS - 1))
         assertTrue(poll.shouldFetch(refused, active, nowMs = 1_000 + FRONTEND_REFUSED_RELEASE_REFETCH_MS))
-        val other = FrontendImplementationReleaseIdentity("d".repeat(64), 6)
+        val other = releaseIdentity("d", 6)
         assertTrue(poll.shouldFetch(other, active, nowMs = 1_001), "a different generation is fetched at once")
     }
 
@@ -96,4 +98,46 @@ class SnapshotSchemaNegotiationTest {
         assertTrue(answered.logLine().contains("version=5 backend_offered=5"), answered.logLine())
         assertTrue(answered.logLine().contains("provisional=false"), answered.logLine())
     }
+
+    /**
+     * GH #435: a Client whose shell is not the backend's logs both builds once, not every 30 s,
+     * and says when it matches again.
+     */
+    @Test
+    fun aClientPluginMismatchIsLoggedOncePerDistinctOffer() {
+        val poll = FrontendReleasePoll()
+        val older = FrontendReleaseOffer(
+            backendPluginVersion = "0.2.1053",
+            backendPluginPath = "/backend/plugins/agent-doc-jetbrains-262",
+            backendShellDigest = "b".repeat(64),
+            compatibility = FrontendShellCompatibility.CLIENT_OLDER,
+            release = releaseIdentity("e", 9),
+        )
+        val line = poll.offerLogLine(older)!!
+        assertTrue(line.contains("client plugin mismatch compatibility=client_older"), line)
+        assertTrue(line.contains("backend_plugin=0.2.1053"), line)
+        assertTrue(line.contains("backend_plugin_path=/backend/plugins/agent-doc-jetbrains-262"), line)
+        assertEquals(null, poll.offerLogLine(older), "the same mismatch is not repeated")
+        val matched = older.copy(compatibility = FrontendShellCompatibility.SAME_SHELL)
+        assertTrue(poll.offerLogLine(matched)!!.contains("matches the backend 0.2.1053 again"))
+        assertEquals(null, poll.offerLogLine(matched))
+    }
+
+    /** GH #435: a backend up to 0.2.1052 has no offer API; its package is asked for once per backoff. */
+    @Test
+    fun aLegacyBackendIsAskedForThePackageOncePerBackoff() {
+        val poll = FrontendReleasePoll()
+        assertTrue(poll.shouldFetchFromLegacyBackend(1_000))
+        assertFalse(poll.shouldFetchFromLegacyBackend(1_000 + 30_000), "not on the next 30 s poll")
+        assertTrue(poll.shouldFetchFromLegacyBackend(1_000 + FRONTEND_REFUSED_RELEASE_REFETCH_MS))
+    }
+
+    private fun releaseIdentity(digit: String, epoch: Long) = FrontendReleaseGeneration(
+        releaseVersion = "0.2.1053",
+        packageUrl = "https://example.invalid/agent-doc-jetbrains-262-0.2.1053.zip",
+        implSha256 = digit.repeat(64),
+        shellDigest = "a".repeat(64),
+        spiVersion = 1,
+        epoch = epoch,
+    )
 }

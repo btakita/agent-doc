@@ -1316,6 +1316,200 @@ fn jetbrains_open_lease_frontend_mismatch_lines(system_roots: &[PathBuf]) -> Vec
         .collect()
 }
 
+/// GH #435: the newest JetBrains Client whose frontend shell is not this
+/// backend's, as the backend idea.log records it since the last IDE start:
+/// `[frontend-impl] client plugin mismatch ...` from a Client that names its
+/// build (after 0.2.1052), or `[frontend-impl] client shell mismatch ...` from
+/// an older Client known only by the shell its activation receipt proved.
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct ClientPluginMismatch {
+    client: String,
+    /// `client_older`, `client_newer` or `different_build`; None when the
+    /// Client did not name its build.
+    compatibility: Option<String>,
+    client_plugin: Option<String>,
+    client_plugin_path: Option<String>,
+    client_shell: Option<String>,
+    backend_plugin: Option<String>,
+    backend_plugin_path: Option<String>,
+    backend_shell: Option<String>,
+}
+
+/// The value of `key=` in a `[frontend-impl]` line, up to the next known key.
+/// Paths may hold spaces (macOS `Application Support`), so a value ends only
+/// where another ` <known key>=` starts.
+fn frontend_impl_field(event: &str, key: &str) -> Option<String> {
+    const KEYS: [&str; 9] = [
+        "client",
+        "compatibility",
+        "client_plugin",
+        "client_plugin_path",
+        "client_shell",
+        "backend_plugin",
+        "backend_plugin_path",
+        "backend_shell",
+        "reason",
+    ];
+    let start = event
+        .match_indices(&format!(" {key}="))
+        .next()
+        .map(|(index, matched)| index + matched.len())?;
+    let rest = &event[start..];
+    let end = KEYS
+        .iter()
+        .filter_map(|other| rest.find(&format!(" {other}=")))
+        .min()
+        .unwrap_or(rest.len());
+    let value = rest[..end].trim();
+    (!value.is_empty() && value != "unknown").then(|| value.to_string())
+}
+
+fn client_plugin_mismatch(log: &str) -> Option<ClientPluginMismatch> {
+    let mut newest = None;
+    for line in log.lines() {
+        if line.contains(" IDE STARTED ") {
+            newest = None;
+            continue;
+        }
+        let Some((_, event)) = line.split_once("[frontend-impl] ") else {
+            continue;
+        };
+        let named = event.starts_with("client plugin mismatch ");
+        if !named && !event.starts_with("client shell mismatch ") {
+            continue;
+        }
+        let event = format!(" {}", event.trim_end());
+        let Some(client) = frontend_impl_field(&event, "client") else {
+            continue;
+        };
+        newest = Some(ClientPluginMismatch {
+            client,
+            compatibility: named
+                .then(|| frontend_impl_field(&event, "compatibility"))
+                .flatten(),
+            client_plugin: frontend_impl_field(&event, "client_plugin"),
+            client_plugin_path: frontend_impl_field(&event, "client_plugin_path"),
+            client_shell: frontend_impl_field(&event, "client_shell"),
+            backend_plugin: frontend_impl_field(&event, "backend_plugin"),
+            backend_plugin_path: frontend_impl_field(&event, "backend_plugin_path"),
+            backend_shell: frontend_impl_field(&event, "backend_shell"),
+        });
+    }
+    newest
+}
+
+/// The signed modular ZIP URL the installer recorded for `version` in a
+/// backend plugins directory's frontend release handoff, if any.
+fn frontend_release_package_url(plugin_dirs: &[PathBuf], version: &str) -> Option<String> {
+    plugin_dirs.iter().find_map(|dir| {
+        let manifest = std::fs::read_to_string(
+            dir.join(JETBRAINS_FRONTEND_RELEASE_DIR)
+                .join("release.properties"),
+        )
+        .ok()?;
+        let field = |key: &str| {
+            manifest.lines().find_map(|line| {
+                line.strip_prefix(key)?
+                    .strip_prefix('=')
+                    .map(|value| value.trim().to_string())
+            })
+        };
+        (field("release_version")? == version)
+            .then(|| field("package_url"))
+            .flatten()
+    })
+}
+
+/// The directory holding `path`, for either OS's separators.
+fn parent_of_client_path(path: &str) -> Option<&str> {
+    let trimmed = path.trim_end_matches(['/', '\\']);
+    let cut = trimmed.rfind(['/', '\\'])?;
+    (cut > 0).then(|| &trimmed[..cut])
+}
+
+/// GH #435: what `agent-doc upgrade` prints for a Client whose frontend shell
+/// is not this backend's: which side is stale, and the exact update.
+fn client_plugin_mismatch_message(
+    mismatch: &ClientPluginMismatch,
+    log: &Path,
+    package_url: Option<&str>,
+) -> String {
+    let named = |subject: &str, version: Option<&String>, shell: Option<&String>| {
+        let mut text = subject.to_string();
+        if let Some(version) = version {
+            text.push_str(&format!(" {version}"));
+        }
+        if let Some(shell) = shell {
+            text.push_str(&format!(" (shell {shell})"));
+        }
+        text
+    };
+    let client = named(
+        "JetBrains Client plugin",
+        mismatch.client_plugin.as_ref(),
+        mismatch.client_shell.as_ref(),
+    );
+    let backend = named(
+        "the backend",
+        mismatch.backend_plugin.as_ref(),
+        mismatch.backend_shell.as_ref(),
+    );
+    let source = format!("{} client={}", log.display(), mismatch.client);
+    if mismatch.compatibility.as_deref() == Some("client_newer") {
+        let backend_dir = mismatch
+            .backend_plugin_path
+            .as_deref()
+            .and_then(parent_of_client_path)
+            .unwrap_or("this IDE's plugins directory");
+        return format!(
+            "{client} is newer than {backend} (GH #435; {source}). Update the backend plugin: run `agent-doc upgrade` in this workspace (it installs into {backend_dir}), then restart the backend IDE."
+        );
+    }
+    let relation = match mismatch.compatibility.as_deref() {
+        Some("client_older") => "is older than",
+        _ => "is not the same build as",
+    };
+    let zip = package_url.map(str::to_string).unwrap_or_else(|| {
+        mismatch.backend_plugin.as_deref().map_or_else(
+            || "the backend's agent-doc-jetbrains-262 ZIP".to_string(),
+            |version| format!("agent-doc-jetbrains-262-{version}.zip from its agent-doc release"),
+        )
+    });
+    let target = match mismatch.client_plugin_path.as_deref() {
+        Some(path) => format!(
+            "{} (replacing {path})",
+            parent_of_client_path(path).unwrap_or(path)
+        ),
+        None => "the Client's plugins directory (Toolbox/Gateway: <IDE data dir>/plugins/frontend on Windows and macOS, <IDE data dir>/frontend on Linux; the Client idea.log line `frontend surface publisher started` names it as plugin_path=)".to_string(),
+    };
+    format!(
+        "{client} {relation} {backend} (GH #435; {source}). Update the Client plugin: run `agent-doc upgrade` on the Client machine, or quit the Client, install {zip} into {target}, and start it again."
+    )
+}
+
+/// GH #435: one line per backend idea.log on this machine whose newest
+/// connected Client runs a frontend shell other than the backend's.
+fn jetbrains_client_plugin_mismatch_lines(
+    system_roots: &[PathBuf],
+    plugin_dirs: &[PathBuf],
+) -> Vec<String> {
+    jetbrains_backend_idea_logs(system_roots)
+        .into_iter()
+        .filter_map(|log| {
+            let mismatch = client_plugin_mismatch(&read_log_tail(&log)?)?;
+            let url = mismatch
+                .backend_plugin
+                .as_deref()
+                .and_then(|version| frontend_release_package_url(plugin_dirs, version));
+            Some(client_plugin_mismatch_message(
+                &mismatch,
+                &log,
+                url.as_deref(),
+            ))
+        })
+        .collect()
+}
+
 /// GH #108: the headline for a finished release install. A staged package left
 /// the plugin tree untouched by design, so it must not read "Plugin installed"
 /// stamped with the on-disk (old) version; it names the staged version instead.
@@ -5279,8 +5473,13 @@ pub fn report_reconcile_summary(report: &PluginReconcileReport, release: &str) {
         printed_reconcile_summary(report, release, note_printed)
     );
     if report.has_modular_jetbrains_target() {
-        for line in jetbrains_open_lease_frontend_mismatch_lines(
-            &agent_doc_fs::jetbrains_install::jetbrains_system_roots(),
+        let system_roots = agent_doc_fs::jetbrains_install::jetbrains_system_roots();
+        for line in jetbrains_open_lease_frontend_mismatch_lines(&system_roots) {
+            eprintln!("WARNING: {line}");
+        }
+        for line in jetbrains_client_plugin_mismatch_lines(
+            &system_roots,
+            &agent_doc_fs::jetbrains_install::jetbrains_plugin_dirs(),
         ) {
             eprintln!("WARNING: {line}");
         }
@@ -7714,6 +7913,104 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
     /// refused every snapshot of the Client's lease. `agent-doc upgrade` on the
     /// backend reads that from the backend idea.log and names the repair: a
     /// Client reconnect, not another reinstall.
+    /// GH #435: a 0.2.1052 backend stranded a 0.2.1046 Client whose shell
+    /// differs. The backend now logs the Client's shell (and, from a Client
+    /// that names it, its build and plugin folder); `agent-doc upgrade` turns
+    /// that into "the Client plugin is older than the backend: update it",
+    /// with the release ZIP URL and the exact Client folder.
+    #[test]
+    fn upgrade_names_the_stale_client_plugin_and_its_exact_paths() {
+        let log = "\
+2026-11-24 10:07:44,001 [   1]   WARN - #c.g.b.a.s.b.BackendSurfaceSnapshotRpcApi - [frontend-impl] client shell mismatch client=c-1 client_shell=b5741f110bfb backend_plugin=0.2.1053 backend_shell=1265693a728a backend_plugin_path=/home/coder/.local/share/JetBrains/IntelliJIdea2026.3/agent-doc-jetbrains-262
+2026-11-24 10:09:00,001 [   1]   WARN - #c.g.b.a.s.b.BackendFrontendReleaseRpcApi - [frontend-impl] client plugin mismatch client=c-2 compatibility=client_older client_plugin=0.2.1053 client_plugin_path=/Users/dev/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend/agent-doc-jetbrains-262 client_shell=cccccccccccc backend_plugin=0.2.1060 backend_plugin_path=/home/coder/.local/share/JetBrains/IntelliJIdea2026.3/agent-doc-jetbrains-262 backend_shell=aaaaaaaaaaaa
+";
+        let mismatch = super::client_plugin_mismatch(log).expect("a mismatched Client");
+        assert_eq!(mismatch.client, "c-2");
+        assert_eq!(
+            mismatch.client_plugin_path.as_deref(),
+            Some(
+                "/Users/dev/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend/agent-doc-jetbrains-262"
+            )
+        );
+        let url = "https://github.com/btakita/agent-doc/releases/download/v0.35.600/agent-doc-jetbrains-262-0.2.1060.zip";
+        let message = super::client_plugin_mismatch_message(
+            &mismatch,
+            Path::new("/cache/IntelliJIdea2026.3/log/idea.log"),
+            Some(url),
+        );
+        for needle in [
+            "JetBrains Client plugin 0.2.1053 (shell cccccccccccc) is older than the backend 0.2.1060 (shell aaaaaaaaaaaa)",
+            "/cache/IntelliJIdea2026.3/log/idea.log client=c-2",
+            "run `agent-doc upgrade` on the Client machine",
+            url,
+            "into /Users/dev/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend (replacing /Users/dev/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend/agent-doc-jetbrains-262)",
+        ] {
+            assert!(message.contains(needle), "missing {needle:?}: {message}");
+        }
+
+        // A 0.2.1046 Client names no build: only its shell, and the generic folder.
+        let old = super::client_plugin_mismatch(log.lines().next().unwrap()).unwrap();
+        assert_eq!(old.compatibility, None);
+        let message = super::client_plugin_mismatch_message(&old, Path::new("/l"), None);
+        assert!(
+            message.starts_with("JetBrains Client plugin (shell b5741f110bfb) is not the same build as the backend 0.2.1053 (shell 1265693a728a)"),
+            "{message}"
+        );
+        assert!(
+            message.contains("agent-doc-jetbrains-262-0.2.1053.zip from its agent-doc release"),
+            "{message}"
+        );
+        assert!(
+            message.contains("<IDE data dir>/plugins/frontend on Windows and macOS"),
+            "{message}"
+        );
+
+        // A newer Client updates the backend instead; an IDE restart forgets it.
+        let newer = log.replace("client_older", "client_newer");
+        let message = super::client_plugin_mismatch_message(
+            &super::client_plugin_mismatch(&newer).unwrap(),
+            Path::new("/l"),
+            None,
+        );
+        assert!(
+            message.contains("is newer than the backend 0.2.1060"),
+            "{message}"
+        );
+        assert!(message.contains("run `agent-doc upgrade` in this workspace (it installs into /home/coder/.local/share/JetBrains/IntelliJIdea2026.3)"), "{message}");
+        let restarted = format!(
+            "{log}2026-11-24 11:00:00,001 [   1]   INFO - #c.i.i.StartupUtil - ------ IDE STARTED ------\n"
+        );
+        assert_eq!(super::client_plugin_mismatch(&restarted), None);
+    }
+
+    /// GH #435: the ZIP URL comes from the backend's frontend release handoff
+    /// for exactly the backend's plugin version.
+    #[test]
+    fn upgrade_reads_the_client_zip_url_from_the_backend_release_handoff() {
+        let tmp = tempfile::tempdir().unwrap();
+        let handoff = tmp.path().join(super::JETBRAINS_FRONTEND_RELEASE_DIR);
+        std::fs::create_dir_all(&handoff).unwrap();
+        std::fs::write(
+            handoff.join("release.properties"),
+            "release_version=0.2.1053\npackage_url=https://example.invalid/agent-doc-jetbrains-262-0.2.1053.zip\n",
+        )
+        .unwrap();
+        let dirs = vec![tmp.path().to_path_buf()];
+        assert_eq!(
+            super::frontend_release_package_url(&dirs, "0.2.1053").as_deref(),
+            Some("https://example.invalid/agent-doc-jetbrains-262-0.2.1053.zip")
+        );
+        assert_eq!(super::frontend_release_package_url(&dirs, "0.2.1052"), None);
+        assert_eq!(
+            super::parent_of_client_path(
+                "C:\\Users\\dev\\AppData\\Roaming\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend\\agent-doc-jetbrains-262"
+            ),
+            Some(
+                "C:\\Users\\dev\\AppData\\Roaming\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend"
+            )
+        );
+    }
+
     #[test]
     fn upgrade_detects_a_schema_one_lease_stuck_in_the_backend_idea_log() {
         let log = "\

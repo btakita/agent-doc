@@ -45,6 +45,8 @@ class SplitShellOwnershipTest {
             setOf(
                 "SurfaceSnapshotRemoteApiProvider.kt",
                 "BackendSurfaceSnapshotRpcApi.kt",
+                "BackendFrontendReleaseRpcApi.kt",
+                "FrontendReleaseDeliveryGate.kt",
                 "AuthenticatedSurfaceIngressService.kt",
                 "SurfaceIngressSpi.kt",
             ),

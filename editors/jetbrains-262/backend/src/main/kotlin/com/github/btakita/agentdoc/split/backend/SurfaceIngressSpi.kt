@@ -25,6 +25,15 @@ internal interface SurfaceIngressFactory {
 
     /** Discovers and activates the backend peer of the selected frontend package. */
     fun currentFrontendRelease(): FrontendImplementationRelease?
+
+    /**
+     * GH #435: the selected frontend package without activating the backend peer, for a Client
+     * whose shell cannot load it (the backend then names the package to install instead).
+     */
+    fun selectedFrontendRelease(): FrontendImplementationRelease?
+
+    /** GH #435/#440: the selected package's URL from the handoff manifest alone, or null for none. */
+    fun selectedFrontendReleasePackageUrl(): String?
 }
 
 /** The authenticated frontend lease, snapshot and presentation-receipt ingress of one project. */

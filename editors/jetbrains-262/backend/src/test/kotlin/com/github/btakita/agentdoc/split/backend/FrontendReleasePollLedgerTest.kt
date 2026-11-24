@@ -71,9 +71,13 @@ class FrontendReleasePollLedgerTest {
             packageBytes = ByteArray(16),
             signatureBytes = ByteArray(64),
         )
+        // GH #435: the delivery gate withholds the package before the schema answer; a withheld
+        // whole-package poll of a selected release is the same legacy proof.
         val api = BackendSurfaceSnapshotRpcApi(
             frontendRelease = { release },
+            gate = FrontendReleaseDeliveryGate(),
             releasePolls = ledger,
+            releaseSelected = { true },
             callerClientId = { caller },
         )
         api.frontendImplementationRelease()
@@ -85,7 +89,13 @@ class FrontendReleasePollLedgerTest {
         assertNull(ledger.evidence("new-client"))
 
         caller = "shell-only"
-        BackendSurfaceSnapshotRpcApi(frontendRelease = { null }, releasePolls = ledger, callerClientId = { caller })
+        BackendSurfaceSnapshotRpcApi(
+            frontendRelease = { null },
+            gate = FrontendReleaseDeliveryGate(),
+            releasePolls = ledger,
+            releaseSelected = { false },
+            callerClientId = { caller },
+        )
             .frontendImplementationRelease()
         assertNull(ledger.evidence("shell-only"), "no package moved, so nothing was refused")
     }

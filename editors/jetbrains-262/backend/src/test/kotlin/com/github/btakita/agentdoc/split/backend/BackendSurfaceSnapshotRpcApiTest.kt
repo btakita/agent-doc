@@ -1,46 +1,79 @@
 package com.github.btakita.agentdoc.split.backend
 
-import com.github.btakita.agentdoc.split.FrontendImplementationRelease
-import com.github.btakita.agentdoc.split.FrontendImplementationReleaseIdentity
+import com.github.btakita.agentdoc.split.FrontendClientBuild
+import com.github.btakita.agentdoc.split.FrontendReleaseGeneration
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertFalse
 import kotlin.test.assertNull
-import kotlinx.coroutines.runBlocking
+import kotlin.test.assertTrue
 
 /**
- * GH #435: the Client's 30 s release poll asks for the selected generation's identity, so the
- * multi-megabyte package crosses the Remote Dev link only when the Client must activate it.
+ * GH #435: [FrontendReleaseDeliveryGate] moves the multi-megabyte release to a Client only after
+ * its schema answer, only to a Client on this backend's shell, and once per generation.
  */
 class BackendSurfaceSnapshotRpcApiTest {
-    @Test
-    fun releaseIdentityNamesTheSelectedGenerationWithoutItsBytes() = runBlocking {
-        var discoveries = 0
-        val release = FrontendImplementationRelease(
-            releaseVersion = "0.2.1052",
-            packageUrl = "https://example.invalid/agent-doc.zip",
-            signatureUrl = "https://example.invalid/agent-doc.zip.sig",
-            implEntry = "lib/impl.jar",
-            implSha256 = "e".repeat(64),
-            shellDigest = "a".repeat(64),
-            spiVersion = 1,
-            epoch = 9,
-            packageBytes = ByteArray(4 * 1024 * 1024),
-            signatureBytes = ByteArray(64),
-        )
-        val api = BackendSurfaceSnapshotRpcApi(
-            frontendRelease = { discoveries++; release },
-            releasePolls = FrontendReleasePollLedger(),
-            callerClientId = { "client-a" },
-        )
+    private var now = 0L
+    private val gate = FrontendReleaseDeliveryGate(backendShell = { "b".repeat(64) }, clock = { now })
+    private val generation = FrontendReleaseGeneration(
+        releaseVersion = "0.2.1053",
+        packageUrl = "https://example.invalid/agent-doc-jetbrains-262-0.2.1053.zip",
+        implSha256 = "e".repeat(64),
+        shellDigest = "b".repeat(64),
+        spiVersion = 1,
+        epoch = 9,
+    )
 
-        assertEquals(FrontendImplementationReleaseIdentity("e".repeat(64), 9), api.frontendImplementationReleaseIdentity())
-        assertEquals(1, discoveries, "the identity uses the same discovery (and backend peer activation)")
-        assertNull(
-            BackendSurfaceSnapshotRpcApi(
-                frontendRelease = { null },
-                releasePolls = FrontendReleasePollLedger(),
-                callerClientId = { "client-a" },
-            ).frontendImplementationReleaseIdentity(),
+    @Test
+    fun theBytesWaitForTheSchemaAnswerAndTheClientShell() {
+        assertEquals(FrontendReleaseDeliveryGate.Admission.NOT_NEGOTIATED, gate.admission("c"))
+        gate.negotiated("c")
+        assertEquals(FrontendReleaseDeliveryGate.Admission.SHELL_UNKNOWN, gate.admission("c"))
+        assertEquals(FrontendReleaseDeliveryGate.ShellObservation.FIRST_MATCH, gate.observeShell("c", "b".repeat(64)))
+        assertEquals(FrontendReleaseDeliveryGate.ShellObservation.UNCHANGED, gate.observeShell("c", "b".repeat(64)))
+        assertEquals(FrontendReleaseDeliveryGate.Admission.DELIVER, gate.admission("c"))
+        gate.leaseOpened("c")
+        assertEquals(
+            FrontendReleaseDeliveryGate.Admission.NOT_NEGOTIATED,
+            gate.admission("c"),
+            "a new lease negotiates again before the bytes move",
         )
+        assertEquals("b".repeat(64), gate.clientShell("c"), "the proven shell survives a new lease")
+    }
+
+    @Test
+    fun anotherShellIsNeverAdmitted() {
+        gate.negotiated("c")
+        assertEquals(
+            FrontendReleaseDeliveryGate.ShellObservation.FIRST_MISMATCH,
+            gate.observeBuild("c", FrontendClientBuild("0.2.1046", "/p", "a".repeat(64), 1)),
+        )
+        assertEquals(FrontendReleaseDeliveryGate.Admission.SHELL_MISMATCH, gate.admission("c"))
+        assertEquals("0.2.1046", gate.clientBuild("c")?.pluginVersion)
+    }
+
+    @Test
+    fun oneGenerationIsDeliveredOncePerBackoffAndEachWithholdReasonLogsOnce() {
+        assertTrue(gate.withheld("c", FrontendReleaseDeliveryGate.Admission.NOT_NEGOTIATED))
+        assertFalse(gate.withheld("c", FrontendReleaseDeliveryGate.Admission.NOT_NEGOTIATED))
+        assertTrue(gate.withheld("c", FrontendReleaseDeliveryGate.Admission.SHELL_UNKNOWN))
+        assertTrue(gate.claimDelivery("c", generation))
+        now += 30_000
+        assertFalse(gate.claimDelivery("c", generation))
+        assertTrue(gate.claimDelivery("c", generation.copy(epoch = 10)), "a new generation goes at once")
+        now += FrontendReleaseDeliveryGate.RELEASE_REFETCH_AFTER_MS
+        assertTrue(gate.claimDelivery("c", generation.copy(epoch = 10)))
+        assertTrue(gate.claimDelivery("other", generation), "per Client")
+    }
+
+    @Test
+    fun theGateKeepsOnlyTheNewestClients() {
+        repeat(FrontendReleaseDeliveryGate.MAX_TRACKED_CLIENTS + 10) { index ->
+            now++
+            gate.observeShell("c$index", "a".repeat(64))
+            gate.leaseOpened("c$index")
+        }
+        assertNull(gate.clientShell("c0"))
+        assertEquals("a".repeat(64), gate.clientShell("c${FrontendReleaseDeliveryGate.MAX_TRACKED_CLIENTS + 9}"))
     }
 }

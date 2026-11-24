@@ -272,6 +272,17 @@ data class FrontendImplementationRelease(
     val signatureBytes: ByteArray,
 )
 
+/**
+ * The Fleet RPC contract every shipped JetBrains Client frontend calls (0.2.1046 shape, plus the
+ * 0.2.1052 [frontendImplementationReleaseIdentity]). It is FROZEN (GH #435):
+ * the Client's frontend is shell code that only a Client plugin update replaces, so a backend must
+ * keep answering this exact interface for every older Client. Fleet RPC routes a call by method
+ * name and decodes its named arguments and result with `ignoreUnknownKeys = false`, so a renamed
+ * method, a changed parameter, or a new key in any message an older peer decodes breaks it. Add a
+ * new RPC to a new, additive `RemoteApi` (see [FrontendReleaseRpcApi]) instead;
+ * `SharedRpcContractGuardTest` fails until a change here is declared in
+ * `shared-rpc-contract.baseline` with a shell bump and a compatibility plan.
+ */
 @Rpc
 interface SurfaceSnapshotRpcApi : RemoteApi<Unit> {
     companion object {
@@ -309,22 +320,17 @@ interface SurfaceSnapshotRpcApi : RemoteApi<Unit> {
     suspend fun frontendImplementationRelease(): FrontendImplementationRelease?
 
     /**
-     * GH #435: which package [frontendImplementationRelease] would return, without its bytes, or
-     * null while the backend remains shell-only. The Client polls this every 30 s and fetches the
-     * multi-megabyte package only when it names a generation the Client has not activated; polling
-     * the full release resent the whole ZIP every 30 s over the Remote Dev link, and the
-     * congestion timed out the Client's 5 s schema negotiation.
+     * GH #435: which package [frontendImplementationRelease] would return, without its bytes.
+     * Shipped in 0.2.1052 and called by 0.2.1052 through 0.2.1054 Clients, so it stays: a backend
+     * answers it only for a Client the release delivery gate admits, and null otherwise. Clients
+     * after 0.2.1054 ask [FrontendReleaseRpcApi.frontendReleaseOffer] instead.
      */
     suspend fun frontendImplementationReleaseIdentity(): FrontendImplementationReleaseIdentity?
 }
 
-/** GH #435: the identity of one backend-selected frontend generation (no package bytes). */
+/** GH #435: the 0.2.1052 identity of one backend-selected frontend generation (frozen). */
 @Serializable
 data class FrontendImplementationReleaseIdentity(
     val implSha256: String,
     val epoch: Long,
 )
-
-/** GH #435: the identity of [this] release. */
-fun FrontendImplementationRelease.identity(): FrontendImplementationReleaseIdentity =
-    FrontendImplementationReleaseIdentity(implSha256 = implSha256, epoch = epoch)

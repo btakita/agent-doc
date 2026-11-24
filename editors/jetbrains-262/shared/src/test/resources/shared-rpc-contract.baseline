@@ -1,0 +1,150 @@
+# GH #435: the frozen Fleet RPC wire contract between the JetBrains Client frontend and the
+# backend (SharedRpcContractGuardTest). Every shipped Client shell keeps calling these methods and
+# decoding these messages with `ignoreUnknownKeys = false`, so a backend must keep serving them.
+#
+# To change it: prefer a new, additive RemoteApi. Otherwise replace the fingerprint below with
+# shared/build/shared-rpc-contract.actual, bump `revision`, set `shell_bump` to the plugin version
+# that ships the change, and state the `compatibility_plan` for Clients and backends in the field.
+revision: 1
+shell_bump: 0.2.1055
+compatibility_plan: SurfaceSnapshotRpcApi keeps its exact shipped shape (0.2.1046 methods plus the 0.2.1052 frontendImplementationReleaseIdentity), so every Client from 0.2.1046 on calls a backend that answers all of its methods; the backend answers the identity poll and the whole-package poll only for a Client its release delivery gate admits. The new FrontendReleaseRpcApi is additive: a 0.2.1054-or-older backend fails its call and a 0.2.1055 Client falls back to the frozen frontendImplementationRelease at most once per 10 minutes; a 0.2.1054-or-older Client never calls it.
+---
+api com.github.btakita.agentdoc.split.FrontendReleaseRpcApi
+  frontendReleaseOffer(client: com.github.btakita.agentdoc.split.FrontendClientBuild): com.github.btakita.agentdoc.split.FrontendReleaseOffer
+api com.github.btakita.agentdoc.split.SurfaceSnapshotRpcApi
+  frontendImplementationRelease(): com.github.btakita.agentdoc.split.FrontendImplementationRelease?
+  frontendImplementationReleaseIdentity(): com.github.btakita.agentdoc.split.FrontendImplementationReleaseIdentity?
+  openIngress(projectId: com.intellij.platform.project.ProjectId, frontendInstanceId: kotlin.String): Flow<com.github.btakita.agentdoc.split.SurfaceIngressLease>
+  publishPresentationReceipt(lease: com.github.btakita.agentdoc.split.SurfaceIngressLease, receipt: com.github.btakita.agentdoc.split.FrontendPresentationReceipt): com.github.btakita.agentdoc.split.SurfaceIngressAck
+  publishSnapshot(lease: com.github.btakita.agentdoc.split.SurfaceIngressLease, snapshot: com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot): com.github.btakita.agentdoc.split.SurfaceIngressAck
+  supportedSnapshotSchemaVersion(): kotlin.Int
+type com.github.btakita.agentdoc.split.EditorWindowBounds CLASS
+  x: kotlin.Int
+  y: kotlin.Int
+  width: kotlin.Int
+  height: kotlin.Int
+type com.github.btakita.agentdoc.split.EditorWindowSnapshot CLASS
+  ordinal: kotlin.Int
+  selectedPath: kotlin.String?
+  openPaths: LIST<kotlin.String>
+  visiblePaths: LIST<kotlin.String>
+  bounds: com.github.btakita.agentdoc.split.EditorWindowBounds? optional
+type com.github.btakita.agentdoc.split.FrontendClientBuild CLASS
+  pluginVersion: kotlin.String
+  pluginPath: kotlin.String
+  shellDigest: kotlin.String
+  spiVersion: kotlin.Int
+type com.github.btakita.agentdoc.split.FrontendImplementationRelease CLASS
+  releaseVersion: kotlin.String
+  packageUrl: kotlin.String
+  signatureUrl: kotlin.String
+  implEntry: kotlin.String
+  implSha256: kotlin.String
+  shellDigest: kotlin.String
+  spiVersion: kotlin.Int
+  epoch: kotlin.Long
+  packageBytes: LIST<kotlin.Byte>
+  signatureBytes: LIST<kotlin.Byte>
+type com.github.btakita.agentdoc.split.FrontendImplementationReleaseIdentity CLASS
+  implSha256: kotlin.String
+  epoch: kotlin.Long
+type com.github.btakita.agentdoc.split.FrontendLayoutColumn CLASS
+  paths: LIST<kotlin.String>
+type com.github.btakita.agentdoc.split.FrontendPresentationCapability ENUM
+  SNAPSHOT_ONLY
+  EXACT_262_INTERNAL
+type com.github.btakita.agentdoc.split.FrontendPresentationKind ENUM
+  EMPTY
+  TERMINAL
+  PLACEHOLDER
+type com.github.btakita.agentdoc.split.FrontendPresentationProjection CLASS
+  status: com.github.btakita.agentdoc.split.FrontendProjectionStatus
+  revision: kotlin.Long
+  retrySuggested: kotlin.Boolean
+  presentations: LIST<com.github.btakita.agentdoc.split.FrontendSurfacePresentation>
+type com.github.btakita.agentdoc.split.FrontendPresentationReceipt CLASS
+  projectId: com.intellij.platform.project.ProjectId
+  identity: com.github.btakita.agentdoc.split.FrontendSurfaceIdentity
+  presentationRevision: kotlin.Long
+  kind: com.github.btakita.agentdoc.split.FrontendPresentationKind
+  document: kotlin.String? optional
+  viewSession: kotlin.String? optional
+  outcome: com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
+  diagnostic: kotlin.String? optional
+type com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome ENUM
+  APPLIED
+  REFUSED
+  STALE
+type com.github.btakita.agentdoc.split.FrontendProjectionStatus ENUM
+  APPLIED
+  STALE
+  FROZEN
+type com.github.btakita.agentdoc.split.FrontendReleaseGeneration CLASS
+  releaseVersion: kotlin.String
+  packageUrl: kotlin.String
+  implSha256: kotlin.String
+  shellDigest: kotlin.String
+  spiVersion: kotlin.Int
+  epoch: kotlin.Long
+type com.github.btakita.agentdoc.split.FrontendReleaseOffer CLASS
+  backendPluginVersion: kotlin.String
+  backendPluginPath: kotlin.String
+  backendShellDigest: kotlin.String
+  compatibility: com.github.btakita.agentdoc.split.FrontendShellCompatibility
+  release: com.github.btakita.agentdoc.split.FrontendReleaseGeneration? optional
+type com.github.btakita.agentdoc.split.FrontendShellCompatibility ENUM
+  SAME_SHELL
+  CLIENT_OLDER
+  CLIENT_NEWER
+  DIFFERENT_BUILD
+type com.github.btakita.agentdoc.split.FrontendSurface CLASS
+  paneId: kotlin.String
+  surfaceGeneration: kotlin.Long
+  role: com.github.btakita.agentdoc.split.SurfaceRole
+  focused: kotlin.Boolean
+  windows: LIST<com.github.btakita.agentdoc.split.EditorWindowSnapshot>
+  layoutColumns: LIST<com.github.btakita.agentdoc.split.FrontendLayoutColumn>? optional
+  focusedEditorPath: kotlin.String? optional
+type com.github.btakita.agentdoc.split.FrontendSurfaceIdentity CLASS
+  clientId: kotlin.String
+  connectionGeneration: kotlin.Long
+  surfaceId: kotlin.String
+  surfaceGeneration: kotlin.Long
+type com.github.btakita.agentdoc.split.FrontendSurfacePresentation CLASS
+  identity: com.github.btakita.agentdoc.split.FrontendSurfaceIdentity
+  presentationRevision: kotlin.Long
+  kind: com.github.btakita.agentdoc.split.FrontendPresentationKind
+  document: kotlin.String? optional
+  reason: kotlin.String? optional
+  viewSession: kotlin.String? optional
+type com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot CLASS
+  schemaVersion: kotlin.Int optional
+  frontendInstanceId: kotlin.String
+  sequence: kotlin.Long
+  projectId: com.intellij.platform.project.ProjectId
+  complete: kotlin.Boolean
+  presentationCapability: com.github.btakita.agentdoc.split.FrontendPresentationCapability optional
+  surfaces: LIST<com.github.btakita.agentdoc.split.FrontendSurface>
+  activationReceipt: kotlin.String? optional
+type com.github.btakita.agentdoc.split.SurfaceIngressAck CLASS
+  status: com.github.btakita.agentdoc.split.SurfaceIngressStatus
+  connectionGeneration: kotlin.Long
+  acceptedSequence: kotlin.Long?
+  diagnostic: kotlin.String? optional
+  presentation: com.github.btakita.agentdoc.split.FrontendPresentationProjection? optional
+type com.github.btakita.agentdoc.split.SurfaceIngressLease CLASS
+  leaseId: kotlin.String
+  connectionGeneration: kotlin.Long
+type com.github.btakita.agentdoc.split.SurfaceIngressStatus ENUM
+  ACCEPTED
+  STALE_LEASE
+  STALE_SEQUENCE
+  INVALID_SCHEMA
+  INCOMPLETE
+  INVALID_MAIN_CARDINALITY
+  INVALID_SURFACE
+  PROJECT_MISMATCH
+  DELIVERY_FAILED
+type com.github.btakita.agentdoc.split.SurfaceRole ENUM
+  MAIN
+  DETACHED

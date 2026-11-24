@@ -1824,10 +1824,45 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   `frontend_plugin=<version|unnamed>`. The 30 s frontend-release poll waits for the first lease's
   schema negotiation (at most 30 s) before it polls, because on a cold start its multi-megabyte
   package fetch held the Remote Dev link and the schema answer, though the backend returns it from
-  a constant, queued behind it past the 5 s window (GH #441). The poll asks
-  `frontendImplementationReleaseIdentity()` (digest and epoch) and fetches the package bytes only
-  for a generation the Client has not activated, retrying a refused one after 10 minutes. The
-  backend validator accepts schemas 1 through 5. Explicit retirement/release is the
+  a constant, queued behind it past the 5 s window (GH #441). The backend validator accepts schemas 1 through 5.
+
+  **Frozen shared RPC contract (GH #435).** The Client frontend is shell code only a Client
+  plugin update replaces, so `SurfaceSnapshotRpcApi` is frozen at its shipped shape (0.2.1046's
+  methods plus 0.2.1052's `frontendImplementationReleaseIdentity()`, which 0.2.1052 through 0.2.1054
+  Clients poll) and every backend keeps answering all of it. Fleet RPC routes a call by method
+  name with a map of parameter name to JSON (`RpcMessage.CallRequest`), so the method 89b1df09af
+  added did not break an older Client's calls; the old Client was stranded by the release
+  transfer and its shell, not by the interface. New RPCs go to an additive `RemoteApi`:
+  `FrontendReleaseRpcApi.frontendReleaseOffer(FrontendClientBuild)` names the Client's build
+  (plugin version, plugin folder, shell digest, SPI) and answers the backend's build, the shell
+  compatibility, and the selected generation's identity without its bytes. An older backend fails
+  that call, and the Client then asks the frozen `frontendImplementationRelease()` at most once per
+  10 minutes. The backend answers the frozen identity poll only for a Client the gate below admits. `SharedRpcContractGuardTest` renders every shared `@Rpc` API (method and parameter
+  names, and the serial shape of every message) and fails until a change is declared in
+  `shared/src/test/resources/shared-rpc-contract.baseline` with a `revision`, the `shell_bump`
+  that ships it, and a `compatibility_plan`. `OldClientShellCompatibilityTest` drives a
+  0.2.1046- and a 0.2.1052-shaped client stub against the current backend through both interfaces' generated
+  Fleet descriptors and Fleet's own `RpcJson`.
+
+  **Release delivery gate (GH #435).** Every Client up to 0.2.1051 polls the whole release ZIP
+  every 30 s from Client start, before its lease negotiated; on Coder the transfer raced the 5 s
+  schema negotiation, and a 0.2.1046 Client on an older shell refused the 0.2.1052 package 33
+  times. The backend (`FrontendReleaseDeliveryGate`, shell) now moves the bytes to one Client only
+  after it answered that Client's negotiation on the current lease, only when the Client proved
+  this backend's shell (a schema-5 receipt, or its offer request), and once per generation per 10
+  minutes; every other answer is null, which every shipped Client treats as nothing to activate.
+  No release discovery or backend peer activation runs for a Client before its schema answer. The
+  backend peer activates only for a negotiated Client on its own shell, before that Client's
+  snapshot reaches the ingress fence, so its not-yet-activated snapshots are refused before any is
+  accepted rather than revoked after. A Client on another shell never activates the backend peer,
+  so the backend stays shell-only for it and admits its shell-only snapshots ("Ingress fence"
+  above); a backend that already activated for another Client still holds it. The backend logs
+  `[frontend-impl] client shell mismatch ...` (receipt only) or `[frontend-impl] client plugin
+  mismatch ...` (named build, with both plugin folders), which `agent-doc upgrade` on the backend
+  turns into "the JetBrains Client plugin X is older than the backend Y: update the Client plugin"
+  with the handoff's ZIP URL and the Client folder. The Client's 30 s poll asks
+  `frontendReleaseOffer` first, logs a shell mismatch once, waits for its first negotiation before
+  fetching bytes, and is woken as soon as that negotiation returns. Explicit retirement/release is the
   only transition that hands authority back to the backend fallback. Evidence: the client logs
   `[split-surface] snapshot schema negotiated version=<n> backend_offered=<n|none>
   geometry=measured|unavailable`; the backend logs `[rd-layout] forwarded measured columns

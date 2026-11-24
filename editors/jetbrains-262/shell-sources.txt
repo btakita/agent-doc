@@ -17,6 +17,10 @@ frontend/src/main/
 frontend/build.gradle.kts
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/SurfaceSnapshotRemoteApiProvider.kt
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/BackendSurfaceSnapshotRpcApi.kt
+# GH #435: the additive frontend-release RPC and the per-Client release delivery gate both RPC
+# providers share (the ingress implementation only reads it).
+backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/BackendFrontendReleaseRpcApi.kt
+backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/FrontendReleaseDeliveryGate.kt
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/AuthenticatedSurfaceIngressService.kt
 # The ingress SPI the shell service delegates through; the state machine behind it is impl.
 backend/src/main/kotlin/com/github/btakita/agentdoc/split/backend/SurfaceIngressSpi.kt

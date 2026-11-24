@@ -5,8 +5,14 @@ package com.github.btakita.agentdoc.split.frontend
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.shell.receipt.ActivationReceipt
+import com.github.btakita.agentdoc.shell.receipt.SHELL_SPI_VERSION
+import com.github.btakita.agentdoc.shell.receipt.ShellIdentity
+import com.github.btakita.agentdoc.split.FrontendClientBuild
 import com.github.btakita.agentdoc.split.FrontendImplementationRelease
-import com.github.btakita.agentdoc.split.FrontendImplementationReleaseIdentity
+import com.github.btakita.agentdoc.split.FrontendReleaseGeneration
+import com.github.btakita.agentdoc.split.FrontendReleaseOffer
+import com.github.btakita.agentdoc.split.FrontendReleaseRpcApi
+import com.github.btakita.agentdoc.split.FrontendShellCompatibility
 import com.github.btakita.agentdoc.split.FrontendPresentationCapability
 import com.github.btakita.agentdoc.split.FrontendPresentationReceipt
 import com.github.btakita.agentdoc.split.FrontendPresentationReceiptOutcome
@@ -20,15 +26,15 @@ import com.github.btakita.agentdoc.split.SurfaceIngressLease
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.split.SurfaceSnapshotRpcApi
+import com.github.btakita.agentdoc.split.agentDocPluginDescriptorFact
 import com.github.btakita.agentdoc.split.forSchema
 import com.github.btakita.agentdoc.split.frontendLeaseInstanceId
-import com.github.btakita.agentdoc.split.identity
+import com.github.btakita.agentdoc.split.generation
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.components.service
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
@@ -65,7 +71,7 @@ class FrontendSurfaceSnapshotService(
     /** GH #441: names this frontend's plugin version, so a backend can tell provisional schema 1. */
     private val frontendInstanceId = frontendLeaseInstanceId(
         UUID.randomUUID().toString(),
-        frontendPluginDescriptorFact("getVersion"),
+        agentDocPluginDescriptorFact("getVersion"),
     )
     private val schemaNegotiationGate = SchemaNegotiationGate()
     private val surfaceIdentities = FrontendSurfaceIdentityTracker()
@@ -82,8 +88,8 @@ class FrontendSurfaceSnapshotService(
         // GH #435: the first Client-side proof that `agent.doc.frontend` loaded for this project.
         LOG.info(
             "[split-surface] frontend surface publisher started project=${project.name} " +
-                "plugin=${frontendPluginDescriptorFact("getVersion") ?: "unknown"} " +
-                "plugin_path=${frontendPluginDescriptorFact("getPluginPath") ?: "unknown"} " +
+                "plugin=${agentDocPluginDescriptorFact("getVersion") ?: "unknown"} " +
+                "plugin_path=${agentDocPluginDescriptorFact("getPluginPath") ?: "unknown"} " +
                 "instance=$frontendInstanceId schema_max=$SURFACE_SNAPSHOT_SCHEMA_VERSION " +
                 "receipt=${FrontendActivationReceipt.line}",
         )
@@ -130,40 +136,19 @@ class FrontendSurfaceSnapshotService(
         )
     }
 
+    /**
+     * GH #435: one release poll. This Client names its own build to the additive
+     * [FrontendReleaseRpcApi] and learns which generation the backend selected, never its bytes. A
+     * Client whose shell is not the backend's logs both builds once and stops
+     * there: it could only refuse the package. Otherwise the bytes are fetched once per new
+     * generation; [runFrontendReleasePoll] already held the first poll until this Client's schema
+     * negotiation returned (GH #441), so the transfer never races it. A backend that predates
+     * [FrontendReleaseRpcApi] (up to 0.2.1054) is asked for the package through the frozen API at
+     * most once per [FRONTEND_REFUSED_RELEASE_REFETCH_MS].
+     */
     private suspend fun pollFrontendImplementationReleaseOnce(poll: FrontendReleasePoll) {
         try {
-            // GH #435: ask which generation the backend selected before moving its bytes. The
-            // full release is a multi-megabyte ZIP; fetching it every 30 s congested the
-            // Remote Dev link enough to time out the schema negotiation.
-            val identity = SurfaceSnapshotRpcApi.getInstance().frontendImplementationReleaseIdentity()
-            if (poll.shouldFetch(identity, FrontendReleaseActivation.receipt(), System.currentTimeMillis())) {
-                SurfaceSnapshotRpcApi.getInstance().frontendImplementationRelease()?.let { release ->
-                    val active = FrontendReleaseActivation.receipt()
-                    if (active.implSha256 != release.implSha256 || active.epoch != release.epoch) {
-                        when (val outcome = activateFrontendImplementationRelease(release)) {
-                            is FrontendActivationOutcome.Activated -> {
-                                LOG.info(
-                                    "[frontend-impl] activated digest=${outcome.receipt.implSha256} " +
-                                        "epoch=${outcome.receipt.epoch}",
-                                )
-                                requestCapture()
-                            }
-                            is FrontendActivationOutcome.Refused -> {
-                                poll.refused(release.identity(), System.currentTimeMillis())
-                                LOG.warn("[frontend-impl] refused: ${outcome.reason}")
-                            }
-                            is FrontendActivationOutcome.RestartRequired -> {
-                                poll.refused(release.identity(), System.currentTimeMillis())
-                                LOG.warn("[frontend-impl] restart required: ${outcome.reason}")
-                            }
-                            is FrontendActivationOutcome.RolledBack -> {
-                                poll.refused(release.identity(), System.currentTimeMillis())
-                                LOG.warn("[frontend-impl] rolled back: ${outcome.reason}")
-                            }
-                        }
-                    }
-                }
-            }
+            pollFrontendImplementationRelease(poll)
         } catch (cancelled: CancellationException) {
             throw cancelled
         } catch (failure: Exception) {
@@ -172,6 +157,57 @@ class FrontendSurfaceSnapshotService(
                     "(${failure.javaClass.simpleName}: ${failure.message})",
             )
         }
+    }
+
+    private suspend fun pollFrontendImplementationRelease(poll: FrontendReleasePoll) {
+        val offer = askFrontendReleaseOffer()
+        if (offer != null) {
+            poll.offerLogLine(offer)?.let(LOG::warn)
+            if (offer.compatibility != FrontendShellCompatibility.SAME_SHELL) return
+        }
+        val now = System.currentTimeMillis()
+        val fetch = if (offer != null) {
+            poll.shouldFetch(offer.release, FrontendReleaseActivation.receipt(), now)
+        } else {
+            poll.shouldFetchFromLegacyBackend(now)
+        }
+        if (!fetch) return
+        SurfaceSnapshotRpcApi.getInstance().frontendImplementationRelease()?.let { release ->
+            val active = FrontendReleaseActivation.receipt()
+            if (active.implSha256 == release.implSha256 && active.epoch == release.epoch) return
+            when (val outcome = activateFrontendImplementationRelease(release)) {
+                is FrontendActivationOutcome.Activated -> {
+                    LOG.info(
+                        "[frontend-impl] activated digest=${outcome.receipt.implSha256} " +
+                            "epoch=${outcome.receipt.epoch}",
+                    )
+                    requestCapture()
+                }
+                is FrontendActivationOutcome.Refused -> {
+                    poll.refused(release.generation(), System.currentTimeMillis())
+                    LOG.warn("[frontend-impl] refused: ${outcome.reason}")
+                }
+                is FrontendActivationOutcome.RestartRequired -> {
+                    poll.refused(release.generation(), System.currentTimeMillis())
+                    LOG.warn("[frontend-impl] restart required: ${outcome.reason}")
+                }
+                is FrontendActivationOutcome.RolledBack -> {
+                    poll.refused(release.generation(), System.currentTimeMillis())
+                    LOG.warn("[frontend-impl] rolled back: ${outcome.reason}")
+                }
+            }
+        }
+    }
+
+    /** The backend's offer, or null when it predates [FrontendReleaseRpcApi] or did not answer. */
+    private suspend fun askFrontendReleaseOffer(): FrontendReleaseOffer? = try {
+        withTimeoutOrNull(FRONTEND_RELEASE_OFFER_TIMEOUT_MS) {
+            FrontendReleaseRpcApi.getInstance().frontendReleaseOffer(currentFrontendClientBuild())
+        }
+    } catch (cancelled: CancellationException) {
+        throw cancelled
+    } catch (failure: Exception) {
+        null
     }
 
     /**
@@ -495,20 +531,13 @@ internal class FrontendPublicationLog(private val connectionGeneration: Long) {
     }
 }
 
-/**
- * GH #435: one fact (`getVersion`, `getPluginPath`) of this Client's loaded Agent Doc descriptor,
- * read reflectively (as `MarketplacePlatformBridge` does on the backend), so the Client's idea.log
- * names the plugin version and directory the operator must replace on an upgrade.
- */
-internal fun frontendPluginDescriptorFact(getter: String): String? = runCatching {
-    val manager = Class.forName("com.intellij.ide.plugins.PluginManagerCore")
-    val descriptor = manager.getMethod("getPlugin", PluginId::class.java)
-        .invoke(null, PluginId.getId(AGENT_DOC_PLUGIN_ID)) ?: return null
-    descriptor.javaClass.methods.first { it.name == getter && it.parameterCount == 0 }
-        .invoke(descriptor)?.toString()
-}.getOrNull()
-
-private const val AGENT_DOC_PLUGIN_ID = "com.github.btakita.agent-doc"
+/** GH #435: this Client's own Agent Doc frontend build, named in every release offer request. */
+internal fun currentFrontendClientBuild(): FrontendClientBuild = FrontendClientBuild(
+    pluginVersion = agentDocPluginDescriptorFact("getVersion") ?: "unknown",
+    pluginPath = agentDocPluginDescriptorFact("getPluginPath") ?: "unknown",
+    shellDigest = ShellIdentity.shellDigest,
+    spiVersion = SHELL_SPI_VERSION,
+)
 
 /** Retry a normally completed, lease-less RPC flow without spinning either IDE process. */
 internal fun frontendIngressRetryDelayMillis(consecutiveEmptyCompletions: Int): Long {
@@ -609,6 +638,9 @@ internal class SnapshotSchemaNegotiation(private val ask: suspend () -> Int?) {
             "provisional=${!answered}"
 }
 
+/** GH #435: how long the Client waits for [FrontendReleaseRpcApi] before treating the backend as older. */
+internal const val FRONTEND_RELEASE_OFFER_TIMEOUT_MS = 10_000L
+
 /** GH #435: how long a generation the Client refused waits before its package is fetched again. */
 internal const val FRONTEND_REFUSED_RELEASE_REFETCH_MS = 10L * 60 * 1000
 
@@ -619,11 +651,46 @@ internal const val FRONTEND_REFUSED_RELEASE_REFETCH_MS = 10L * 60 * 1000
  * trust file added later still activates without a restart.
  */
 internal class FrontendReleasePoll {
-    private var refused: FrontendImplementationReleaseIdentity? = null
+    private var refused: FrontendReleaseGeneration? = null
     private var refusedAtMs: Long = 0
+    private var legacyFetchedAtMs: Long? = null
+    private var lastOfferReport: String? = null
+
+    /**
+     * GH #435: the Client-side mismatch facts for [offer], once per distinct
+     * mismatch (and once when it clears), so a 30 s poll does not repeat it.
+     */
+    fun offerLogLine(offer: FrontendReleaseOffer): String? {
+        val report = if (offer.compatibility == FrontendShellCompatibility.SAME_SHELL) {
+            null
+        } else {
+            "[frontend-impl] client plugin mismatch compatibility=${offer.compatibility.name.lowercase()} " +
+                "backend_plugin=${offer.backendPluginVersion} backend_plugin_path=${offer.backendPluginPath} " +
+                "backend_shell=${offer.backendShellDigest.take(12)} client_shell=${ShellIdentity.shellDigest.take(12)}"
+        }
+        if (report == lastOfferReport) return null
+        val cleared = lastOfferReport != null && report == null
+        lastOfferReport = report
+        return report ?: if (cleared) {
+            "[frontend-impl] client plugin matches the backend ${offer.backendPluginVersion} again"
+        } else {
+            null
+        }
+    }
+
+    /**
+     * GH #435: a backend up to 0.2.1054 has no offer API, so its whole package is the only way to
+     * learn the generation; ask at most once per [FRONTEND_REFUSED_RELEASE_REFETCH_MS].
+     */
+    fun shouldFetchFromLegacyBackend(nowMs: Long): Boolean {
+        val last = legacyFetchedAtMs
+        if (last != null && nowMs - last < FRONTEND_REFUSED_RELEASE_REFETCH_MS) return false
+        legacyFetchedAtMs = nowMs
+        return true
+    }
 
     fun shouldFetch(
-        identity: FrontendImplementationReleaseIdentity?,
+        identity: FrontendReleaseGeneration?,
         active: ActivationReceipt,
         nowMs: Long,
     ): Boolean {
@@ -632,7 +699,7 @@ internal class FrontendReleasePoll {
         return identity != refused || nowMs - refusedAtMs >= FRONTEND_REFUSED_RELEASE_REFETCH_MS
     }
 
-    fun refused(identity: FrontendImplementationReleaseIdentity, nowMs: Long) {
+    fun refused(identity: FrontendReleaseGeneration, nowMs: Long) {
         refused = identity
         refusedAtMs = nowMs
     }

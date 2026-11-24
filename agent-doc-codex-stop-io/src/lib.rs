@@ -2098,7 +2098,7 @@ fn claude_stop_answer_with_drain_readiness(
 
 /// `#stoploopcap`: how every released row is closed. The agent resolves it
 /// with an agent-doc command, never by asking the operator to edit the row.
-const RELEASED_ROW_AGENT_CLOSE: &str = "An agent closes each row with an agent-doc command, never an operator edit: run the command its line names, `agent-doc queue report-complete` for a worker's finished generation, or `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<outcome>'` once its work is done or cannot be done.";
+const RELEASED_ROW_AGENT_CLOSE: &str = "An agent closes each row with an agent-doc command, never an operator edit: run the command its line names, `agent-doc queue report-complete` for a worker's finished generation, or `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<outcome>'` once its work is done. Only when the agent tried to resolve a row and could not, `agent-doc queue fail <FILE> --item '<row>' --reason '<why>' --attempted '<what was tried>'` ends it as terminal ❌.";
 
 /// Operator-visible notice for `state=unchanged_debts` (`#stophookactiveguard`).
 fn unchanged_debts_system_message(
@@ -16884,6 +16884,7 @@ Waiting on the reported row.\n\
             assert!(notice.contains("The rows stay live"), "{notice}");
             assert!(notice.contains("never an operator edit"), "{notice}");
             assert!(notice.contains("agent-doc queue consume"), "{notice}");
+            assert!(notice.contains("agent-doc queue fail"), "{notice}");
             let log = ops();
             assert!(
                 log.contains(&format!(

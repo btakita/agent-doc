@@ -39,9 +39,11 @@ fn struck_root_whose_action_items_became_rows_reads_complete() {
         root_tree(SESSION).contains(&format!("**Guidance:** {FOLLOW_UP_ACTION_ITEMS_GUIDANCE}")),
         "fixture keeps the inconsistent live shape"
     );
+    // `#staleguidance`: tree-status derives the State from the document, so
+    // even the unrepaired tree no longer reads as needing review.
     assert!(
-        root_needs_review(SESSION),
-        "tree-status left the struck root in review"
+        !root_needs_review(SESSION),
+        "tree-status re-derives the moved State before any writer repairs it"
     );
 
     let (repaired, rows) = reconcile_moved_followup_states(SESSION).expect("root repaired");

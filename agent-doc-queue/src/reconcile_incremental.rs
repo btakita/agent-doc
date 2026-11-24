@@ -315,7 +315,8 @@ pub struct QueueSyncResponses {
 }
 
 /// The response passes `agent-doc queue sync` runs, in its order: retained
-/// response lifecycle markers, superseded operator blockers, self-repair,
+/// response lifecycle markers, superseded operator blockers, moved follow-up
+/// states (`#followupmovedstate`, `#staleguidance`), self-repair,
 /// the response-tree sync (`#treefinish`), then the `Queue markers:` legend.
 /// One pure entry point, so the command and the tests run the same passes
 /// in the same order (`#answeredentry`).
@@ -327,6 +328,9 @@ pub fn queue_sync_response_chain(
         agent_doc_markdown_ast::overlay::normalize_generated_response_lifecycle_markers(document);
     let normalized = crate::queue_consume::reconcile_superseded_response_blockers(&normalized)
         .unwrap_or(normalized);
+    // `#staleguidance`: the chain's first pass, as in [`run_chain`].
+    let normalized = crate::followup_moved_state::reconcile_moved_followup_states(&normalized)
+        .map_or(normalized, |(moved, _)| moved);
     let mut out = QueueSyncResponses {
         document: normalized,
         ..QueueSyncResponses::default()

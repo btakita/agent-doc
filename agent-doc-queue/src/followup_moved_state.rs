@@ -30,7 +30,11 @@
 //!
 //! The strike renders that state directly. [`reconcile_moved_followup_states`]
 //! updates trees written before this rule, and trees whose follow-up rows were
-//! placed after the strike; preflight queue maintenance runs it every cycle.
+//! placed after the strike; preflight queue maintenance runs it every cycle,
+//! and so do every strike, `queue sync`, and the controller's background
+//! reconcile chain. `queue tree-status` reads each struck row as this pass
+//! would rewrite it (`#staleguidance`), so a turn that runs no preflight
+//! never leaves a stale State in review.
 //! It rewrites only the State and Guidance values of a struck row's own
 //! response child, only when they are exactly the follow-up form above, so it
 //! is idempotent and never touches operator text.
@@ -380,3 +384,7 @@ pub fn reconcile_moved_followup_states(document: &str) -> Option<(String, usize)
 #[cfg(test)]
 #[path = "followup_moved_state_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "stale_followup_guidance_tests.rs"]
+mod stale_guidance_tests;

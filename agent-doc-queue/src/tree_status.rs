@@ -11,7 +11,9 @@
 //!   [`crate::waiting_status`] and [`crate::waiting_subtree`]
 //!   (`#waitingtriage`);
 //! - a struck row's closability from its response summary's `**State:**` row,
-//!   the value the `**Guidance:**` row spells out.
+//!   the value the `**Guidance:**` row spells out, as the document re-derives
+//!   it (`#staleguidance`: a follow-up State whose action items all moved to
+//!   their own follow-up rows reads `Complete.`).
 //!
 //! The answer lists, for the subtree rooted at the row on a given line, the
 //! rows that wait on the operator (`Next: you`), the rows the agent owes
@@ -500,6 +502,16 @@ impl Context<'_> {
 /// `document`: the deepest queue row whose subtree contains the line, or the
 /// whole queue component when the line is inside one but on no row.
 pub fn tree_status(document: &str, line: usize) -> Result<TreeStatus> {
+    // `#staleguidance`: a struck row's State is derived, not stored. A
+    // response still in the follow-up form whose action items all have their
+    // own follow-up rows reads as the document re-derives it
+    // ([`crate::followup_moved_state::reconcile_moved_followup_states`]),
+    // even when no writer ran that pass yet. The pass rewrites values inside
+    // lines only, so every line number stays the caller's.
+    let derived = crate::followup_moved_state::reconcile_moved_followup_states(document);
+    let document = derived
+        .as_ref()
+        .map_or(document, |(derived, _)| derived.as_str());
     let views = component_views(document)?;
     let view = views
         .iter()

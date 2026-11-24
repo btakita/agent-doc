@@ -7593,6 +7593,14 @@ pub fn attach_stopped_row_responses(
         block.push_str(&rendered);
         out.insert_str(insert_at, &block);
     }
+    // `#staleguidance`: a struck row whose response still says its action
+    // items are follow-up work in its tree, while each of them already has
+    // its own follow-up row, is re-derived on every strike, not only by
+    // preflight maintenance: a coordinator turn that runs no preflight still
+    // repairs the tree with its next closeout.
+    if let Some((moved, _)) = crate::followup_moved_state::reconcile_moved_followup_states(&out) {
+        out = moved;
+    }
     // `#guidancescope`: the strike changed the tree, so every other struck
     // row's generated deletion guidance in it is re-read from the new tree
     // (a sibling that just closed no longer keeps the root open).

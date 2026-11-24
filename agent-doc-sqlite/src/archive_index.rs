@@ -174,7 +174,14 @@ pub fn index_archive(doc: &Path, archive_path: &Path) -> Result<()> {
     let conn = open_archive_index(&db_path)?;
     ensure_schema(&conn)?;
     let record = parse_archive(doc, archive_path, &project_root)?;
+    // One commit per archive (`#archiveindexwal`): this
+    // single-archive path is the one the commit's inline-response indexing and
+    // `compact exchange` call, and it ran every turn/ref row as its own
+    // autocommit fsync. Against the 6 MB `sdk-dev.exchange-archive.md`
+    // (2,080 turns) that held the controller's `commit.reposition` for ~20s.
+    let tx = crate::immediate_transaction_unchecked(&conn)?;
     upsert_archive(&conn, &record)?;
+    tx.commit()?;
     Ok(())
 }
 
@@ -752,36 +759,86 @@ fn upsert_archive(conn: &Connection, record: &ArchiveRecord) -> Result<()> {
         |row| row.get(0),
     )?;
 
-    conn.execute(
-        "DELETE FROM archive_turns WHERE archive_id = ?1",
-        params![archive_id],
-    )?;
-    conn.execute(
-        "DELETE FROM archive_refs WHERE archive_id = ?1",
-        params![archive_id],
-    )?;
-
-    for turn in &record.turns {
-        conn.execute(
+    // Targeted reconciliation: an exchange archive is
+    // append-only, so a re-index after one more archived cell changes a turn or
+    // two out of thousands. Deleting and re-inserting every row rewrote the
+    // whole `normalized_text` index for each append. Keep unchanged rows in
+    // place, update only rows whose text differs, insert new rows, and delete
+    // only rows the parsed archive no longer has.
+    let existing_turns = {
+        let mut stmt = conn.prepare_cached(
+            "SELECT turn_ordinal, speaker FROM archive_turns WHERE archive_id = ?1",
+        )?;
+        stmt.query_map(params![archive_id], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<std::result::Result<BTreeSet<_>, _>>()?
+    };
+    let wanted_turns = record
+        .turns
+        .iter()
+        .map(|turn| (turn.turn_ordinal, turn.speaker.clone()))
+        .collect::<BTreeSet<_>>();
+    {
+        let mut delete = conn.prepare_cached(
+            "DELETE FROM archive_turns
+             WHERE archive_id = ?1 AND turn_ordinal = ?2 AND speaker = ?3",
+        )?;
+        for (ordinal, speaker) in existing_turns.difference(&wanted_turns) {
+            delete.execute(params![archive_id, ordinal, speaker])?;
+        }
+    }
+    {
+        let mut upsert = conn.prepare_cached(
             "INSERT INTO archive_turns (
                  archive_id, turn_ordinal, speaker, text, normalized_text
-             ) VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(archive_id, turn_ordinal, speaker) DO UPDATE SET
+                 text = excluded.text,
+                 normalized_text = excluded.normalized_text
+             WHERE archive_turns.text IS NOT excluded.text
+                OR archive_turns.normalized_text IS NOT excluded.normalized_text",
+        )?;
+        for turn in &record.turns {
+            upsert.execute(params![
                 archive_id,
                 turn.turn_ordinal,
                 turn.speaker,
                 turn.text,
                 turn.normalized_text
-            ],
-        )?;
+            ])?;
+        }
     }
 
-    for archive_ref in &record.refs {
-        conn.execute(
+    let existing_refs = {
+        let mut stmt = conn
+            .prepare_cached("SELECT ref_kind, ref_value FROM archive_refs WHERE archive_id = ?1")?;
+        stmt.query_map(params![archive_id], |row| {
+            Ok(ArchiveRef {
+                kind: row.get(0)?,
+                value: row.get(1)?,
+            })
+        })?
+        .collect::<std::result::Result<BTreeSet<_>, _>>()?
+    };
+    let wanted_refs = record.refs.iter().cloned().collect::<BTreeSet<_>>();
+    {
+        let mut delete = conn.prepare_cached(
+            "DELETE FROM archive_refs
+             WHERE archive_id = ?1 AND ref_kind = ?2 AND ref_value = ?3",
+        )?;
+        for stale in existing_refs.difference(&wanted_refs) {
+            delete.execute(params![archive_id, stale.kind, stale.value])?;
+        }
+    }
+    {
+        let mut insert = conn.prepare_cached(
             "INSERT OR IGNORE INTO archive_refs (archive_id, ref_kind, ref_value)
              VALUES (?1, ?2, ?3)",
-            params![archive_id, archive_ref.kind, archive_ref.value],
         )?;
+        for archive_ref in wanted_refs.difference(&existing_refs) {
+            insert.execute(params![archive_id, archive_ref.kind, archive_ref.value])?;
+        }
     }
     Ok(())
 }
@@ -1248,6 +1305,112 @@ mod tests {
         assert_eq!(archive_count, 1);
         assert_eq!(turn_count, 2);
         assert!(ref_count >= 2);
+    }
+
+    #[test]
+    fn index_archive_reconciles_only_the_rows_an_append_changed() {
+        // Re-indexing an append-only exchange archive used to
+        // delete and re-insert every turn and ref, one autocommit fsync each
+        // (~20s for a 2,080-turn archive inside `commit.reposition`). Unchanged
+        // rows must stay in place; only changed, new, and removed rows move.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("tasks/session.md");
+        fs::create_dir_all(doc.parent().unwrap()).unwrap();
+        fs::write(&doc, "body\n").unwrap();
+        let archive = root.join("tasks/session.exchange-archive.md");
+        let render = |turns: &[(&str, &str)]| {
+            let mut out = String::from("<!-- agent-doc-exchange-archive-v1 -->\n\n");
+            for (speaker, text) in turns {
+                out.push_str(&format!("## {speaker}\n\n{text}\n\n"));
+            }
+            out
+        };
+        let turn_rows = |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT t.id, t.turn_ordinal, t.speaker, t.text
+                     FROM archive_turns t JOIN archives a ON a.id = t.archive_id
+                     WHERE a.archive_path = 'tasks/session.exchange-archive.md'
+                     ORDER BY t.turn_ordinal",
+                )
+                .unwrap();
+            stmt.query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                ))
+            })
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap()
+        };
+        let refs = |conn: &Connection| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT r.ref_value
+                     FROM archive_refs r JOIN archives a ON a.id = r.archive_id
+                     WHERE a.archive_path = 'tasks/session.exchange-archive.md'
+                     ORDER BY r.ref_value",
+                )
+                .unwrap();
+            stmt.query_map([], |row| row.get::<_, String>(0))
+                .unwrap()
+                .collect::<std::result::Result<Vec<_>, _>>()
+                .unwrap()
+        };
+
+        fs::write(
+            &archive,
+            render(&[
+                ("User", "Do #firstitem."),
+                ("Assistant", "Answer one #seconditem."),
+                ("User", "Follow up."),
+            ]),
+        )
+        .unwrap();
+        index_archive(&doc, &archive).unwrap();
+        // A second archive indexed afterwards holds higher row ids, so a
+        // delete-and-reinsert of the first archive could not reuse its ids.
+        let other = root.join("tasks/other.exchange-archive.md");
+        fs::write(&other, render(&[("User", "Unrelated.")])).unwrap();
+        index_archive(&doc, &other).unwrap();
+        let conn = Connection::open(root.join(".agent-doc/archive-index.db")).unwrap();
+        let before = turn_rows(&conn);
+        assert_eq!(before.len(), 3);
+        assert_eq!(refs(&conn), vec!["#firstitem", "#seconditem"]);
+
+        fs::write(
+            &archive,
+            render(&[
+                ("User", "Do #firstitem."),
+                ("Assistant", "Answer one, revised #thirditem."),
+                ("User", "Follow up."),
+                ("Assistant", "Answer two."),
+            ]),
+        )
+        .unwrap();
+        index_archive(&doc, &archive).unwrap();
+        let after = turn_rows(&conn);
+        assert_eq!(after.len(), 4);
+        assert_eq!(after[0], before[0], "an unchanged turn keeps its row");
+        assert_eq!(after[2], before[2], "an unchanged turn keeps its row");
+        assert_eq!(
+            after[1].0, before[1].0,
+            "a changed turn is updated in place"
+        );
+        assert_eq!(after[1].3, "Answer one, revised #thirditem.");
+        assert_eq!((after[3].1, after[3].3.as_str()), (4, "Answer two."));
+        assert_eq!(refs(&conn), vec!["#firstitem", "#thirditem"]);
+
+        fs::write(&archive, render(&[("User", "Do #firstitem.")])).unwrap();
+        index_archive(&doc, &archive).unwrap();
+        let truncated = turn_rows(&conn);
+        assert_eq!(truncated, vec![before[0].clone()]);
+        assert_eq!(refs(&conn), vec!["#firstitem"]);
     }
 
     #[test]

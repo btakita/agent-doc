@@ -4671,15 +4671,21 @@ where
 
     let elapsed_pre_reposition = t_total.elapsed().as_millis();
     let t_reposition = std::time::Instant::now();
+    // `reposition` spans every pre-stage guard and
+    // projection below, so its total alone cannot name the slow step (21-51s
+    // live on sdk-dev). Each mark records the time since the previous one.
+    let mut reposition_phases = CommitPhaseClock::start();
     let _snap_changed = agent_doc_git_io::boundary_reposition::reposition_boundary_in_snapshot(
         ports.boundary_reposition,
         file,
     );
+    reposition_phases.mark("boundary");
     if let Ok(Some(reloaded)) = agent_doc_snapshot_io::load_document_baseline(file) {
         snapshot_content = Some(reloaded);
     }
     file_content = commit_current_document_content(file, "commit_after_boundary_reposition")
         .unwrap_or_default();
+    reposition_phases.mark("reload");
     // Boundary reposition performs a second authority read. Preserve the same
     // attested handoff across that cut as well; otherwise the first adoption is
     // silently discarded immediately before staging.
@@ -4690,10 +4696,12 @@ where
         &mut snapshot_content,
         &mut file_content,
     )?;
+    reposition_phases.mark("dedupe");
     settle_in_progress_recap_for_commit(file, &mut snapshot_content, &mut file_content)?;
     if let Some(snapshot) = snapshot_content.as_mut() {
         adopt_pending_completion_cells_from_disk(file, snapshot, "snapshot_before_stage");
     }
+    reposition_phases.mark("recap_settle");
     // `agent:active` is a derived index. A snapshot captured before
     // `report-complete` can already contain the reported queue row and newly
     // merged completion cell while retaining the older `running` active
@@ -4719,6 +4727,7 @@ where
         snapshot_content = Some(reconciled);
         snapshot_active_projection_reconciled = true;
     }
+    reposition_phases.mark("active_projection");
     agent_doc_git_io::live_buffer_guard::ensure_no_live_editor_buffer_ahead_of_disk(
         ports.live_buffer_guard,
         file,
@@ -4726,12 +4735,14 @@ where
         "pre_stage",
         snapshot_content.as_deref(),
     )?;
+    reposition_phases.mark("live_buffer_guard");
     agent_doc_git_io::capture_materialization_guard::ensure_active_capture_materialized_for_commit(
         ports.capture_materialization_guard,
         file,
         snapshot_content.as_deref().or(Some(file_content.as_str())),
         "staged",
     )?;
+    reposition_phases.mark("capture_guard");
     // `#respindexorphan`: a queue strike mints the response id of a hand-back
     // or stopped-row projection without an exchange cell to archive. Index the
     // projections this commit records so the reference and its durable
@@ -4760,6 +4771,7 @@ where
             ),
         ),
     }
+    reposition_phases.mark("inline_response_index");
     binary_owned_side_effects = binary_owned_commit_side_effects(file, &file_content)?;
     if !binary_owned_side_effects.is_empty() {
         agent_doc_ops_log_io::log_op(
@@ -4775,6 +4787,7 @@ where
             ),
         );
     }
+    reposition_phases.mark("side_effects");
     let prospective_document = snapshot_content.as_deref().unwrap_or(&file_content);
     let decision_trailers = agent_doc_decision_io::trailers_for_diff(
         head_doc.as_deref().unwrap_or_default(),
@@ -4799,9 +4812,14 @@ where
             decision_trailers.decision_ids,
         );
     }
+    reposition_phases.mark("trailers");
     let elapsed_reposition = t_reposition.elapsed().as_millis();
+    let reposition_phases = reposition_phases.render();
     if elapsed_reposition > 0 {
-        eprintln!("[perf] commit.reposition: {}ms", elapsed_reposition);
+        eprintln!(
+            "[perf] commit.reposition: {}ms ({})",
+            elapsed_reposition, reposition_phases
+        );
     }
 
     let t_commit = std::time::Instant::now();
@@ -5062,7 +5080,7 @@ where
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "commit_latency file={} total_ms={} phases=pre_reposition:{}ms,reposition:{}ms,git_commit:{}ms,post_commit:{}ms post_commit_phases=finalize:{}ms,transient_cleanup:{}ms,worktree_check:{}ms did_commit={}",
+            "commit_latency file={} total_ms={} phases=pre_reposition:{}ms,reposition:{}ms,git_commit:{}ms,post_commit:{}ms post_commit_phases=finalize:{}ms,transient_cleanup:{}ms,worktree_check:{}ms reposition_phases={} did_commit={}",
             file.display(),
             elapsed_total,
             elapsed_pre_reposition,
@@ -5072,6 +5090,7 @@ where
             elapsed_post_commit_finalize,
             elapsed_transient_cleanup,
             elapsed_postcommit_check,
+            reposition_phases,
             did_commit,
         ),
     );
@@ -5082,6 +5101,38 @@ where
         did_commit,
         vcs_refresh_signaled,
     })
+}
+
+/// Named sub-phase timings for one commit stretch.
+/// Each [`CommitPhaseClock::mark`] records the time elapsed since the previous
+/// mark, so the rendered phases sum to the stretch total.
+struct CommitPhaseClock {
+    last: std::time::Instant,
+    phases: Vec<(&'static str, u128)>,
+}
+
+impl CommitPhaseClock {
+    fn start() -> Self {
+        Self {
+            last: std::time::Instant::now(),
+            phases: Vec::new(),
+        }
+    }
+
+    fn mark(&mut self, phase: &'static str) {
+        let now = std::time::Instant::now();
+        self.phases
+            .push((phase, now.duration_since(self.last).as_millis()));
+        self.last = now;
+    }
+
+    fn render(&self) -> String {
+        self.phases
+            .iter()
+            .map(|(phase, ms)| format!("{phase}:{ms}ms"))
+            .collect::<Vec<_>>()
+            .join(",")
+    }
 }
 
 fn captured_response_body_for_commit(
@@ -5539,6 +5590,35 @@ mod retained_recap_settle_tests {
             "{err:#}"
         );
         assert_eq!(convergence.awaits.load(Ordering::SeqCst), 0);
+    }
+}
+
+#[cfg(test)]
+mod commit_phase_clock_tests {
+    use super::*;
+
+    /// Every mark names its phase in order, so the
+    /// `commit_latency` op-log line can attribute a slow `reposition` stretch.
+    #[test]
+    fn phase_clock_renders_each_mark_in_order() {
+        let mut clock = CommitPhaseClock::start();
+        clock.mark("boundary");
+        clock.mark("capture_guard");
+        clock.mark("inline_response_index");
+        let rendered = clock.render();
+        let names = rendered
+            .split(',')
+            .map(|phase| {
+                let (name, ms) = phase.split_once(':').expect("name:ms");
+                assert!(ms.ends_with("ms"), "{phase}");
+                ms.trim_end_matches("ms").parse::<u128>().expect("millis");
+                name
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(
+            names,
+            ["boundary", "capture_guard", "inline_response_index"]
+        );
     }
 }
 

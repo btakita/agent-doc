@@ -410,7 +410,7 @@ mod tests {
     /// claim ledger (haiven-dev `subagent:adv929#1`, 2026-11-23): the
     /// subagent-end hook froze a worker whose last message said it was
     /// waiting on a fixer. The attempt stays `Running` and its row projects
-    /// plain `⚠️`. The gate must name the continue of that exact worker and
+    /// `🚧` (`#reportowedmarker`: its hand-back is owed). The gate must name the continue of that exact worker and
     /// keep the turn open through a recursive Stop; before, it gave the
     /// generic lost text and let the turn end.
     #[test]
@@ -441,7 +441,9 @@ mod tests {
         let marker = frozen
             .visible_projection_for_owner(agent_doc_queue::queue_claim::ClaimOwnerLiveness::Live)
             .prefix();
-        assert_eq!(marker, "⚠️", "a frozen Running attempt paints plain lost");
+        // `#reportowedmarker`: an ended worker with a recorded (here interim)
+        // hand-back is owed a continue or report, not lost: it keeps `🚧`.
+        assert_eq!(marker, "🚧", "a report-owed frozen attempt keeps running");
         let content = write_doc(&doc, &format!("{marker} [#subagent:adv929#1] {ITEM}"));
 
         let evidence = closeout_evidence(&doc, &content);

@@ -558,11 +558,14 @@ pub struct QueueLifecycleDiagnosis {
 ///
 /// Formal policy, for attempt `a` and visible row `q`:
 ///
-/// * `Expected(q) = projection(state(a))`.
+/// * `Expected(q) = visible_projection(a)` ([`QueueClaim::lifecycle_projection_marker`]),
+///   the same marker the document projector paints, so a correction converges.
 /// * `Visible(q) != Expected(q) => ProjectionDrift` and projection is safe.
 /// * `state(a)=Claimed && age(a)>=grace => DispatchEvidenceMissing`.
+/// * A stopped `Running` worker projects `⚠️`, except one whose recorded end
+///   hand-back is still owed, which keeps `🚧` (`#reportowedmarker`).
 /// * Before failed-continue replacement, a transient low-level freeze keeps
-///   `projection(state(a))` after the TTL. This retained ledger evidence is
+///   its projection after the TTL. This retained ledger evidence is
 ///   not a coordinator-visible old-generation continuation contract.
 /// * Missing worker evidence is `Unknown`; it never authorizes a lifecycle
 ///   transition. Only a generation-fenced start/heartbeat/report can prove work.
@@ -572,18 +575,23 @@ pub fn diagnose_lifecycle(
     now_secs: u64,
     dispatch_grace_secs: u64,
 ) -> Option<QueueLifecycleDiagnosis> {
-    let expected = if claim.replacement_pending() {
-        agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-    } else if claim.retains_frozen_worker_claim()
-        || claim.state == QueueClaimState::Lost
-        || crate::lost_running_recovery::authorized_running_requeue(claim)
-    {
-        claim.projection_marker()
-    } else if claim.unbound_reservation_expired(now_secs) {
-        agent_doc_document::queue_projection::QueueLifecycleMarker::LostClaimed
-    } else {
-        claim.projection_marker()
-    };
+    diagnose_lifecycle_for_owner(claim, observed, now_secs, dispatch_grace_secs, |_| {
+        ClaimOwnerLiveness::Unrecorded
+    })
+}
+
+/// [`diagnose_lifecycle`] against the owner-session verdict the document
+/// projector uses (`#reportowedmarker`). `Expected(q)` is
+/// [`QueueClaim::lifecycle_projection_marker`], the exact marker the projector
+/// paints, so `ProjectExpectedMarker` converges after one projection.
+pub fn diagnose_lifecycle_for_owner(
+    claim: &QueueClaim,
+    observed: Option<agent_doc_document::queue_projection::QueueLifecycleMarker>,
+    now_secs: u64,
+    dispatch_grace_secs: u64,
+    owner_liveness: impl FnOnce(&QueueClaim) -> ClaimOwnerLiveness,
+) -> Option<QueueLifecycleDiagnosis> {
+    let expected = claim.lifecycle_projection_marker(now_secs, owner_liveness);
     let worker_liveness = match claim.state {
         QueueClaimState::Running if claim.frozen.is_some() => WorkerLivenessEvidence::Absent,
         QueueClaimState::Running | QueueClaimState::Reported => WorkerLivenessEvidence::Proven,
@@ -720,17 +728,55 @@ impl QueueClaim {
     /// The row paints `⚠️`, not `⚠️🚧`: a scan for `🚧` must not count a
     /// stopped worker. Unknown liveness passes `false` and keeps
     /// [`Self::projection_marker`].
+    ///
+    /// `#reportowedmarker`: a stopped worker that ended with a hand-back the
+    /// coordinator has not reported ([`Self::ended_hand_back_owed`]) is not
+    /// lost. Its result exists and the coordinator owes `queue
+    /// report-complete` (or a continue of that worker, or an explicit
+    /// requeue), so the row keeps `🚧` (report owed). Only an end with no
+    /// hand-back, a wrapper exit, or an abandon paints `⚠️`. haiven-dev
+    /// `sdk-dev.md` `subagent:jwtq#1` (2026-11-24) ended with a complete
+    /// hand-back and was painted `⚠️` while the lifecycle invariant expected
+    /// `🚧`.
     pub fn visible_projection_marker(
         &self,
         worker_not_running: bool,
     ) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
         if self.replacement_pending() {
             agent_doc_document::queue_projection::QueueLifecycleMarker::Pending
-        } else if self.state == QueueClaimState::Running && worker_not_running {
+        } else if self.state == QueueClaimState::Running
+            && worker_not_running
+            && self.ended_hand_back_owed().is_none()
+        {
             agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
         } else {
             self.projection_marker()
         }
+    }
+
+    /// The one visible lifecycle marker for this exact attempt, as the
+    /// document projector paints it and as the lifecycle invariant expects it
+    /// (`#reportowedmarker`). TTL expiry of an unbound reservation is
+    /// projected first. `owner_liveness` is consulted only for an unfrozen
+    /// `Running` attempt: a recorded freeze already proves the worker stopped.
+    ///
+    /// Painter and invariant must share this derivation. When they disagreed,
+    /// the invariant logged `ProjectionDrift … correction=ProjectExpectedMarker`
+    /// on every pass while the painter kept repainting its own marker, so the
+    /// correction never converged.
+    pub fn lifecycle_projection_marker(
+        &self,
+        now_secs: u64,
+        owner_liveness: impl FnOnce(&QueueClaim) -> ClaimOwnerLiveness,
+    ) -> agent_doc_document::queue_projection::QueueLifecycleMarker {
+        let mut claim = self.clone();
+        claim.project_expiry(now_secs);
+        let owner = if claim.state == QueueClaimState::Running && claim.frozen.is_none() {
+            owner_liveness(&claim)
+        } else {
+            ClaimOwnerLiveness::Unrecorded
+        };
+        claim.visible_projection_for_owner(owner)
     }
 
     /// The old generation stays in the ledger as audit and fencing evidence.
@@ -5121,6 +5167,209 @@ mod tests {
         assert_eq!(claim.state, QueueClaimState::Running);
     }
 
+    /// The haiven-dev `sdk-dev.md` `subagent:jwtq#1` claim (2026-11-24) as
+    /// the ledger held it: `Running`, a bound worker, a live coordinator, and
+    /// the subagent-end hook's freeze recording a complete hand-back.
+    fn jwtq_report_owed_claim() -> QueueClaim {
+        let mut ledger = QueueClaimLedger::default();
+        ledger.claim(
+            "https://github.com/haiven-dev/haiven-api/pull/930: Why do we store the credentials? I thought we were using JWT.",
+            "subagent:jwtq",
+            1_795_552_900,
+            7_224,
+        );
+        let mut claim = ledger.claims.remove(0);
+        claim.state = QueueClaimState::Running;
+        claim.worker = Some(QueueWorkerBinding {
+            worker_id: "a1fc83b2b11ed7537".into(),
+            started_at_secs: 1_795_552_924,
+        });
+        claim.heartbeat_at_secs = Some(1_795_552_924);
+        claim.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 1_795_553_059,
+            reason: subagent_end_freeze_reason(Some(
+                "I answered #930's question from the code and the ADRs. Short version: game credentials are JWTs, and we do not store the token itself. Each JWT has a database row so it can be revoked, and #930 doesn't change what that row holds. **Summary**: answered.",
+            )),
+            abandoned: false,
+        });
+        claim
+    }
+
+    /// `#reportowedmarker`: a worker that ended with a recorded hand-back is
+    /// report-owed, never lost. Every owner verdict projects `🚧`; an end with
+    /// no hand-back or a wrapper exit still projects `⚠️`; a `Lost` attempt
+    /// with an owed hand-back keeps the composite `⚠️🚧`, never bare `⚠️`.
+    #[test]
+    fn reportowedmarker_ended_hand_back_projects_running_not_lost() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+        let claim = jwtq_report_owed_claim();
+        assert!(claim.ended_hand_back_owed().is_some(), "{claim:#?}");
+        assert!(claim.interim_end_hand_back().is_none());
+        for owner in [
+            ClaimOwnerLiveness::Live,
+            ClaimOwnerLiveness::Unrecorded,
+            ClaimOwnerLiveness::Ended(OwnerSessionEndReason::OwnerProcessExited),
+        ] {
+            assert!(claim.worker_not_running(owner));
+            assert_eq!(
+                claim.visible_projection_for_owner(owner),
+                QueueLifecycleMarker::Running,
+                "{owner:?}"
+            );
+            assert_eq!(claim.visible_projection_for_owner(owner).prefix(), "🚧");
+        }
+        assert_eq!(
+            claim.lifecycle_projection_marker(1_795_553_100, |_| ClaimOwnerLiveness::Live),
+            QueueLifecycleMarker::Running
+        );
+        // The hand-back still holds the slot: report-owed is not dispatchable.
+        assert!(claim.blocks_dispatch(1_795_553_100));
+
+        let mut interim = claim.clone();
+        interim.frozen.as_mut().unwrap().reason = subagent_end_freeze_reason(Some(
+            "After they land it will finish the fix and return its full result. I'm waiting for that.",
+        ));
+        assert!(interim.interim_end_hand_back().is_some());
+        assert_eq!(
+            interim.visible_projection_for_owner(ClaimOwnerLiveness::Live),
+            QueueLifecycleMarker::Running
+        );
+
+        let mut no_hand_back = claim.clone();
+        no_hand_back.frozen.as_mut().unwrap().reason = subagent_end_freeze_reason(None);
+        assert!(no_hand_back.ended_hand_back_owed().is_none());
+        assert_eq!(
+            no_hand_back
+                .visible_projection_for_owner(ClaimOwnerLiveness::Live)
+                .prefix(),
+            "⚠️"
+        );
+
+        let mut wrapper = claim.clone();
+        wrapper.frozen.as_mut().unwrap().reason =
+            subagent_end_freeze_reason(Some("Task abc is still running. Use /codex:status."));
+        assert!(wrapper.ended_hand_back_owed().is_none());
+        assert_eq!(
+            wrapper
+                .visible_projection_for_owner(ClaimOwnerLiveness::Live)
+                .prefix(),
+            "⚠️"
+        );
+
+        let mut lost = claim.clone();
+        lost.mark_lost();
+        assert!(lost.lost_end_hand_back().is_some());
+        assert_eq!(
+            lost.visible_projection_for_owner(ClaimOwnerLiveness::Live),
+            QueueLifecycleMarker::LostRunning
+        );
+        assert_ne!(
+            lost.visible_projection_for_owner(ClaimOwnerLiveness::Live),
+            QueueLifecycleMarker::Lost
+        );
+    }
+
+    /// `#reportowedmarker`: the lifecycle invariant expects the marker the
+    /// projector paints. Painting the expected marker clears the drift, so
+    /// `ProjectExpectedMarker` converges after one projection instead of being
+    /// logged on every pass.
+    #[test]
+    fn reportowedmarker_invariant_expected_marker_converges_after_projection() {
+        use agent_doc_document::queue_projection::QueueLifecycleMarker;
+
+        let now = 1_795_553_100;
+        let claim = jwtq_report_owed_claim();
+        let live = |_: &QueueClaim| ClaimOwnerLiveness::Live;
+
+        // The sdk-dev state: `⚠️` painted, `🚧` expected.
+        let drift = diagnose_lifecycle_for_owner(
+            &claim,
+            Some(QueueLifecycleMarker::Lost),
+            now,
+            DISPATCH_EVIDENCE_GRACE_SECS,
+            live,
+        )
+        .expect("a report-owed attempt painted lost has drifted");
+        assert_eq!(drift.invariant, QueueLifecycleInvariant::ProjectionDrift);
+        assert_eq!(drift.expected, QueueLifecycleMarker::Running);
+        assert_eq!(
+            drift.correction,
+            QueueInvariantCorrection::ProjectExpectedMarker
+        );
+        // Applying the correction paints exactly what the projector paints.
+        let painted = claim.lifecycle_projection_marker(now, live);
+        assert_eq!(painted, drift.expected);
+        assert!(
+            diagnose_lifecycle_for_owner(
+                &claim,
+                Some(painted),
+                now,
+                DISPATCH_EVIDENCE_GRACE_SECS,
+                live
+            )
+            .is_none()
+        );
+
+        // Every stopped-worker shape converges the same way: the invariant's
+        // expected marker is the projector's marker, for each owner verdict.
+        let mut no_hand_back = claim.clone();
+        no_hand_back.frozen.as_mut().unwrap().reason = subagent_end_freeze_reason(None);
+        let mut ended_owner = claim.clone();
+        ended_owner.frozen = None;
+        let mut abandoned = claim.clone();
+        abandoned.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 1_795_553_059,
+            reason: ABANDONED_REQUEUE_REASON.into(),
+            abandoned: true,
+        });
+        let ended =
+            |_: &QueueClaim| ClaimOwnerLiveness::Ended(OwnerSessionEndReason::OwnerProcessExited);
+        for (attempt, owner, expected) in [
+            (
+                &no_hand_back,
+                live as fn(&QueueClaim) -> ClaimOwnerLiveness,
+                "⚠️",
+            ),
+            (
+                &ended_owner,
+                ended as fn(&QueueClaim) -> ClaimOwnerLiveness,
+                "⚠️",
+            ),
+            (
+                &ended_owner,
+                live as fn(&QueueClaim) -> ClaimOwnerLiveness,
+                "🚧",
+            ),
+        ] {
+            let painted = attempt.lifecycle_projection_marker(now, owner);
+            assert_eq!(painted.prefix(), expected, "{attempt:#?}");
+            assert!(
+                diagnose_lifecycle_for_owner(
+                    attempt,
+                    Some(painted),
+                    now,
+                    DISPATCH_EVIDENCE_GRACE_SECS,
+                    owner
+                )
+                .is_none(),
+                "{attempt:#?}"
+            );
+        }
+        let painted = abandoned.lifecycle_projection_marker(now, live);
+        assert!(!painted.prefix().contains('🚧'), "{painted:?}");
+        assert!(
+            diagnose_lifecycle_for_owner(
+                &abandoned,
+                Some(painted),
+                now,
+                DISPATCH_EVIDENCE_GRACE_SECS,
+                live
+            )
+            .is_none()
+        );
+    }
+
     /// `#markdrift`: a stopped running worker paints `⚠️`, not `🚧` and not
     /// `⚠️🚧`. The ledger stays `Running`. A live owner, including one whose
     /// heartbeat is old, keeps `🚧`. Reported stays `☑️`.
@@ -6580,15 +6829,22 @@ mod tests {
         assert_eq!(frozen.claims[0].state, QueueClaimState::Running);
         assert!(frozen.claims[0].blocks_dispatch(200));
         assert!(frozen.claimed_items(200, Some(&live_heads)).claims("work"));
+        // `#reportowedmarker`: the invariant expects what the projector
+        // paints. A stopped worker with no hand-back paints plain `⚠️` (the
+        // ledger stays `Running`); TTL expiry never turns it into `⚠️🚧`.
+        assert_eq!(
+            frozen.claims[0].lifecycle_projection_marker(200, |_| ClaimOwnerLiveness::Live),
+            agent_doc_document::queue_projection::QueueLifecycleMarker::Lost
+        );
         assert!(
             diagnose_lifecycle(
                 &frozen.claims[0],
-                Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Running),
+                Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Lost),
                 200,
                 DISPATCH_EVIDENCE_GRACE_SECS,
             )
             .is_none(),
-            "transient pre-recovery evidence keeps the running projection"
+            "transient pre-recovery evidence keeps the stopped-worker projection"
         );
         let wrong_generation = revive(&mut frozen, "subagent:a", Some(2)).unwrap_err();
         assert_eq!(wrong_generation.reason.kind(), "stale_attempt");

@@ -707,13 +707,18 @@ fn derive_runtime_projection_scoped(
                             ),
                         });
                     }
+                    // `#reportowedmarker`: diagnose against the owner verdict
+                    // the lifecycle painter uses, so the expected marker is
+                    // the one this pass paints and the drift converges.
                     if let Some(claim) = claim_states.get(&identity)
-                        && let Some(diagnosis) = agent_doc_queue::queue_claim::diagnose_lifecycle(
-                            claim,
-                            observed,
-                            crate::queue_claim::claim_clock_now_secs(),
-                            agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
-                        )
+                        && let Some(diagnosis) =
+                            agent_doc_queue::queue_claim::diagnose_lifecycle_for_owner(
+                                claim,
+                                observed,
+                                now,
+                                agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
+                                |claim| crate::queue_claim::claim_owner_liveness(file, claim),
+                            )
                     {
                         log_queue_invariant_once(file, claim, diagnosis);
                     }
@@ -4701,6 +4706,90 @@ mod tests {
         assert!(!reconcile_drifted_claim_markers(&effects, &live).unwrap());
         let live_text = std::fs::read_to_string(&live).unwrap();
         assert!(live_text.contains("- 🚧 still working"), "{live_text}");
+    }
+
+    /// `#reportowedmarker`: haiven-dev `sdk-dev.md` `subagent:jwtq#1`
+    /// (2026-11-24). The subagent-end hook froze a `Running` worker that ended
+    /// with a complete hand-back, the row was painted `⚠️`, `queue claims`
+    /// called that synchronized, and the lifecycle invariant logged
+    /// `ProjectionDrift expected=🚧 observed=⚠️` on every pass without any
+    /// repaint. The report-owed row must expect and paint `🚧`, and one
+    /// reconcile must converge.
+    #[test]
+    fn reportowedmarker_ended_hand_back_row_repaints_report_owed_and_converges() {
+        use agent_doc_queue::queue_claim::QueueClaimState;
+
+        const ROW: &str = "Why do we store the credentials? I thought we were using JWT.";
+        let effects = FakeEffects::default();
+        let dir = tempfile::tempdir().unwrap();
+        let doc = write_claim_projection_doc(dir.path(), &format!("- {ROW}\n"));
+        crate::queue_claim::claim(&doc, ROW, "subagent:jwtq", 3_600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:jwtq",
+            "a1fc83b2b11ed7537",
+            3_600,
+            1,
+        )
+        .unwrap();
+        let mut ledger = crate::queue_claim::load_ledger(&doc).unwrap();
+        let mut owner = crate::queue_claim::current_owner_session().unwrap_or_default();
+        owner.pid = Some(std::process::id());
+        ledger.claims[0].owner_session = Some(owner);
+        crate::queue_claim::store_ledger_for_test(&doc, &ledger).unwrap();
+        let reason = agent_doc_queue::queue_claim::subagent_end_freeze_reason(Some(
+            "I answered #930's question from the code and the ADRs. Short version: game credentials are JWTs, and we do not store the token itself. **Summary**: answered.",
+        ));
+        let frozen = crate::queue_claim::freeze_attempt(&doc, ROW, Some(1), &reason).unwrap();
+        assert_eq!(frozen.state, QueueClaimState::Running);
+        assert!(frozen.ended_hand_back_owed().is_some(), "{frozen:#?}");
+
+        // The live sdk-dev row: painted lost.
+        let content = std::fs::read_to_string(&doc).unwrap();
+        let lost_row = content.replace(
+            &format!("- {ROW}"),
+            &format!("- ⚠️ [#subagent:jwtq#1] {ROW}"),
+        );
+        assert_ne!(lost_row, content);
+        std::fs::write(&doc, &lost_row).unwrap();
+
+        let before = crate::queue_claim::claim_reports_for_content(&doc, &lost_row).unwrap();
+        assert_eq!(before[0].owner_session_state, "live");
+        assert_eq!(before[0].expected_visible_marker, "🚧");
+        assert_eq!(before[0].observed_visible_markers, ["⚠️"]);
+        assert_eq!(before[0].visible_projection_state, "out_of_sync");
+
+        assert!(reconcile_drifted_claim_markers(&effects, &doc).unwrap());
+        let text = std::fs::read_to_string(&doc).unwrap();
+        assert!(
+            text.contains(&format!("- 🚧 [#subagent:jwtq#1] {ROW}")),
+            "{text}"
+        );
+        assert!(!text.contains("⚠️"), "{text}");
+        let after = crate::queue_claim::claim_reports_for_content(&doc, &text).unwrap();
+        assert_eq!(after[0].visible_projection_state, "synchronized");
+        assert_eq!(after[0].expected_visible_marker, "🚧");
+
+        // Converged: the invariant's expected marker is the painted one, and
+        // a second reconcile has nothing to repaint.
+        let claim = crate::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .remove(0);
+        assert_eq!(claim.state, QueueClaimState::Running);
+        assert!(
+            agent_doc_queue::queue_claim::diagnose_lifecycle_for_owner(
+                &claim,
+                Some(agent_doc_document::queue_projection::QueueLifecycleMarker::Running),
+                crate::queue_claim::claim_clock_now_secs(),
+                agent_doc_queue::queue_claim::DISPATCH_EVIDENCE_GRACE_SECS,
+                |claim| crate::queue_claim::claim_owner_liveness(&doc, claim),
+            )
+            .is_none()
+        );
+        assert!(!reconcile_drifted_claim_markers(&effects, &doc).unwrap());
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), text);
     }
 
     /// Grok consumes tokenized steering inside the same passive turn. If that

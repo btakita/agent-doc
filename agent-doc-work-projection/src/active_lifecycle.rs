@@ -24,7 +24,7 @@ use std::sync::OnceLock;
 
 use agent_doc_document::queue_projection::QueueLifecycleMarker;
 use agent_doc_element_queue::{QueueItemIdentity, QueueReportState};
-use agent_doc_queue::queue_claim::{ClaimOwnerLiveness, QueueClaim, QueueClaimState};
+use agent_doc_queue::queue_claim::{ClaimOwnerLiveness, QueueClaim};
 use anyhow::{Context, Result, ensure};
 use serde::Deserialize;
 
@@ -229,13 +229,11 @@ impl ActiveLifecycle {
             if fact.ended {
                 continue;
             }
+            // `#reportowedmarker`: the lifecycle invariant expects this exact
+            // derivation, so its `ProjectExpectedMarker` correction converges.
+            let marker = claim.lifecycle_projection_marker(now_secs, &owner_liveness);
             let mut claim = claim.clone();
             claim.project_expiry(now_secs);
-            let marker = if claim.state == QueueClaimState::Running && claim.frozen.is_none() {
-                claim.visible_projection_for_owner(owner_liveness(&claim))
-            } else {
-                claim.visible_projection_for_owner(ClaimOwnerLiveness::Unrecorded)
-            };
             let (since_secs, since_source) = match (&fact.latest, &claim.worker) {
                 (Some((kind, at)), _) => (*at, kind.clone()),
                 (None, Some(worker)) => (worker.started_at_secs, "started".to_string()),

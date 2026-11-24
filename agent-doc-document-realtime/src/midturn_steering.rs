@@ -5243,6 +5243,36 @@ mod tests {
         assert!(subagent_dispatch_heads(&invalid, None).is_empty());
     }
 
+    /// `#remainingstrike`: an operator question nested under a Remaining
+    /// entry of a struck row's response is live work, offered for dispatch
+    /// with the entry's lineage, even though the row above it is struck.
+    #[test]
+    fn a_question_under_a_struck_rows_remaining_entry_is_a_subagent_head() {
+        let content = format!(
+            "{FM}# Session\n\n<!-- agent:queue subagents go -->\n\
+             - ### https://example.com/api/pull/7\n\
+             \x20 - ~~Should we use stateless tokens?~~\n\
+             \x20   - **Response [#r-ddc5f0eb1a59]**\n\
+             \x20     - **Timestamp:** 2026-11-24T21:38:22.000Z\n\
+             \x20     - **Summary:** Stateless tokens cannot revoke one token. <!-- agent-doc:response-detail -->\n\
+             \x20     - **Action items:** <!-- agent-doc:response-detail -->\n\
+             \x20       - operator: choose one: (1) keep durable per-`jti` rows plus retention; (2) stateless. <!-- agent-doc:response-detail -->\n\
+             \x20     - **Remaining:**\n\
+             \x20       - 🙋 operator: choose one: (1) keep durable per-`jti` rows plus retention <!-- agent-doc:response-detail -->\n\
+             \x20         - What is per-`jti`?\n\
+             \x20     - **State:** Waiting on operator input.\n\
+             \x20     - **Guidance:** 🙋 1/2 done, 1 yours. Only you can finish this: choose one. Strike or answer its row when done.\n\
+             <!-- /agent:queue -->\n\n<!-- agent:exchange -->\n<!-- /agent:exchange -->\n"
+        );
+        let heads = subagent_dispatch_heads(&content, None);
+        assert!(
+            heads
+                .iter()
+                .any(|head| head.ends_with("What is per-`jti`?")),
+            "{heads:?}"
+        );
+    }
+
     #[test]
     fn session_trigger_is_not_a_subagent_head() {
         let trigger = "agent-doc /home/brian/work/tasks/bugs.md";

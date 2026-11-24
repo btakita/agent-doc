@@ -1206,6 +1206,37 @@ fn apply_ack_text_response(
             attached.bare_rows[0],
         );
     }
+    // `#remainingstrike`: an explicit strike must not close a row whose
+    // response is the only place an operator decision is written down. Its
+    // `🙋` Remaining entries would sit under a struck (finished-looking) row
+    // instead of a live row the operator works from.
+    if let Some(buried) =
+        agent_doc_queue::response_remaining::struck_responses_burying_operator_items(
+            before,
+            &attached.document,
+        )
+        .into_iter()
+        .next()
+    {
+        anyhow::bail!(
+            "{}: --ack-text would strike {:?} while its response still owes the operator {} \
+             action item(s) that no queue row tracks: {}; no change was applied. Queue each one \
+             as a live row first (`agent-doc queue follow-up {} --id <queue id> --after {:?} --item \
+             '<item>'`), \
+             or leave the row open until the operator answers it (#remainingstrike).",
+            file.display(),
+            buried.row,
+            buried.items.len(),
+            buried
+                .items
+                .iter()
+                .map(|item| format!("{item:?}"))
+                .collect::<Vec<_>>()
+                .join(", "),
+            file.display(),
+            buried.row,
+        );
+    }
     Ok(attached.document)
 }
 
@@ -7229,6 +7260,88 @@ mod core_tests {
             "no blank line in the tree: {tree:?}"
         );
         assert_eq!(updated.matches("**Response [#r-4fa4a87420e5]**").count(), 1);
+    }
+
+    /// `#remainingstrike`: an explicit `--ack-text` strike of a reported row
+    /// whose hand-back owes the operator a decision that no queue row tracks
+    /// is refused with no change: the decision would otherwise sit only in
+    /// the struck row's Remaining list. Once the item has its follow-up row,
+    /// the same strike lands and attaches the hand-back.
+    #[test]
+    fn exact_text_ack_refuses_to_bury_an_untracked_operator_item() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let question = "Should we use stateless tokens?";
+        let decision = "operator: choose durable rows or stateless tokens before #7 merges.";
+        let handback = format!(
+            "**Summary**\n\nStateless tokens cannot revoke one leaked token.\n\n\
+             **What changed**\n\nnone\n\n\
+             **Verification**\n\n- Read the auth code.\n\n\
+             **Action items**\n\n- {decision}\n\n\
+             **Notes**\n\nnone\n\n\
+             **Next actions**\n\n- none\n"
+        );
+        let cell = agent_doc_document::subagent_completion::cell_with_response(
+            "subagent:tokens",
+            question,
+            "tokens-key",
+            &handback,
+        )
+        .unwrap();
+        let content_with = |followups: &str| {
+            format!(
+                "---\nqueue_active: true\n---\n\n\
+                 <!-- agent:exchange -->\n{cell}\n<!-- /agent:exchange -->\n\n\
+                 <!-- agent:run id=\"main\" subagents -->\n\
+                 - ### https://example.com/api/pull/7\n\
+                 \x20 - {question}\n\
+                 {followups}\
+                 - keep this queued\n\
+                 <!-- /agent:run -->\n"
+            )
+        };
+        let ack = |content: &str| {
+            fs::write(&doc, content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+            super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+                &doc,
+                &format!("https://example.com/api/pull/7: {question}"),
+                None,
+                super::AckTextResponse::Required,
+                &TEST_EFFECTS,
+                &guard,
+            )
+        };
+
+        let bare = content_with("");
+        let refused = ack(&bare).unwrap_err().to_string();
+        assert!(refused.contains("#remainingstrike"), "{refused}");
+        assert!(refused.contains(decision), "{refused}");
+        assert!(refused.contains("queue follow-up"), "{refused}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), bare, "no change");
+
+        let tracked = content_with(&format!(
+            "  - 🙋 [#q-0123456789ab] follow-up: {decision} [operator-verify] [#q-ba9876543210]\n"
+        ));
+        ack(&tracked)
+            .unwrap()
+            .expect("a tracked decision lets the strike land");
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(
+            updated.contains(&format!("  - ~~{question}~~\n")),
+            "{updated}"
+        );
+        assert!(
+            updated.contains(&format!("  - 🙋 [#q-0123456789ab] follow-up: {decision}")),
+            "the decision's row stays live: {updated}"
+        );
     }
 
     /// `#queuefail`: the last-resort terminal state. sdk-dev `#address` under

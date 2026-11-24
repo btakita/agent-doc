@@ -94,6 +94,8 @@ pub mod queue_set;
 pub mod queue_sync_payload;
 pub mod queue_tree;
 pub mod reconcile_incremental;
+#[cfg(test)]
+mod remaining_strike_tests;
 pub mod reported_closeout;
 pub mod response_remaining;
 pub mod response_tree_rehome;

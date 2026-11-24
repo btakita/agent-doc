@@ -59,7 +59,12 @@
 //!    origin) is struck in a queue, or is gone from every queue but quoted as
 //!    a dispatched `> ` queue prompt in `agent:exchange` (finished, then
 //!    deleted). A live follow-up row keeps it open; an item that never had a
-//!    row stays open;
+//!    row stays open. `#remainingstrike`: the row may quote a multi-line
+//!    item with its nested detail entries joined, and a quote may carry the
+//!    row's lineage before it and a nested answer after it. Once this pass
+//!    has rendered a response `Complete.`, a follow-up row that later
+//!    vanishes without a trace (deleted, and its exchange quote compacted)
+//!    does not reopen it; only a live row does;
 //! 3. for an `agent:` item only, a later completion covers it: a struck row
 //!    in the same response, after the item and not under any action item
 //!    (the operator's `~~Do the next actions.~~`). Agent items are finished in
@@ -485,7 +490,31 @@ struct ActionItem {
     raw: String,
     /// Normalized key for follow-up row matching.
     key: String,
+    /// `#remainingstrike`: [`Self::key`] with the item's nested detail
+    /// entries appended, the way report-complete joins a multi-line item
+    /// into one follow-up row. Equal to `key` for a one-line item.
+    detail_key: String,
     struck: bool,
+}
+
+impl ActionItem {
+    /// `#remainingstrike`: whether a follow-up row (or a dispatched quote of
+    /// one) whose action-item key is `row_key` holds this item. The row may
+    /// quote the item's head alone, or the head with its nested detail
+    /// entries joined (`agent: update the script: Drop X. Change Y.`). A quote
+    /// may carry the row's trailing `[#q-…]` and, when it quotes an answer
+    /// nested under the row, that answer after `: `.
+    fn held_by_row_key(&self, row_key: &str) -> bool {
+        [self.key.as_str(), self.detail_key.as_str()]
+            .into_iter()
+            .any(|key| {
+                !key.is_empty()
+                    && (row_key == key
+                        || row_key
+                            .strip_prefix(key)
+                            .is_some_and(|rest| rest.starts_with(" [#") || rest.starts_with(": ")))
+            })
+    }
 }
 
 struct ResponseBlock {
@@ -664,6 +693,21 @@ fn parse_response(
                         .split_whitespace()
                         .collect::<Vec<_>>()
                         .join(" ");
+                    let details = lines[span.clone()]
+                        .iter()
+                        .filter_map(|detail| {
+                            let body = detail.text.strip_prefix("- ")?;
+                            body.ends_with(RESPONSE_DETAIL_MARKER)
+                                .then(|| plain_text(body))
+                        })
+                        .filter(|detail| !detail.is_empty())
+                        .collect::<Vec<_>>();
+                    let key = item_key(&plain);
+                    let detail_key = if details.is_empty() {
+                        key.clone()
+                    } else {
+                        item_key(&format!("{plain} {}", details.join(" ")))
+                    };
                     response.items.push(ActionItem {
                         line: index,
                         span: span.clone(),
@@ -671,7 +715,8 @@ fn parse_response(
                         agent,
                         text,
                         raw,
-                        key: item_key(&plain),
+                        key,
+                        detail_key,
                         struck,
                     });
                     index = span.end.max(index + 1);
@@ -721,13 +766,26 @@ fn followup_rows(document: &str, tree: &QueueTree) -> Vec<(String, FollowupRow, 
                     .unwrap_or(quoted)
                     .trim_start();
                 let plain = plain_text(quoted);
-                if let Some(item) = followup_row_action_item(&plain) {
+                if let Some(item) = quoted_followup_action_item(&plain) {
                     rows.push((item_key(item), FollowupRow::Quoted, None));
                 }
             }
         }
     }
     rows
+}
+
+/// `#remainingstrike`: the action item a dispatched queue prompt quotes
+/// when it names a follow-up row. A nested row's prompt is quoted with its
+/// lineage (`<parent>: [#origin] follow-up: <item>: <answer>`), so the
+/// follow-up row may start after any `: ` of the quote, not only at its
+/// start.
+fn quoted_followup_action_item(plain: &str) -> Option<&str> {
+    followup_row_action_item(plain).or_else(|| {
+        plain
+            .match_indices(": ")
+            .find_map(|(at, sep)| followup_row_action_item(&plain[at + sep.len()..]))
+    })
 }
 
 /// One Remaining entry.
@@ -1163,67 +1221,82 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
         })
         .collect();
     // Rule 1–5 for each item of each response.
-    let resolved: Vec<Vec<bool>> = responses
-        .iter()
-        .zip(&answered)
-        .map(|(response, answered)| {
-            let own_tree = tree_lines_of(response.line);
-            response
-                .items
-                .iter()
-                .zip(answered)
-                .map(|(item, answered)| {
-                    // Rule 5 (`#answeredentry`): a struck, finished answer
-                    // under any entry that lists the item.
-                    if item.struck
-                        || *answered == Some(EntryStatus::Done)
-                        || item
-                            .span
-                            .clone()
-                            .any(|line| node_at(line).is_some_and(|index| tree.nodes[index].closed))
-                    {
-                        return true;
-                    }
-                    let matches = followups
-                        .iter()
-                        .filter(|(key, _, _)| *key == item.key)
-                        .map(|(_, state, _)| *state)
-                        .collect::<Vec<_>>();
-                    if !matches.contains(&FollowupRow::Live)
-                        && (matches.contains(&FollowupRow::Struck)
-                            || matches.contains(&FollowupRow::Quoted))
-                    {
-                        return true;
-                    }
-                    // `#treefinish`: rule 4, delegation. A live follow-up row
-                    // in another top-level tree carries the item; this tree
-                    // no longer holds it.
-                    if followups.iter().any(|(key, state, line)| {
-                        *key == item.key
-                            && *state == FollowupRow::Live
-                            && line.is_some_and(|line| {
-                                own_tree.as_ref().is_none_or(|own| !own.contains(&line))
+    let resolved: Vec<Vec<bool>> =
+        responses
+            .iter()
+            .zip(&answered)
+            .map(|(response, answered)| {
+                let own_tree = tree_lines_of(response.line);
+                // `#remainingstrike`: this pass already rendered the response
+                // `Complete.`, so every item was resolved then. A follow-up row
+                // that has since vanished without a trace (the operator deleted
+                // the finished row and the exchange that quoted it was
+                // compacted) cannot reopen it; only a live row can.
+                let rendered_complete = response
+                    .state
+                    .as_ref()
+                    .is_some_and(|(_, state)| state == RESPONSE_STATE_COMPLETE)
+                    && response.guidance.as_ref().is_some_and(|(_, guidance)| {
+                        managed_form(RESPONSE_STATE_COMPLETE, guidance)
+                    });
+                response
+                    .items
+                    .iter()
+                    .zip(answered)
+                    .map(|(item, answered)| {
+                        // Rule 5 (`#answeredentry`): a struck, finished answer
+                        // under any entry that lists the item.
+                        if item.struck
+                            || *answered == Some(EntryStatus::Done)
+                            || item.span.clone().any(|line| {
+                                node_at(line).is_some_and(|index| tree.nodes[index].closed)
                             })
-                    }) {
-                        return true;
-                    }
-                    // `#selfrepaircleanup`: an operator ask to clean up
-                    // agent-doc's own artifacts is agent-doc's repair, not
-                    // operator work, unless a live row still tracks it.
-                    if !matches.contains(&FollowupRow::Live)
-                        && crate::self_repair::is_self_repair_cleanup_item(&item.raw)
-                    {
-                        return true;
-                    }
-                    item.agent
-                        && (item.span.end.max(item.line + 1)..response.block.end).any(|line| {
-                            !in_item_span(line)
-                                && node_at(line).is_some_and(|index| tree.nodes[index].closed)
-                        })
-                })
-                .collect()
-        })
-        .collect();
+                        {
+                            return true;
+                        }
+                        let matches = followups
+                            .iter()
+                            .filter(|(key, _, _)| item.held_by_row_key(key))
+                            .map(|(_, state, _)| *state)
+                            .collect::<Vec<_>>();
+                        if !matches.contains(&FollowupRow::Live)
+                            && (matches.contains(&FollowupRow::Struck)
+                                || matches.contains(&FollowupRow::Quoted))
+                        {
+                            return true;
+                        }
+                        if rendered_complete && matches.is_empty() {
+                            return true;
+                        }
+                        // `#treefinish`: rule 4, delegation. A live follow-up row
+                        // in another top-level tree carries the item; this tree
+                        // no longer holds it.
+                        if followups.iter().any(|(key, state, line)| {
+                            item.held_by_row_key(key)
+                                && *state == FollowupRow::Live
+                                && line.is_some_and(|line| {
+                                    own_tree.as_ref().is_none_or(|own| !own.contains(&line))
+                                })
+                        }) {
+                            return true;
+                        }
+                        // `#selfrepaircleanup`: an operator ask to clean up
+                        // agent-doc's own artifacts is agent-doc's repair, not
+                        // operator work, unless a live row still tracks it.
+                        if !matches.contains(&FollowupRow::Live)
+                            && crate::self_repair::is_self_repair_cleanup_item(&item.raw)
+                        {
+                            return true;
+                        }
+                        item.agent
+                            && (item.span.end.max(item.line + 1)..response.block.end).any(|line| {
+                                !in_item_span(line)
+                                    && node_at(line).is_some_and(|index| tree.nodes[index].closed)
+                            })
+                    })
+                    .collect()
+            })
+            .collect();
 
     let mut edits: Vec<(std::ops::Range<usize>, String)> = Vec::new();
     let mut changed = 0;
@@ -1276,6 +1349,9 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
             entries.push(entry);
         };
         let mut listed_keys: Vec<String> = Vec::new();
+        // `#remainingstrike`: the listed items themselves, so a follow-up row
+        // quoting a multi-line item's joined text is recognized as its row.
+        let mut listed_items: Vec<&ActionItem> = Vec::new();
         let mut covered: Vec<std::ops::Range<usize>> = answer_spans.clone();
         // A response that says it is complete by another rule keeps its
         // word: its items are neither listed nor counted open.
@@ -1318,6 +1394,7 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
                     let own_answer = answer_of(&entry.key()).is_some();
                     if own_answer || *answered == Some(EntryStatus::Done) {
                         listed_keys.push(item.key.clone());
+                        listed_items.push(item);
                         entry.status = EntryStatus::Done;
                         push_entry(entry, &mut entries, &mut used_answers, &mut answered_done);
                     }
@@ -1329,6 +1406,7 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
                     entry.status = EntryStatus::Working;
                 }
                 listed_keys.push(item.key.clone());
+                listed_items.push(item);
                 covered.push(item.span.clone());
                 push_entry(entry, &mut entries, &mut used_answers, &mut answered_done);
             }
@@ -1346,9 +1424,12 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
             }
             let row = &tree.nodes[node];
             let plain = plain_text(&row.full_text);
-            if followup_row_action_item(&plain)
-                .is_some_and(|item| listed_keys.contains(&item_key(item)))
-            {
+            if followup_row_action_item(&plain).is_some_and(|row_item| {
+                let row_key = item_key(row_item);
+                listed_items
+                    .iter()
+                    .any(|item| item.held_by_row_key(&row_key))
+            }) {
                 continue;
             }
             let (owner, text) = open_row_entry(row);
@@ -1399,6 +1480,7 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
         // `#donetrack`: every action item (once per key) and queue row in
         // scope, done or not, for the tally.
         let mut tally_keys: Vec<String> = Vec::new();
+        let mut tally_items: Vec<&ActionItem> = Vec::new();
         let mut item_spans: Vec<std::ops::Range<usize>> = answer_spans.clone();
         let mut total = 0usize;
         let mut done = 0usize;
@@ -1412,6 +1494,7 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
                     continue;
                 }
                 tally_keys.push(item.key.clone());
+                tally_items.push(item);
                 total += 1;
                 let key = entry_key(&format!(
                     "{}: {}",
@@ -1436,8 +1519,12 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
             let row = &tree.nodes[node];
             if row.state == QueueNodeState::Group
                 || item_spans.iter().any(|span| span.contains(&line))
-                || followup_row_action_item(&plain_text(&row.full_text))
-                    .is_some_and(|item| tally_keys.contains(&item_key(item)))
+                || followup_row_action_item(&plain_text(&row.full_text)).is_some_and(|row_item| {
+                    let row_key = item_key(row_item);
+                    tally_items
+                        .iter()
+                        .any(|item| item.held_by_row_key(&row_key))
+                })
             {
                 continue;
             }
@@ -1541,6 +1628,120 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
     }
     let (out, deferred) = apply_disjoint_edits(document, edits);
     Some((out, changed, deferred || state_changed))
+}
+
+/// `#remainingstrike`: a struck row whose response would be the only place
+/// an operator-owned action item is written down.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BuriedOperatorItems {
+    /// The struck row, as it reads in the queue.
+    pub row: String,
+    /// Each open operator-owned action item no queue row tracks, as written.
+    pub items: Vec<String>,
+}
+
+/// `#remainingstrike`: the rows a strike from `before` to `after` would close
+/// while their response still owes the operator an action item that no queue
+/// row tracks.
+///
+/// `queue report-complete` turns each action item into its own follow-up row
+/// (`#workerresponsestructure`), and the strike that follows closes the
+/// origin because those rows now carry the work. When an item has no such
+/// row (placement was refused, the row was never placed, or the hand-back
+/// landed on a row other than the one its follow-up rows name), striking the
+/// row leaves the operator's decision only in a closed tree's **Remaining**
+/// list, where a `🙋` entry under a struck row reads as finished. Such a
+/// strike must refuse until the item has a live row.
+///
+/// Only responses the strike closes count: a response under a row that was
+/// already struck in `before` is not this strike's. An item is tracked when a
+/// follow-up row for it exists in any state (live or struck in a queue, or
+/// quoted in `agent:exchange`), when it is struck or answered by a struck row
+/// nested under it, or when it is an agent-doc self-repair cleanup item. A
+/// response that says `Complete.` keeps its word.
+pub fn struck_responses_burying_operator_items(
+    before: &str,
+    after: &str,
+) -> Vec<BuriedOperatorItems> {
+    if !after.contains("**Response [#r-") {
+        return Vec::new();
+    }
+    let struck_response_headers = |document: &str| -> Vec<String> {
+        let lines = document_lines(document);
+        let Some(responses) = queue_responses(document, &lines) else {
+            return Vec::new();
+        };
+        let Ok(tree) = crate::queue_tree::queue_tree(
+            document,
+            &crate::queue_tree::QueueTreeOptions::default(),
+        ) else {
+            return Vec::new();
+        };
+        responses
+            .iter()
+            .filter(|response| {
+                response.parent.is_some_and(|parent| {
+                    tree.nodes
+                        .iter()
+                        .any(|node| node.line == parent + 1 && node.closed)
+                })
+            })
+            .map(|response| lines[response.line].text.to_string())
+            .collect()
+    };
+    let already_struck = struck_response_headers(before);
+    let lines = document_lines(after);
+    let Some(responses) = queue_responses(after, &lines) else {
+        return Vec::new();
+    };
+    let Ok(tree) =
+        crate::queue_tree::queue_tree(after, &crate::queue_tree::QueueTreeOptions::default())
+    else {
+        return Vec::new();
+    };
+    let node_at = |line: usize| tree.nodes.iter().position(|node| node.line == line + 1);
+    let followups = followup_rows(after, &tree);
+    let mut buried = Vec::new();
+    for response in &responses {
+        let Some(parent) = response.parent.and_then(node_at) else {
+            continue;
+        };
+        if !tree.nodes[parent].closed
+            || already_struck
+                .iter()
+                .any(|header| header == lines[response.line].text)
+            || response
+                .state
+                .as_ref()
+                .is_some_and(|(_, state)| state == RESPONSE_STATE_COMPLETE)
+        {
+            continue;
+        }
+        let items = response
+            .items
+            .iter()
+            .filter(|item| {
+                !item.agent
+                    && !item.struck
+                    && !item
+                        .span
+                        .clone()
+                        .any(|line| node_at(line).is_some_and(|index| tree.nodes[index].closed))
+                    && !crate::self_repair::is_self_repair_cleanup_item(&item.raw)
+                    && !followups
+                        .iter()
+                        .any(|(key, _, _)| item.held_by_row_key(key))
+            })
+            .map(|item| item.raw.clone())
+            .collect::<Vec<_>>();
+        if !items.is_empty() {
+            buried.push(BuriedOperatorItems {
+                row: plain_text(&tree.nodes[parent].full_text),
+                items,
+            });
+        }
+    }
+    buried
 }
 
 /// `#answeredentry`: drop a State/Guidance pair this pass rendered once no

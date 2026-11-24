@@ -128,7 +128,7 @@ class FrontendSurfaceSnapshotService(
             gateTimeoutMs = FRONTEND_RELEASE_FETCH_NEGOTIATION_WAIT_MS,
             onGateTimeout = {
                 LOG.info(
-                    "[frontend-impl] no lease negotiated a snapshot schema within " +
+                    "[frontend-impl] no lease got a snapshot schema answer within " +
                         "${FRONTEND_RELEASE_FETCH_NEGOTIATION_WAIT_MS}ms; polling the backend release anyway",
                 )
             },
@@ -141,10 +141,10 @@ class FrontendSurfaceSnapshotService(
      * [FrontendReleaseRpcApi] and learns which generation the backend selected, never its bytes. A
      * Client whose shell is not the backend's logs both builds once and stops
      * there: it could only refuse the package. Otherwise the bytes are fetched once per new
-     * generation; [runFrontendReleasePoll] already held the first poll until this Client's schema
-     * negotiation returned (GH #441), so the transfer never races it. A backend that predates
-     * [FrontendReleaseRpcApi] (up to 0.2.1054) is asked for the package through the frozen API at
-     * most once per [FRONTEND_REFUSED_RELEASE_REFETCH_MS].
+     * generation; [runFrontendReleasePoll] already held the first poll until a lease's schema
+     * negotiation was answered (GH #441, at most 30 s), so the transfer never races it. A
+     * backend that predates [FrontendReleaseRpcApi] (up to 0.2.1054) is asked for the package
+     * through the frozen API at most once per [FRONTEND_REFUSED_RELEASE_REFETCH_MS].
      */
     private suspend fun pollFrontendImplementationReleaseOnce(poll: FrontendReleasePoll) {
         try {
@@ -240,10 +240,11 @@ class FrontendSurfaceSnapshotService(
     private suspend fun publishForLease(lease: SurfaceIngressLease) {
         // GH #435: the schema belongs to this lease, but an unanswered negotiation is provisional:
         // a refusal asks the backend again instead of pinning schema 1 for the lease's lifetime.
-        val negotiation = SnapshotSchemaNegotiation(::askBackendSnapshotSchema)
+        // GH #441: the first answer, from this ask or a re-ask after a refusal, opens the release
+        // poll. An unanswered ask keeps the multi-megabyte package off the link so the re-ask can
+        // get through.
+        val negotiation = SnapshotSchemaNegotiation(schemaNegotiationGate, ::askBackendSnapshotSchema)
         negotiation.negotiate()
-        // GH #441: only now may the release poll move the multi-megabyte package over the link.
-        schemaNegotiationGate.settle()
         LOG.info(negotiation.logLine())
         val outcomes = FrontendPublicationLog(lease.connectionGeneration)
         captures.collectLatest {
@@ -436,12 +437,18 @@ internal const val FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
 internal const val FRONTEND_RELEASE_FETCH_NEGOTIATION_WAIT_MS = 30_000L
 
 /**
- * GH #441: settles once the first lease's schema negotiation returned, answered or not.
+ * GH #441: settles once a lease's schema negotiation is answered, by its first ask or by a re-ask
+ * after a refusal. An unanswered ask does not settle it; the release poll's cap
+ * ([FRONTEND_RELEASE_FETCH_NEGOTIATION_WAIT_MS]) bounds the wait.
  *
  * On a cold start the release poll and the first lease started together, and the poll's
  * multi-megabyte package fetch occupied the Remote Dev link while the lease asked for the schema.
  * The backend answers that ask from a constant, yet the answer queued behind the package, the 5 s
  * negotiation went unanswered, and the first snapshot was a provisional schema 1.
+ *
+ * Review cycle 1: the gate used to settle after an unanswered ask too. When the first answer
+ * reached the Client after 5 s, the package then started, the re-ask after the refusal queued
+ * behind it, and the next schema 1 made the backend show the false reinstall notice.
  */
 internal class SchemaNegotiationGate {
     private val settled = CompletableDeferred<Unit>()
@@ -456,7 +463,8 @@ internal class SchemaNegotiationGate {
 
 /**
  * GH #441: the frontend release poll. Its first poll, which may fetch the whole package, waits for
- * [gate] (at most [gateTimeoutMs]), so the first lease's schema ask never queues behind it.
+ * [gate] (at most [gateTimeoutMs]), so a lease's schema ask, or its re-ask after a refusal, never
+ * queues behind it.
  */
 internal suspend fun runFrontendReleasePoll(
     gate: SchemaNegotiationGate,
@@ -607,7 +615,11 @@ internal fun negotiatedSnapshotSchema(backendOffered: Int?): Int =
  * every snapshot (`frontend_authority_absent_or_generation_mismatched`) until the Client
  * reconnected, and reported an "older Agent Doc frontend" the Client did not have.
  */
-internal class SnapshotSchemaNegotiation(private val ask: suspend () -> Int?) {
+internal class SnapshotSchemaNegotiation(
+    /** GH #441: settled by the first answer, so the release poll moves bytes only after one. */
+    private val answeredGate: SchemaNegotiationGate? = null,
+    private val ask: suspend () -> Int?,
+) {
     @Volatile
     var schema: Int = LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
         private set
@@ -619,7 +631,10 @@ internal class SnapshotSchemaNegotiation(private val ask: suspend () -> Int?) {
 
     /** Ask the backend; returns the schema to publish. */
     suspend fun negotiate(): Int {
-        ask()?.let { backendOffered = it }
+        ask()?.let {
+            backendOffered = it
+            answeredGate?.settle()
+        }
         schema = negotiatedSnapshotSchema(backendOffered)
         return schema
     }

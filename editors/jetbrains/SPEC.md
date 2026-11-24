@@ -1821,10 +1821,14 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   snapshot after a refusal is still schema 1, or when the schema-1 snapshot is accepted (no
   refusal asks again). A schema 1 from a frontend that names another plugin, or none (0.2.1052
   and earlier), is reported at once; the backend's `lease opened` line logs
-  `frontend_plugin=<version|unnamed>`. The 30 s frontend-release poll waits for the first lease's
-  schema negotiation (at most 30 s) before it polls, because on a cold start its multi-megabyte
-  package fetch held the Remote Dev link and the schema answer, though the backend returns it from
-  a constant, queued behind it past the 5 s window (GH #441). The backend validator accepts schemas 1 through 5.
+  `frontend_plugin=<version|unnamed>`. The 30 s frontend-release poll waits until a lease's
+  schema negotiation is answered (at most 30 s) before it polls, because on a cold start its
+  multi-megabyte package fetch held the Remote Dev link and the schema answer, though the backend
+  returns it from a constant, queued behind it past the 5 s window (GH #441). An unanswered ask
+  does not release the poll; the answer to the first ask or to a re-ask after a refusal does. If
+  the first answer reaches the Client after 5 s, the package therefore stays off the link and the
+  re-ask can still bring schema 5, so the next snapshot is not a schema 1 that the backend would
+  report. The backend validator accepts schemas 1 through 5.
 
   **Frozen shared RPC contract (GH #435).** The Client frontend is shell code only a Client
   plugin update replaces, so `SurfaceSnapshotRpcApi` is frozen at its shipped shape (0.2.1046's
@@ -1861,8 +1865,8 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   mismatch ...` (named build, with both plugin folders), which `agent-doc upgrade` on the backend
   turns into "the JetBrains Client plugin X is older than the backend Y: update the Client plugin"
   with the handoff's ZIP URL and the Client folder. The Client's 30 s poll asks
-  `frontendReleaseOffer` first, logs a shell mismatch once, waits for its first negotiation before
-  fetching bytes, and is woken as soon as that negotiation returns. Explicit retirement/release is the
+  `frontendReleaseOffer` first, logs a shell mismatch once, waits for a schema answer before
+  fetching bytes, and is woken as soon as a negotiation is answered (at most 30 s). Explicit retirement/release is the
   only transition that hands authority back to the backend fallback. Evidence: the client logs
   `[split-surface] snapshot schema negotiated version=<n> backend_offered=<n|none>
   geometry=measured|unavailable`; the backend logs `[rd-layout] forwarded measured columns

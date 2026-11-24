@@ -5361,6 +5361,56 @@ pub fn load_state_events_by_fact_types_for_document_from_db(
     Ok(events)
 }
 
+/// Facts whose reducer arms write only a projection plane the closeout
+/// readers never consult, and which carry the bulk of a document's payload
+/// bytes: `visible_write_*` observations write only
+/// `DocumentStateProjection::visible_write` (live `sdk-dev.md`: 282 rows /
+/// 110MB of full document images), and `document_authority_observed` writes
+/// only `DocumentProjection::latest_authority` (see
+/// [`load_state_events_for_cycle_projection_from_db`]).
+pub const CLOSEOUT_IRRELEVANT_HEAVY_FACT_TYPES: &[&str] = &[
+    "document_authority_observed",
+    "visible_write_commit_candidate_observed",
+    "visible_write_materialized_carry_forward_observed",
+];
+
+/// Load one document's events except the named fact types, in append order.
+///
+/// For a reader that projects closeout fields and cannot name the closed set
+/// of facts that write them, but can name heavy facts that provably do not.
+pub fn load_state_events_excluding_fact_types_for_document_from_db(
+    conn: &Connection,
+    document_hash: &str,
+    excluded_fact_types: &[&str],
+) -> Result<Vec<StateEventStatus>> {
+    let placeholders = (0..excluded_fact_types.len())
+        .map(|index| format!("?{}", index + 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let exclusion = if excluded_fact_types.is_empty() {
+        String::new()
+    } else {
+        format!(" AND fact_type NOT IN ({placeholders})")
+    };
+    let sql = format!(
+        "SELECT id, event_id, document_hash, document_version, domain, fact_type, payload_json, timestamp \
+         FROM state_events \
+         WHERE document_hash = ?1{exclusion} \
+         ORDER BY id"
+    );
+    let mut stmt = conn.prepare(&sql)?;
+    let mut values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(excluded_fact_types.len() + 1);
+    values.push(&document_hash);
+    for fact_type in excluded_fact_types {
+        values.push(fact_type);
+    }
+    let mut events = Vec::new();
+    for row in stmt.query_map(values.as_slice(), state_event_status_from_row)? {
+        events.push(row?);
+    }
+    Ok(events)
+}
+
 /// Load a bounded newest-first window of one durable fact type for a document.
 ///
 /// This is intentionally narrower than projection replay: history-aware
@@ -10564,6 +10614,23 @@ mod tests {
         assert!(
             load_state_events_by_fact_types_for_document_from_db(&conn, "doc-hash", &[])?
                 .is_empty()
+        );
+        let excluded = load_state_events_excluding_fact_types_for_document_from_db(
+            &conn,
+            "doc-hash",
+            CLOSEOUT_IRRELEVANT_HEAVY_FACT_TYPES,
+        )?;
+        assert_eq!(
+            excluded
+                .iter()
+                .map(|event| event.event_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["b1", "c1", "x2", "b2"]
+        );
+        assert_eq!(
+            load_state_events_excluding_fact_types_for_document_from_db(&conn, "doc-hash", &[])?
+                .len(),
+            5
         );
         Ok(())
     }

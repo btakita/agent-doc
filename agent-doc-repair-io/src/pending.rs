@@ -193,7 +193,15 @@ fn load_state_event_ledger(
 ) -> Result<agent_doc_state_backbone::EventLedger> {
     let conn = agent_doc_sqlite::state_store::open_state_db(project_root)?;
     let mut ledger = agent_doc_state_backbone::EventLedger::new();
-    for row in agent_doc_sqlite::state_store::load_state_events_from_db(&conn, Some(document_hash))?
+    // Dogfood key preflightlag (`#q-e9483473162d`): the only reader projects
+    // closeout's pending-response fields, so skip the heavy facts whose arms
+    // never write closeout (live `sdk-dev.md`: 110MB of the 137MB replayed).
+    for row in
+        agent_doc_sqlite::state_store::load_state_events_excluding_fact_types_for_document_from_db(
+            &conn,
+            document_hash,
+            agent_doc_sqlite::state_store::CLOSEOUT_IRRELEVANT_HEAVY_FACT_TYPES,
+        )?
     {
         let event: agent_doc_state_backbone::StateEvent = serde_json::from_str(&row.payload_json)
             .with_context(|| {

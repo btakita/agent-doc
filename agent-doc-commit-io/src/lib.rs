@@ -1020,11 +1020,42 @@ fn settle_in_progress_recap_for_commit(
     settle_in_progress_recap_for_commit_with(
         &COMMIT_PRE_STAGE_REPAIR_EFFECTS,
         &agent_doc_document_realtime_io::RUNTIME_WRITE_CONVERGENCE_EFFECTS,
-        agent_doc_write_converge_io::retained_cli_write::configured_retained_cli_write_wait(),
+        recap_settle_retained_wait(
+            agent_doc_write_converge_io::retained_cli_write::configured_retained_cli_write_wait(),
+            agent_doc_debounce::admission_deadline::remaining(),
+        ),
         file,
         snapshot_content,
         file_content,
     )
+}
+
+/// The longest a preflight admission waits for a retained recap-settle write
+/// to converge before handing the commit on.
+///
+/// Dogfood key preflightlag (`#q-e9483473162d`): preflight's
+/// `commit_previous_cycle` waited on the CLI bound (30s) for the editor to
+/// deliver the recap-settle write. The write is already durable once retained;
+/// waiting only decides whether this preflight or the next commit owner (the
+/// turn's closeout, or the next preflight) seals the previous cycle. On live
+/// `sdk-dev.md` the wait ran 4s and still ended `deferred` while the operator
+/// typed. Inside an admission the wait is therefore one short slice.
+pub const PREFLIGHT_RECAP_SETTLE_RETAINED_WAIT: std::time::Duration =
+    std::time::Duration::from_secs(1);
+
+/// The retained-write wait for the recap-settle write: `configured` outside a
+/// preflight admission, else at most [`PREFLIGHT_RECAP_SETTLE_RETAINED_WAIT`]
+/// and never past the admission deadline (`admission_remaining`).
+fn recap_settle_retained_wait(
+    configured: std::time::Duration,
+    admission_remaining: Option<std::time::Duration>,
+) -> std::time::Duration {
+    match admission_remaining {
+        None => configured,
+        Some(left) => configured
+            .min(PREFLIGHT_RECAP_SETTLE_RETAINED_WAIT)
+            .min(left),
+    }
 }
 
 /// The source label a retained recap-settle write reports.
@@ -5387,6 +5418,27 @@ mod retained_recap_settle_tests {
     /// replica converged, and the closeout exited 1 with `failed to drop the
     /// previous turn recap before commit`. A converged retention continues the
     /// commit with the settled recap.
+    #[test]
+    fn preflight_admission_bounds_the_recap_settle_wait_to_one_short_slice() {
+        let configured = std::time::Duration::from_secs(30);
+        assert_eq!(recap_settle_retained_wait(configured, None), configured);
+        assert_eq!(
+            recap_settle_retained_wait(configured, Some(std::time::Duration::from_secs(60))),
+            PREFLIGHT_RECAP_SETTLE_RETAINED_WAIT
+        );
+        assert_eq!(
+            recap_settle_retained_wait(configured, Some(std::time::Duration::from_millis(200))),
+            std::time::Duration::from_millis(200)
+        );
+        assert_eq!(
+            recap_settle_retained_wait(
+                std::time::Duration::from_millis(100),
+                Some(std::time::Duration::from_secs(60))
+            ),
+            std::time::Duration::from_millis(100)
+        );
+    }
+
     #[test]
     fn a_retained_recap_settle_that_converges_continues_the_commit() {
         let (_dir, file) = doc_path();

@@ -271,7 +271,7 @@ pub fn queue_prompt_preset_expansions_from<'a>(
     presets: impl Iterator<Item = (&'a String, &'a String)> + Clone,
 ) -> Vec<(String, String)> {
     let text = strip_priority_markers(text);
-    let text = crate::queue_continuation::mask_inline_code(&text);
+    let text = crate::queue_continuation::mask_directive_scan(&text);
     let referenced = text
         .split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
         .filter(|token| token.starts_with('#'));
@@ -3154,6 +3154,7 @@ mod tests {
             reply_ids: Vec::new(),
             comment_commit: None,
             thread_named: false,
+            review_state: None,
         };
         AddressObservation::Seen {
             baseline: Some(snap("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),

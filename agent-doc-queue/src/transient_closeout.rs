@@ -190,7 +190,7 @@ impl DispatchHold {
     fn remedy(&self) -> &'static str {
         match self.blocker.as_str() {
             "claim_projection_unrepresentable" => {
-                "the claim marker could not be shown on the row, usually because the same row appears more than once in the document; remove the extra copy so one row carries this item"
+                "the claim marker could not be shown on the row, usually because the same row appears more than once in the document; collapse the extra copy with `agent-doc queue prune-duplicates <FILE>` (a dry run that names each copy it drops), then the same command with `--apply`, so one row carries this item. Never ask the operator to delete the copy"
             }
             _ => "fix what the blocker names",
         }
@@ -3248,7 +3248,11 @@ EXCHANGE<!-- /agent:exchange -->
             rendered.contains("blocker `claim_projection_unrepresentable`"),
             "{rendered}"
         );
-        assert!(rendered.contains("remove the extra copy"), "{rendered}");
+        assert!(
+            rendered.contains("`agent-doc queue prune-duplicates <FILE>`"),
+            "an agent command collapses the copy (#noopaddress): {rendered}"
+        );
+        assert!(!rendered.contains("remove the extra copy"), "{rendered}");
         assert!(
             rendered.contains(
                 "`agent-doc queue claim /tmp/sdk-dev.md --item '#pushreadmechanges' --owner 'subagent:<label>'`"

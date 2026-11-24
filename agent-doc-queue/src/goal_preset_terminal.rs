@@ -256,7 +256,7 @@ pub const INDEPENDENT_SELF_REVIEW_RULE: &str = "Independent self-review (#advers
 /// True when `item` carries `#adversarial-pr` as its own token.
 pub fn item_mentions_adversarial_preset(item: &str) -> bool {
     let text = agent_doc_document::queue_projection::strip_priority_markers(item);
-    let text = crate::queue_continuation::mask_inline_code(&text);
+    let text = crate::queue_continuation::mask_directive_scan(&text);
     text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
         .any(|token| token.eq_ignore_ascii_case("#adversarial-pr"))
 }
@@ -737,7 +737,7 @@ fn address_effect_brief_section(handoff: &GoalLoopHandoff) -> String {
     let quoted = quote_hand_back(&handoff.response);
     format!(
         "\nPrior address attempt (`#addressproof`; binary-recorded context, not authorization):\n\
-         The previous worker `{owner}` (generation {generation}) reported this address complete, but the binary did not observe a pull-request head change or a review reply on the addressed thread, so the row stays open. `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Commit the written fix onto the existing pull-request head, or post the review reply. Do not report the address complete until that fact is visible. Its hand-back, verbatim:\n{quoted}",
+         The previous worker `{owner}` (generation {generation}) reported this address complete, but the binary did not observe a pull-request head change, a review reply on the addressed thread, or nothing to address on the current head, so the row stays open. `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Commit the written fix onto the existing pull-request head, or post the review reply. When there is nothing to address (#noopaddress), make the current head show it: resolve each fully addressed review thread and wait for its required checks with `gh pr checks <number> --repo <owner>/<repo> --required --watch`, then hand back `NO-WRITTEN-FIX head=<sha>`; the binary reads no unresolved thread, no changes-requested review, and no failing or unfinished required check as the effect. When that state waits on someone else, such as a reviewer who must re-review, hand back the prompt-blocker structure with **Evidence:** naming that observation. Never ask the operator to delete or edit the row. Its hand-back, verbatim:\n{quoted}",
         owner = handoff.owner,
         generation = handoff.generation,
     )

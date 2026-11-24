@@ -1892,6 +1892,7 @@ dependencies = [
  "agent-doc-markdown-ast",
  "agent-doc-prompt-context",
  "agent-doc-prompt-lines",
+ "agent-doc-queue-icons",
  "agent-doc-state-scope",
  "anyhow",
  "lazily 0.63.0",

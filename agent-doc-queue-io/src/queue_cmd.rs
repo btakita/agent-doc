@@ -203,6 +203,12 @@ pub trait QueueCommandEffects {
         if matches!(response, crate::queue_consume::AckTextResponse::Summary(_)) {
             anyhow::bail!("this queue command effect does not support --ack-text --summary");
         }
+        if matches!(
+            response,
+            crate::queue_consume::AckTextResponse::Failed { .. }
+        ) {
+            anyhow::bail!("this queue command effect does not support queue fail");
+        }
         self.acknowledge_paused_free_text_queue_head_with_selector(
             file,
             expected_head,
@@ -2340,6 +2346,58 @@ pub fn acknowledge_paused_free_text(
         None => println!(
             "{}: no exact free-text queue head to acknowledge.",
             file.display()
+        ),
+    }
+    Ok(())
+}
+
+/// `agent-doc queue fail <FILE> --item <ROW> --reason <TEXT> [--attempted <TEXT>]...`
+/// (`#queuefail`).
+///
+/// The last-resort terminal state, after the agent tried to resolve the row
+/// and could not. The row is struck with the failure glyph (`~~❌ …~~`) and a
+/// Response that names the reason and each attempted resolution. A struck row
+/// is never drained, dispatched, requeued, or owed at closeout or Stop, and it
+/// needs no operator action. The operator runs it again by removing the strike
+/// and the ❌.
+pub fn fail_row(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    item: &str,
+    reason: &str,
+    attempted: &[String],
+) -> Result<()> {
+    anyhow::ensure!(
+        !reason.trim().is_empty(),
+        "queue fail needs --reason: why the agent could not resolve the row (#queuefail)"
+    );
+    anyhow::ensure!(
+        attempted.iter().any(|attempt| !attempt.trim().is_empty()),
+        "queue fail needs at least one --attempted resolution: a failed row is a last resort \
+         after the agent tried to resolve it (#queuefail)"
+    );
+    let queue_edit_guard = crate::queue_edit_owner::QueueEditGuard::acquire(file)?;
+    let response = crate::queue_consume::AckTextResponse::Failed {
+        reason: reason.trim(),
+        attempted,
+    };
+    match effects.acknowledge_paused_free_text_queue_head_with_response(
+        file,
+        item,
+        None,
+        response,
+        &queue_edit_guard,
+    )? {
+        Some(outcome) => println!(
+            "{}: failed queue row {:?} as terminal ❌ (remaining: {}) (#queuefail).",
+            file.display(),
+            outcome.consumed_text,
+            outcome.remaining
+        ),
+        None => anyhow::bail!(
+            "{}: no exact queue row {:?} to fail; no change was applied (#queuefail).",
+            file.display(),
+            item
         ),
     }
     Ok(())

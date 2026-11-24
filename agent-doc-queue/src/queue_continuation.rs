@@ -2412,6 +2412,55 @@ fn multiline_head_has_prose_lead(text: &str) -> bool {
         })
 }
 
+/// `#directivequote`: [`mask_inline_code`] plus quoted spans, for preset and
+/// directive detection (`#address`, `#adversarial-pr`, `#rebase`, ...).
+///
+/// A directive is a token the row itself carries. A token inside a quote
+/// describes another row: the dogfood row `fix: the Claude Stop
+/// #transientcloseout gate refused … The debt was '2. 📥 #address' …`
+/// (2026-11-23) was read as an address run and requeued with
+/// `#reviewfixonhead`. Quoted spans are masked on one line only: `"…"`,
+/// `“…”`, `‘…’`, and `'…'` whose opening quote follows a non-word character
+/// and whose closing quote precedes one, so an apostrophe (`doesn't`) never
+/// opens a span.
+pub(crate) fn mask_directive_scan(text: &str) -> String {
+    let code_masked = mask_inline_code(text);
+    let chars: Vec<char> = code_masked.chars().collect();
+    let word = |ch: Option<&char>| ch.is_some_and(|ch| ch.is_alphanumeric());
+    let mut out: Vec<char> = chars.clone();
+    let mut i = 0;
+    while i < chars.len() {
+        let close = match chars[i] {
+            '"' => Some('"'),
+            '\u{201c}' => Some('\u{201d}'),
+            '\u{2018}' => Some('\u{2019}'),
+            '\'' if !word(i.checked_sub(1).and_then(|at| chars.get(at))) => Some('\''),
+            _ => None,
+        };
+        let Some(close) = close else {
+            i += 1;
+            continue;
+        };
+        let end = (i + 1..chars.len())
+            .take_while(|&j| chars[j] != '\n')
+            .find(|&j| {
+                chars[j] == close
+                    && (close != '\''
+                        || (!word(chars.get(j + 1)) && !chars[j - 1].is_whitespace() && j > i + 1))
+            });
+        match end {
+            Some(end) => {
+                for slot in &mut out[i..=end] {
+                    *slot = ' ';
+                }
+                i = end + 1;
+            }
+            None => i += 1,
+        }
+    }
+    out.into_iter().collect()
+}
+
 /// Replace inline-code span contents with spaces so a QUOTED id or preset
 /// cannot be mistaken for an active directive (`#ftquotedid`, GH #331).
 ///

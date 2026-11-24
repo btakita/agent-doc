@@ -63,6 +63,16 @@ pub const TREE_KEEP_LEGEND_ENTRY: &str = "🔒 keep (cut at 🗑\u{fe0f})";
 pub const TREE_DELETE_MEANING: &str = "On the top-most row of a subtree that is safe to delete whole: every row in it is struck and none holds work (no open response, Todo, or waiting packet). Delete that row and everything indented under it. In a struck row it sits just inside the strike (`~~🗑️ …~~`). Re-derived every sync; never part of the row's work text.";
 pub const TREE_KEEP_MEANING: &str = "On a top-level row whose tree still holds work but already has a 🗑️ subtree under it: keep this row and cut only at the 🗑️ rows. It follows the row's lifecycle marker (`🙋 🔒 …`), or sits just inside the strike of a struck row. Not the `📌` priority pin. Re-derived every sync; never part of the row's work text.";
 
+/// `#queuefail`: the last-resort terminal state. `agent-doc queue fail`
+/// strikes a row it could not resolve and writes this glyph just inside the
+/// strike (`~~❌ …~~`), with a Response naming the reason and the resolutions
+/// it tried. A struck row is never drained, dispatched, requeued, or owed at
+/// closeout; the glyph keeps it distinct from `✅` completion.
+pub const FAILED_ROW_GLYPH: &str = "❌";
+/// Legend entry for [`FAILED_ROW_GLYPH`].
+pub const FAILED_ROW_LEGEND_ENTRY: &str = "❌ failed (terminal)";
+pub const FAILED_ROW_MEANING: &str = "Last resort after the agent tried to resolve the row and could not (`agent-doc queue fail`). It sits just inside the strike (`~~❌ …~~`) and the row's Response names the reason and each resolution it tried. Terminal: never re-dispatched or requeued, and nothing is owed on it at closeout or Stop. Not `✅` completion. It needs no operator action; to run it again, remove the strike and the ❌.";
+
 /// Every visible prefix the binary paints on (or accepts from) a queue row.
 ///
 /// Lifecycle markers are mutually exclusive: a row shows exactly one. The
@@ -228,10 +238,14 @@ pub struct QueueMarkerAnnotation {
 
 /// Annotations and legacy spellings that appear on queue rows. Like the
 /// prefixes, every one is stripped before queue work identity is computed.
-pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 14] = [
+pub const QUEUE_MARKER_ANNOTATIONS: [QueueMarkerAnnotation; 15] = [
     QueueMarkerAnnotation {
         token: QUEUE_TERMINAL_TOKEN,
         meaning: QUEUE_TERMINAL_MEANING,
+    },
+    QueueMarkerAnnotation {
+        token: FAILED_ROW_GLYPH,
+        meaning: FAILED_ROW_MEANING,
     },
     QueueMarkerAnnotation {
         token: TREE_DELETE_GLYPH,
@@ -297,6 +311,7 @@ pub fn queue_marker_legend_line_for(icons: &QueueIconSet) -> String {
     entries.push(QUEUE_REPLY_LEGEND_ENTRY.to_string());
     entries.push(TREE_DELETE_LEGEND_ENTRY.to_string());
     entries.push(TREE_KEEP_LEGEND_ENTRY.to_string());
+    entries.push(FAILED_ROW_LEGEND_ENTRY.to_string());
     entries.push(QUEUE_TERMINAL_LEGEND_ENTRY.to_string());
     let entries = entries.join(" · ");
     format!("{QUEUE_MARKER_LEGEND_LINE_PREFIX} {entries} ([legend]({QUEUE_MARKER_LEGEND_URL}))")
@@ -385,6 +400,18 @@ pub fn queue_marker_legend_markdown_table() -> String {
 mod tests {
     use super::*;
     use crate::ALL_LIFECYCLE_STATES;
+
+    /// `#queuefail`: the terminal ❌ state is in every rendered legend.
+    #[test]
+    fn the_failed_terminal_state_is_in_every_legend() {
+        let line = queue_marker_legend_line_for(&QueueIconSet::default());
+        assert!(line.contains(FAILED_ROW_LEGEND_ENTRY), "{line}");
+        let help = queue_marker_legend_help();
+        assert!(help.contains(FAILED_ROW_MEANING), "{help}");
+        assert!(help.contains("agent-doc queue fail"), "{help}");
+        let table = queue_marker_legend_markdown_table();
+        assert!(table.contains("| `❌` |"), "{table}");
+    }
 
     /// Destructures every palette field without `..`: adding a
     /// `[queue_icons]` field fails to compile here until it is given a

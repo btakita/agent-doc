@@ -5,6 +5,11 @@
 //! Completion reads an observation of the pull request. A worker hand-back is
 //! never that observation. An independent validator's observation counts only
 //! when the remote itself could not be read.
+//!
+//! "Nothing to address" is an observation too (`#noopaddress`): the current
+//! head has no unresolved review thread, no changes-requested review, and no
+//! failing or unfinished required check. That read proves a no-op address, so
+//! a no-op hand-back settles without an operator deleting its row.
 
 use std::cell::RefCell;
 use std::collections::BTreeMap;
@@ -55,6 +60,36 @@ pub struct AddressSnapshot {
     /// `true` when the queue item named one discussion or review thread.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub thread_named: bool,
+    /// The pull request's review state on `head_sha`, when the remote reported
+    /// all of it (`#noopaddress`). `None` when it could not be read whole.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Boxed so an observation stays small (`clippy::large_enum_variant`).
+    pub review_state: Option<Box<AddressReviewState>>,
+}
+
+/// What still asks for work on one pull-request head (`#noopaddress`).
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AddressReviewState {
+    /// Review threads that are not resolved.
+    pub unresolved_threads: u64,
+    /// A reviewer's latest opinionated review requests changes.
+    pub changes_requested: bool,
+    /// Required checks on the head that concluded in failure.
+    pub failing_required_checks: u64,
+    /// Required checks on the head that have not finished.
+    pub pending_required_checks: u64,
+}
+
+impl AddressReviewState {
+    /// Nothing on this head asks for an address: no unresolved thread, no
+    /// changes-requested review, and every required check finished without
+    /// failing.
+    pub fn nothing_to_address(&self) -> bool {
+        self.unresolved_threads == 0
+            && !self.changes_requested
+            && self.failing_required_checks == 0
+            && self.pending_required_checks == 0
+    }
 }
 
 /// What the binary could read about an address target.
@@ -79,6 +114,10 @@ pub enum AddressProof {
     HeadChanged { from: String, to: String },
     /// A review reply was posted on the addressed thread.
     ReviewReply { reply_id: u64 },
+    /// The current head has nothing to address (`#noopaddress`): no
+    /// unresolved review thread, no changes-requested review, and no failing
+    /// or unfinished required check.
+    NothingToAddress { head: String },
 }
 
 /// Whether an `#address` run may complete.
@@ -271,9 +310,7 @@ fn judge_seen(baseline: Option<&AddressSnapshot>, current: &AddressSnapshot) -> 
         if let Some(reply_id) = new_reply(&baseline.reply_ids, &current.reply_ids) {
             return AddressCompletion::Proven(AddressProof::ReviewReply { reply_id });
         }
-        return AddressCompletion::NoEffect {
-            head: current.head_sha.clone(),
-        };
+        return nothing_to_address(current);
     }
     if current.thread_named
         && let Some(reply_id) = current.reply_ids.iter().copied().min()
@@ -287,6 +324,24 @@ fn judge_seen(baseline: Option<&AddressSnapshot>, current: &AddressSnapshot) -> 
         return AddressCompletion::Proven(AddressProof::HeadChanged {
             from: comment.to_string(),
             to: current.head_sha.clone(),
+        });
+    }
+    nothing_to_address(current)
+}
+
+/// `#noopaddress`: an unchanged head with no new reply completes only when the
+/// same read shows nothing left to address on that head. The proof is the
+/// remote state, not causation, so it needs no before observation.
+fn nothing_to_address(current: &AddressSnapshot) -> AddressCompletion {
+    let head = current.head_sha.trim();
+    if !head.is_empty()
+        && current
+            .review_state
+            .as_deref()
+            .is_some_and(AddressReviewState::nothing_to_address)
+    {
+        return AddressCompletion::Proven(AddressProof::NothingToAddress {
+            head: head.to_string(),
         });
     }
     AddressCompletion::NoEffect {
@@ -404,7 +459,12 @@ mod tests {
             reply_ids: replies.to_vec(),
             comment_commit: comment.map(str::to_string),
             thread_named: true,
+            review_state: None,
         }
+    }
+
+    fn clean() -> AddressReviewState {
+        AddressReviewState::default()
     }
 
     fn seen(baseline: Option<AddressSnapshot>, current: AddressSnapshot) -> AddressObservation {
@@ -549,5 +609,80 @@ mod tests {
             judge_address_completion(&moved, None),
             AddressCompletion::Proven(AddressProof::HeadChanged { .. })
         ));
+    }
+
+    /// `#noopaddress`: a no-op address on a head with nothing to address is a
+    /// provable agent outcome. sdk-dev `#address` under PR #389 (2026-11-23)
+    /// requeued forever because its no-op hand-back had no head change and no
+    /// review reply, and the agent told the operator to delete the row.
+    #[test]
+    fn a_clean_head_proves_nothing_to_address() {
+        let mut current = snap(HEAD, &[], Some(HEAD));
+        current.review_state = Some(Box::new(clean()));
+        for baseline in [Some(snap(HEAD, &[], Some(HEAD))), None] {
+            let observation = seen(baseline, current.clone());
+            assert_eq!(
+                judge_address_completion(&observation, None),
+                AddressCompletion::Proven(AddressProof::NothingToAddress {
+                    head: HEAD.to_string()
+                })
+            );
+            let _guard = AddressEffectGuard::install_item(ITEM, observation);
+            assert!(!address_effect_unproven(ITEM));
+        }
+        let mut whole_pr = current.clone();
+        whole_pr.thread_named = false;
+        assert!(matches!(
+            judge_address_completion(&seen(None, whole_pr), None),
+            AddressCompletion::Proven(AddressProof::NothingToAddress { .. })
+        ));
+    }
+
+    #[test]
+    fn remaining_review_work_keeps_a_no_op_address_open() {
+        let dirty = [
+            AddressReviewState {
+                unresolved_threads: 1,
+                ..clean()
+            },
+            AddressReviewState {
+                changes_requested: true,
+                ..clean()
+            },
+            AddressReviewState {
+                failing_required_checks: 1,
+                ..clean()
+            },
+            AddressReviewState {
+                pending_required_checks: 1,
+                ..clean()
+            },
+        ];
+        for state in dirty {
+            let mut current = snap(HEAD, &[], Some(HEAD));
+            current.review_state = Some(Box::new(state.clone()));
+            let observation = seen(Some(snap(HEAD, &[], Some(HEAD))), current);
+            assert_eq!(
+                judge_address_completion(&observation, None),
+                AddressCompletion::NoEffect {
+                    head: HEAD.to_string()
+                },
+                "{state:?} still asks for work"
+            );
+        }
+        let unread = seen(Some(snap(HEAD, &[], None)), snap(HEAD, &[], None));
+        assert!(matches!(
+            judge_address_completion(&unread, None),
+            AddressCompletion::NoEffect { .. }
+        ));
+    }
+
+    #[test]
+    fn a_snapshot_without_review_state_keeps_its_stored_shape() {
+        let json = serde_json::to_string(&snap(HEAD, &[], None)).unwrap();
+        assert!(!json.contains("review_state"), "{json}");
+        let old: AddressSnapshot =
+            serde_json::from_str(&format!("{{\"head_sha\":\"{HEAD}\",\"reply_ids\":[]}}")).unwrap();
+        assert_eq!(old.review_state, None);
     }
 }

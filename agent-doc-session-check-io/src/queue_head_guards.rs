@@ -196,8 +196,8 @@ pub fn check_reaped_queue_head_without_response(
 /// than the committed document holds them
 /// ([`agent_doc_queue::duplicate_head_report`]). A retained rebase repeated
 /// whole PR heads of a tracking queue with children that later diverged; no
-/// writer provenance survives per row, so the operator deletes each copy in
-/// the editor. ops.log records `queue_duplicate_head_suspected` with each
+/// writer provenance survives per row, so the warning names the agent repair
+/// (`agent-doc queue prune-duplicates`), never an operator edit. ops.log records `queue_duplicate_head_suspected` with each
 /// copy's line and its first occurrence's line.
 pub fn check_duplicate_queue_heads_guard(file: &Path, rc: &CycleContext) -> Result<GuardResult> {
     const SHOWN: usize = 12;
@@ -225,8 +225,9 @@ pub fn check_duplicate_queue_heads_guard(file: &Path, rc: &CycleContext) -> Resu
         ),
     );
     let mut lines = vec![format!(
-        "{} top-level queue row(s) in {} repeat more often than the committed document holds them; they may be copies agent-doc wrote. Delete each copy in the editor once you have moved anything it alone holds:",
+        "{} top-level queue row(s) in {} repeat more often than the committed document holds them; they may be copies agent-doc wrote. Run `agent-doc queue prune-duplicates {}` to see which copies it collapses (it keeps the copy with the live claim or children), then the same command with `--apply`. Never ask the operator to delete a copy:",
         suspected.len(),
+        file.display(),
         file.display(),
     )];
     lines.extend(suspected.iter().take(SHOWN).map(|head| {

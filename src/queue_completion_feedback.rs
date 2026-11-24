@@ -3035,6 +3035,111 @@ mod tests {
         );
     }
 
+    /// `#noopaddress`: sdk-dev `#address` under haiven-sdk PR #389
+    /// (2026-11-23) had nothing to address. Its `NO-WRITTEN-FIX` hand-back
+    /// requeued every generation, and the coordinator told the operator to
+    /// delete the row. A remote read showing the head has no unresolved
+    /// thread, no changes-requested review, and no failing or unfinished
+    /// required check is the address effect, so the no-op hand-back settles.
+    #[test]
+    fn no_written_fix_on_a_head_with_nothing_to_address_completes() {
+        use agent_doc_queue::address_completion_proof::{
+            AddressObservation, AddressReviewState, AddressSnapshot, ForcedObservation,
+        };
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("prs.md");
+        const ROW: &str = "https://github.com/sample-org/sample-repo/pull/389: #address";
+        const HEAD: &str = "a1379d91362c2defe0e45870af5a279320b058c8";
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:s389address", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:s389address",
+            "worker:s389address",
+            600,
+            1,
+        )
+        .unwrap();
+        let hand_back = format!(
+            "PR #389 has nothing to address: no unresolved thread, no changes requested, required checks green.\n\
+             NO-WRITTEN-FIX head={HEAD}\n\
+             INLINE-THREADS-LOADED 0 head={HEAD}\n"
+        );
+        let snapshot = |review_state: Option<AddressReviewState>| AddressSnapshot {
+            head_sha: HEAD.to_string(),
+            reply_ids: Vec::new(),
+            comment_commit: None,
+            thread_named: false,
+            review_state: review_state.map(Box::new),
+        };
+        {
+            let _unresolved = ForcedObservation::install(AddressObservation::Seen {
+                baseline: Some(snapshot(None)),
+                current: snapshot(Some(AddressReviewState {
+                    unresolved_threads: 1,
+                    ..AddressReviewState::default()
+                })),
+            });
+            let requeued = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &hand_back)
+                .unwrap()
+                .expect("an unresolved thread still asks for work");
+            assert!(requeued.address_effect_unproven);
+        }
+        let (_, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:s389address2", 600)
+                .unwrap();
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:s389address2")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            ROW,
+            "subagent:s389address2",
+            "worker:s389address2",
+            600,
+            generation,
+        )
+        .unwrap();
+        let _clean = ForcedObservation::install(AddressObservation::Seen {
+            baseline: Some(snapshot(None)),
+            current: snapshot(Some(AddressReviewState::default())),
+        });
+        assert!(
+            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &hand_back)
+                .unwrap()
+                .is_none(),
+            "a head with nothing to address settles the no-op address hand-back"
+        );
+    }
+
     fn proved_address_observation() -> agent_doc_queue::address_completion_proof::ForcedObservation
     {
         use agent_doc_queue::address_completion_proof::{
@@ -3045,6 +3150,7 @@ mod tests {
             reply_ids: Vec::new(),
             comment_commit: None,
             thread_named: false,
+            review_state: None,
         };
         ForcedObservation::install(AddressObservation::Seen {
             baseline: Some(snap("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")),
@@ -3062,6 +3168,7 @@ mod tests {
             reply_ids: replies,
             comment_commit: Some(head.to_string()),
             thread_named: true,
+            review_state: None,
         };
         ForcedObservation::install(AddressObservation::Seen {
             baseline: Some(snap(Vec::new())),

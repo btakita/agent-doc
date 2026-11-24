@@ -7289,6 +7289,137 @@ pub fn attach_ack_summary_response(
     })
 }
 
+/// `#queuefail`: State of the Response a failed row carries. It is not
+/// [`RESPONSE_STATE_COMPLETE`], so tree guidance sync never rewrites the row's
+/// failure guidance into `✅ Done.`.
+pub const RESPONSE_STATE_FAILED: &str = "❌ Failed (terminal).";
+
+/// `#queuefail`: Guidance of a failed row's Response.
+pub const FAILED_ROW_GUIDANCE: &str = "❌ Terminal: agent-doc could not resolve this row and stopped retrying it. It is never re-dispatched and needs no action. To run it again, remove the strike and the ❌.";
+
+/// `#queuefail`: the last-resort terminal state. Every row newly struck
+/// between `before` and `after` gets the failure glyph just inside its strike
+/// (`~~❌ …~~`) and a Response that records why the agent stopped and what it
+/// tried:
+///
+/// ```text
+/// - ~~❌ #address~~
+///   - **Response [#r-…]**
+///     - **Timestamp:** 2026-11-24T00:10:40.000Z
+///     - **Summary:** <reason>
+///     - **Notes:** Attempted: <resolution>; <resolution>
+///     - **State:** ❌ Failed (terminal).
+///     - **Guidance:** ❌ Terminal: … remove the strike and the ❌.
+/// ```
+///
+/// A struck row is terminal for drain, dispatch, the pool, closeout and the
+/// Stop gate. The glyph keeps it distinct from `✅` completion and keeps its
+/// text distinct from the original work, so a later identical row is never
+/// treated as a duplicate of finished work.
+pub fn mark_failed_rows(
+    before: &str,
+    after: &str,
+    reason: &str,
+    attempted: &[String],
+    addressed_at: &str,
+) -> anyhow::Result<String> {
+    let reason = reason.split_whitespace().collect::<Vec<_>>().join(" ");
+    anyhow::ensure!(
+        !reason.is_empty(),
+        "a failed row needs a reason (#queuefail)"
+    );
+    let struck_before = agent_doc_markdown_ast::mutations::item_nodes_all(before, "queue")
+        .map(|nodes| {
+            nodes
+                .into_iter()
+                .filter(|node| node.item.struck)
+                .map(|node| node.node_key)
+                .collect::<HashSet<_>>()
+        })
+        .unwrap_or_default();
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes_all(after, "queue")
+        .map_err(|error| anyhow::anyhow!("parse queue rows for #queuefail: {error:?}"))?;
+    let mut newly = nodes
+        .iter()
+        .filter(|node| node.item.struck && !struck_before.contains(&node.node_key))
+        .collect::<Vec<_>>();
+    anyhow::ensure!(
+        !newly.is_empty(),
+        "no row was struck, so there is no row to mark failed (#queuefail)"
+    );
+    // Later rows first, so each edit leaves the earlier offsets valid.
+    newly.sort_by_key(|node| std::cmp::Reverse(node.item.start_byte));
+    let attempted = attempted
+        .iter()
+        .map(|item| item.split_whitespace().collect::<Vec<_>>().join(" "))
+        .filter(|item| !item.is_empty())
+        .collect::<Vec<_>>();
+    let addressed_at = if addressed_at.trim().is_empty() {
+        FALLBACK_RESPONSE_TIMESTAMP
+    } else {
+        addressed_at.trim()
+    };
+    let lineages = QueueRowLineages::new(after);
+    let mut out = after.to_string();
+    for node in newly {
+        let raw = after
+            .get(node.item.start_byte..node.item.end_byte)
+            .unwrap_or("");
+        let indent = raw.len() - raw.trim_start_matches([' ', '\t']).len();
+        let scope_end = descendant_region_end(after, node.item.end_byte, indent);
+        let scope = response_scope(RowRef {
+            text: &node.item.text,
+            start: node.item.start_byte,
+            lineages: &lineages,
+            document: after,
+        });
+        let hash = agent_doc_hash::content_hash(&format!("failed-row\n{scope}\n{reason}"));
+        let response_id = format!("[#r-{}]", &hash[..12]);
+        if !after
+            .get(node.item.end_byte..scope_end)
+            .unwrap_or("")
+            .contains(&response_id)
+            && let Some(marker) =
+                agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(&response_id)
+        {
+            let mut child = format!("{marker}\n- **Timestamp:** {addressed_at}\n");
+            push_prose_row(&mut child, "", "**Summary:**", &reason);
+            if !attempted.is_empty() {
+                push_prose_row(
+                    &mut child,
+                    "",
+                    "**Notes:**",
+                    &format!("Attempted: {}", attempted.join("; ")),
+                );
+            }
+            child.push_str("- **State:** ");
+            child.push_str(RESPONSE_STATE_FAILED);
+            child.push_str("\n- **Guidance:** ");
+            child.push_str(FAILED_ROW_GUIDANCE);
+            let column = row_child_column(after, node.item.start_byte, node.item.end_byte);
+            let rendered = render_response_lookup_child(&child, &" ".repeat(column));
+            let insert_at = response_child_insert_at(after, node.item.end_byte, scope_end);
+            let mut block = String::new();
+            if !out
+                .get(..insert_at)
+                .is_some_and(|prefix| prefix.ends_with('\n'))
+            {
+                block.push('\n');
+            }
+            block.push_str(&rendered);
+            out.insert_str(insert_at, &block);
+        }
+        if let Some(open) = raw.find("~~") {
+            let struck = &raw[open + 2..];
+            let glyph = agent_doc_queue_icons::FAILED_ROW_GLYPH;
+            if !struck.trim_start().starts_with(glyph) {
+                out.insert_str(node.item.start_byte + open + 2, &format!("{glyph} "));
+            }
+        }
+    }
+    Ok(out)
+}
+
 /// Attach a response child to each newly struck row whose stop explanation is
 /// already in `after` or in a row-specific completion cell (`#stoppedstruckqueue`).
 ///

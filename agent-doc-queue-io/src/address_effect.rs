@@ -12,9 +12,9 @@ use std::time::{Duration, Instant};
 use std::{error::Error, fmt};
 
 use agent_doc_queue::address_completion_proof::{
-    AddressCompletion, AddressEffectFacts, AddressEffectGuard, AddressObservation, AddressSnapshot,
-    AddressTarget, address_prompt_revision, address_review_target, forced_observation,
-    judge_address_completion,
+    AddressCompletion, AddressEffectFacts, AddressEffectGuard, AddressObservation,
+    AddressReviewState, AddressSnapshot, AddressTarget, address_prompt_revision,
+    address_review_target, forced_observation, judge_address_completion,
 };
 use agent_doc_queue::queue_claim::QueueClaim;
 use agent_doc_sqlite::state_store;
@@ -728,12 +728,140 @@ fn fetch_snapshot(target: &AddressTarget) -> Option<AddressSnapshot> {
             .find(|comment| comment.id == id)
             .and_then(|comment| comment.commit_id.clone())
     });
+    let review_state = fetch_review_state(target, &head.head_ref_oid).map(Box::new);
     Some(AddressSnapshot {
         head_sha: head.head_ref_oid,
         reply_ids,
         comment_commit,
         thread_named: target.thread_named(),
+        review_state,
     })
+}
+
+/// `#noopaddress`: one GraphQL read of what still asks for work on the head.
+/// Review threads, the latest opinionated reviews, and the head commit's check
+/// contexts with their required flag for this pull request.
+const REVIEW_STATE_QUERY: &str = "query($owner:String!,$repo:String!,$number:Int!){repository(owner:$owner,name:$repo){pullRequest(number:$number){headRefOid reviewDecision latestOpinionatedReviews(first:100){pageInfo{hasNextPage} nodes{state}} reviewThreads(first:100){pageInfo{hasNextPage} nodes{isResolved}} commits(last:1){nodes{commit{oid statusCheckRollup{contexts(first:100){pageInfo{hasNextPage} nodes{__typename ... on CheckRun{status conclusion isRequired(pullRequestNumber:$number)} ... on StatusContext{state isRequired(pullRequestNumber:$number)}}}}}}}}}}";
+
+fn fetch_review_state(target: &AddressTarget, head: &str) -> Option<AddressReviewState> {
+    let owner = format!("owner={}", target.owner);
+    let repo = format!("repo={}", target.repo);
+    let number = format!("number={}", target.number);
+    let query = format!("query={REVIEW_STATE_QUERY}");
+    let stdout = gh(
+        &[
+            "api",
+            "graphql",
+            "-F",
+            owner.as_str(),
+            "-F",
+            repo.as_str(),
+            "-F",
+            number.as_str(),
+            "-f",
+            query.as_str(),
+        ],
+        Duration::from_secs(8),
+    )?;
+    parse_review_state(&stdout, head)
+}
+
+/// The review state of `head`, or `None` when the read is partial, belongs to
+/// another head, or does not parse. A partial read never proves a no-op.
+fn parse_review_state(stdout: &str, head: &str) -> Option<AddressReviewState> {
+    let root: serde_json::Value = serde_json::from_str(stdout).ok()?;
+    let pr = root.pointer("/data/repository/pullRequest")?;
+    let same = |sha: &str| !sha.trim().is_empty() && sha.trim().eq_ignore_ascii_case(head.trim());
+    if !same(pr.get("headRefOid")?.as_str()?) {
+        return None;
+    }
+    let complete = |connection: &serde_json::Value| {
+        connection
+            .pointer("/pageInfo/hasNextPage")
+            .and_then(serde_json::Value::as_bool)
+            == Some(false)
+    };
+    let threads = pr.get("reviewThreads")?;
+    let reviews = pr.get("latestOpinionatedReviews")?;
+    if !complete(threads) || !complete(reviews) {
+        return None;
+    }
+    let unresolved_threads = threads
+        .get("nodes")?
+        .as_array()?
+        .iter()
+        .filter(|thread| {
+            thread
+                .get("isResolved")
+                .and_then(serde_json::Value::as_bool)
+                != Some(true)
+        })
+        .count() as u64;
+    let changes_requested = pr.get("reviewDecision").and_then(serde_json::Value::as_str)
+        == Some("CHANGES_REQUESTED")
+        || reviews.get("nodes")?.as_array()?.iter().any(|review| {
+            review.get("state").and_then(serde_json::Value::as_str) == Some("CHANGES_REQUESTED")
+        });
+    let commit = pr.pointer("/commits/nodes/0/commit")?;
+    if !same(commit.get("oid")?.as_str()?) {
+        return None;
+    }
+    let mut failing_required_checks = 0;
+    let mut pending_required_checks = 0;
+    // A head with no checks reports a null rollup: nothing is required there.
+    if let Some(contexts) = commit
+        .get("statusCheckRollup")
+        .filter(|rollup| !rollup.is_null())
+        .map(|rollup| rollup.get("contexts"))
+    {
+        let contexts = contexts?;
+        if !complete(contexts) {
+            return None;
+        }
+        for check in contexts.get("nodes")?.as_array()? {
+            if check.get("isRequired").and_then(serde_json::Value::as_bool) != Some(true) {
+                continue;
+            }
+            match required_check_outcome(check) {
+                CheckOutcome::Passed => {}
+                CheckOutcome::Failed => failing_required_checks += 1,
+                CheckOutcome::Pending => pending_required_checks += 1,
+            }
+        }
+    }
+    Some(AddressReviewState {
+        unresolved_threads,
+        changes_requested,
+        failing_required_checks,
+        pending_required_checks,
+    })
+}
+
+enum CheckOutcome {
+    Passed,
+    Failed,
+    Pending,
+}
+
+fn required_check_outcome(check: &serde_json::Value) -> CheckOutcome {
+    let field = |name: &str| check.get(name).and_then(serde_json::Value::as_str);
+    match field("__typename") {
+        Some("CheckRun") => {
+            if field("status") != Some("COMPLETED") {
+                return CheckOutcome::Pending;
+            }
+            match field("conclusion") {
+                Some("SUCCESS" | "NEUTRAL" | "SKIPPED") => CheckOutcome::Passed,
+                _ => CheckOutcome::Failed,
+            }
+        }
+        Some("StatusContext") => match field("state") {
+            Some("SUCCESS") => CheckOutcome::Passed,
+            Some("PENDING" | "EXPECTED") => CheckOutcome::Pending,
+            _ => CheckOutcome::Failed,
+        },
+        _ => CheckOutcome::Pending,
+    }
 }
 
 fn reply_ids(target: &AddressTarget, comments: &[GhComment]) -> Vec<u64> {
@@ -817,6 +945,7 @@ mod tests {
             reply_ids,
             comment_commit: None,
             thread_named: true,
+            review_state: None,
         }
     }
 
@@ -1112,5 +1241,85 @@ mod tests {
             )
             .is_none()
         );
+    }
+
+    fn review_json(threads: &str, decision: &str, reviews: &str, checks: &str) -> String {
+        format!(
+            r#"{{"data":{{"repository":{{"pullRequest":{{"headRefOid":"a1379d91","reviewDecision":{decision},"latestOpinionatedReviews":{{"pageInfo":{{"hasNextPage":false}},"nodes":[{reviews}]}},"reviewThreads":{{"pageInfo":{{"hasNextPage":false}},"nodes":[{threads}]}},"commits":{{"nodes":[{{"commit":{{"oid":"a1379d91","statusCheckRollup":{checks}}}}}]}}}}}}}}}}"#
+        )
+    }
+
+    fn rollup(nodes: &str) -> String {
+        format!(r#"{{"contexts":{{"pageInfo":{{"hasNextPage":false}},"nodes":[{nodes}]}}}}"#)
+    }
+
+    /// `#noopaddress`: the haiven-sdk PR #389 shape (approved, no threads,
+    /// optional checks only) reads as nothing to address.
+    #[test]
+    fn review_state_reads_a_clean_head() {
+        let checks = rollup(concat!(
+            r#"{"__typename":"CheckRun","status":"COMPLETED","conclusion":"SKIPPED","isRequired":false},"#,
+            r#"{"__typename":"CheckRun","status":"IN_PROGRESS","conclusion":null,"isRequired":false},"#,
+            r#"{"__typename":"CheckRun","status":"COMPLETED","conclusion":"SUCCESS","isRequired":true},"#,
+            r#"{"__typename":"StatusContext","state":"SUCCESS","isRequired":true}"#,
+        ));
+        let json = review_json(
+            r#"{"isResolved":true}"#,
+            r#""APPROVED""#,
+            r#"{"state":"APPROVED"}"#,
+            &checks,
+        );
+        let state = parse_review_state(&json, "A1379D91").expect("whole read");
+        assert!(state.nothing_to_address(), "{state:?}");
+        let no_checks = review_json("", "null", "", "null");
+        assert!(
+            parse_review_state(&no_checks, "a1379d91")
+                .unwrap()
+                .nothing_to_address()
+        );
+    }
+
+    #[test]
+    fn review_state_counts_what_still_asks_for_work() {
+        let required = |body: &str| rollup(&format!(r#"{{{body},"isRequired":true}}"#));
+        let cases = [
+            review_json(r#"{"isResolved":false}"#, "null", "", "null"),
+            review_json("", r#""CHANGES_REQUESTED""#, "", "null"),
+            review_json("", "null", r#"{"state":"CHANGES_REQUESTED"}"#, "null"),
+            review_json(
+                "",
+                "null",
+                "",
+                &required(r#""__typename":"CheckRun","status":"COMPLETED","conclusion":"FAILURE""#),
+            ),
+            review_json(
+                "",
+                "null",
+                "",
+                &required(r#""__typename":"CheckRun","status":"QUEUED","conclusion":null"#),
+            ),
+            review_json(
+                "",
+                "null",
+                "",
+                &required(r#""__typename":"StatusContext","state":"ERROR""#),
+            ),
+        ];
+        for json in cases {
+            let state = parse_review_state(&json, "a1379d91").expect("whole read");
+            assert!(!state.nothing_to_address(), "{json}\n{state:?}");
+        }
+    }
+
+    #[test]
+    fn a_partial_or_other_head_review_read_proves_nothing() {
+        let clean = review_json("", "null", "", "null");
+        assert!(parse_review_state(&clean, "ffffffff").is_none());
+        let paged = clean.replacen(r#""hasNextPage":false"#, r#""hasNextPage":true"#, 1);
+        assert!(parse_review_state(&paged, "a1379d91").is_none());
+        let stale_commit = clean.replace(r#""oid":"a1379d91""#, r#""oid":"0000aaaa""#);
+        assert!(parse_review_state(&stale_commit, "a1379d91").is_none());
+        assert!(parse_review_state("not json", "a1379d91").is_none());
+        assert!(parse_review_state(r#"{"errors":[{}]}"#, "a1379d91").is_none());
     }
 }

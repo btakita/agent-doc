@@ -1012,6 +1012,19 @@ pub enum AckTextResponse<'a> {
     /// When no hand-back gives the row a response tree, attach this summary
     /// as a short one (`--summary`).
     Summary(&'a str),
+    /// `#queuefail`: the last-resort terminal state. Strike the row with the
+    /// failure glyph (`~~❌ …~~`) and a Response naming `reason` and every
+    /// resolution in `attempted` (`agent-doc queue fail`).
+    Failed {
+        reason: &'a str,
+        attempted: &'a [String],
+    },
+}
+
+impl AckTextResponse<'_> {
+    fn is_failure(&self) -> bool {
+        matches!(self, Self::Failed { .. })
+    }
 }
 
 /// Apply `response` to a `--ack-text` strike from `before` to `after`.
@@ -1025,6 +1038,15 @@ fn apply_ack_text_response(
         AckTextResponse::AsAttached => return Ok(after),
         AckTextResponse::Required => None,
         AckTextResponse::Summary(summary) => Some(summary),
+        AckTextResponse::Failed { reason, attempted } => {
+            return agent_doc_queue::queue_consume::mark_failed_rows(
+                before,
+                &after,
+                reason,
+                attempted,
+                &addressed_at_for_current_cycle(file),
+            );
+        }
     };
     let attached = agent_doc_queue::queue_consume::attach_ack_summary_response(
         before,
@@ -1071,7 +1093,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
     // are struck and the response quotes the reply. Several such rows refuse.
     // It runs before the exact-leaf match: struck alone, the reply would
     // leave its operator row open.
-    if selector.is_none() {
+    if selector.is_none() && !response.is_failure() {
         let in_flight = crate::queue_claim::in_flight_claimed_items_for_content(file, &content);
         let summary = match response {
             AckTextResponse::Summary(summary) => Some(summary),
@@ -1158,7 +1180,33 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
                         && attempt.owner == expected_owner.owner
                         && attempt.generation == expected_owner.generation
             );
-            if !reported_owner_matches {
+            // `#queuefail`: a failure closes a row no worker is still working
+            // on: a requeued or lost attempt, a quota-blocked one, or a report
+            // the coordinator cannot integrate. A worker that may still be
+            // running finishes, reports, or is frozen first.
+            if response.is_failure() {
+                use agent_doc_queue::queue_claim::QueueClaimState;
+                // A recorded freeze (a harness stop, or the abandon a
+                // requeue records) proves the worker is not running.
+                let may_be_working = match attempt.state {
+                    QueueClaimState::Claimed => true,
+                    QueueClaimState::Running => attempt.frozen.is_none(),
+                    _ => false,
+                };
+                if may_be_working {
+                    anyhow::bail!(
+                        "{}: queue fail refuses {:?} while its attempt may still be working \
+                         (state={:?} owner={:?} generation={}); no change was applied. Let the \
+                         worker report (`agent-doc queue report-complete`), or record that it \
+                         stopped (`agent-doc queue freeze`), then fail the row (#queuefail).",
+                        file.display(),
+                        row.lineage,
+                        attempt.state,
+                        attempt.owner,
+                        attempt.generation,
+                    );
+                }
+            } else if !reported_owner_matches {
                 anyhow::bail!(
                     "{}: --ack-text refuses queue work with a live claim. Complete or recover the \
                      worker attempt before acknowledging {:?}. state={:?} owner={:?} generation={}",
@@ -1169,7 +1217,9 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
                     attempt.generation,
                 );
             }
-            crate::queue_lineage::require_integrated_claim_repo_work(file, attempt)?;
+            if !response.is_failure() {
+                crate::queue_lineage::require_integrated_claim_repo_work(file, attempt)?;
+            }
         }
         let open_todo_ids = agent_doc_element::todo::open_todo_ids(&content);
         if agent_doc_document::queue_projection::operator_action_holds_row(
@@ -1209,21 +1259,25 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
             .collect::<Vec<_>>();
         let consumed_count = node_keys.len();
         let mut target = consume_queue_nodes_by_key(&content, &node_keys)?;
-        target = attach_stopped_row_responses_for_file(file, &content, target)?;
+        if !response.is_failure() {
+            target = attach_stopped_row_responses_for_file(file, &content, target)?;
+        }
         target = apply_ack_text_response(file, &content, target, response)?;
         let remaining = addressable_executable_rows(&target)?.len();
-        let response_first_line = projected_capture_response_body(file)
-            .and_then(|body| first_nonempty_line(&body).map(str::to_string));
-        target = embed_consumed_prompt_in_response(
-            &target,
-            std::slice::from_ref(&row.lineage),
-            response_first_line.as_deref(),
-        );
-        require_integrated_reported_repo_work_for_heads(
-            file,
-            &content,
-            std::slice::from_ref(&row.lineage),
-        )?;
+        if !response.is_failure() {
+            let response_first_line = projected_capture_response_body(file)
+                .and_then(|body| first_nonempty_line(&body).map(str::to_string));
+            target = embed_consumed_prompt_in_response(
+                &target,
+                std::slice::from_ref(&row.lineage),
+                response_first_line.as_deref(),
+            );
+            require_integrated_reported_repo_work_for_heads(
+                file,
+                &content,
+                std::slice::from_ref(&row.lineage),
+            )?;
+        }
         target = reconcile_terminal_lifecycle_projection(file, target)?.0;
         let plan = QueueConsumptionPlan {
             consumed_text: row.lineage.clone(),
@@ -1256,8 +1310,13 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
-                "queue_consume_exact_text_ack file={} head_hash={} consumed_count={} remaining={} \
+                "{} file={} head_hash={} consumed_count={} remaining={} \
                  queue_active_preserved={} proof=operator_exact_lineage",
+                if response.is_failure() {
+                    "queue_fail_terminal"
+                } else {
+                    "queue_consume_exact_text_ack"
+                },
                 file.display(),
                 agent_doc_hash::content_hash(row.lineage.trim()),
                 consumed_count,
@@ -1275,7 +1334,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
         }));
     }
 
-    if selector.is_some() {
+    if selector.is_some() || response.is_failure() {
         anyhow::bail!(
             "{}: --ack-text selector did not resolve an exact executable queue lineage; no change was applied.",
             file.display()
@@ -6735,6 +6794,267 @@ mod core_tests {
             "no blank line in the tree: {tree:?}"
         );
         assert_eq!(updated.matches("**Response [#r-4fa4a87420e5]**").count(), 1);
+    }
+
+    /// `#queuefail`: the last-resort terminal state. sdk-dev `#address` under
+    /// haiven-sdk PR #389 (2026-11-23) could not be closed by any agent
+    /// command: its requeued attempt made `--ack-text` refuse, so the
+    /// coordinator told the operator to delete the row. `queue fail` strikes
+    /// the row as `~~❌ …~~` with a Response naming the reason and what was
+    /// tried, while a worker that may still run is refused.
+    #[test]
+    fn queue_fail_strikes_an_unresolvable_row_as_terminal_failed() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=\"main\" subagents -->\n",
+            "- ### https://github.com/sample-org/sample-repo/pull/389\n",
+            "  - #address\n",
+            "- keep this queued\n",
+            "<!-- /agent:run -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let head = "https://github.com/sample-org/sample-repo/pull/389: #address";
+        let attempted = vec![
+            "observed the head for unresolved threads, changes requested, and required checks"
+                .to_string(),
+            "dispatched three address workers".to_string(),
+        ];
+        let fail = || {
+            let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+            super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+                &doc,
+                head,
+                None,
+                super::AckTextResponse::Failed {
+                    reason: "GitHub could not be read for the pull request.",
+                    attempted: &attempted,
+                },
+                &TEST_EFFECTS,
+                &guard,
+            )
+        };
+
+        crate::queue_claim::claim(&doc, head, "subagent:s389address", 600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            head,
+            "subagent:s389address",
+            "worker:s389address",
+            600,
+            1,
+        )
+        .unwrap();
+        let refused = fail().unwrap_err().to_string();
+        assert!(refused.contains("may still be working"), "{refused}");
+        assert!(refused.contains("agent-doc queue freeze"), "{refused}");
+        assert_eq!(fs::read_to_string(&doc).unwrap(), content, "no change");
+        crate::claim_release_receipt::release_attempt(
+            &doc,
+            head,
+            crate::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap()
+        .expect("the address hand-back requeued its attempt");
+
+        fail().unwrap().expect("the requeued row fails");
+        let updated = fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("  - ~~❌ #address~~\n"), "{updated}");
+        assert!(
+            updated
+                .contains("      - **Summary:** GitHub could not be read for the pull request.\n"),
+            "{updated}"
+        );
+        assert!(
+            updated.contains(
+                "      - **Notes:** Attempted: observed the head for unresolved threads, changes requested, and required checks; dispatched three address workers\n"
+            ),
+            "{updated}"
+        );
+        assert!(
+            updated.contains(&format!(
+                "      - **State:** {}\n",
+                agent_doc_queue::queue_consume::RESPONSE_STATE_FAILED
+            )),
+            "{updated}"
+        );
+        assert!(!updated.contains("✅ Done."), "{updated}");
+        assert!(updated.contains("- keep this queued\n"), "{updated}");
+        let executable = super::addressable_executable_rows(&updated)
+            .unwrap()
+            .into_iter()
+            .map(|row| row.lineage)
+            .collect::<Vec<_>>();
+        assert_eq!(executable, vec!["keep this queued".to_string()]);
+        let assessment = agent_doc_queue::transient_closeout::assess_transient_closeout(
+            &updated,
+            &agent_doc_queue::transient_closeout::CloseoutEvidence::default(),
+        )
+        .unwrap();
+        assert!(
+            assessment
+                .debts
+                .iter()
+                .all(|debt| !debt.row.contains("#address")),
+            "a failed row owes nothing at closeout or Stop: {assessment:#?}"
+        );
+    }
+
+    /// `#directivequote` + `#queuefail`, replaying the live agent-loop
+    /// `agent-doc-bugs.md` row `stoploopcap` (2026-11-24). It quotes another
+    /// row's `'2. 📥 #address'`, so the hand-back was read as an address run:
+    /// `queue report-complete` requeued it (`#reviewfixonhead`) even on
+    /// `NO-WRITTEN-FIX`, `queue release` wanted a report first, and
+    /// `--ack-text` refused the live claim. Now the hand-back takes the
+    /// ordinary report path and `--ack-text --ack-owner` closes the reported
+    /// row; the attempt the old binary requeued closes with `queue fail`.
+    #[test]
+    fn a_quoted_address_row_closes_through_an_agent_command() {
+        const ROW: &str = "[from:dogfood key=stoploopcap] fix: the Claude Stop #transientcloseout gate refused 9 consecutive recursive Stops (stop_hook_active=true, debts=1, unchanged) on sdk-dev.md until Claude Code's block cap overrode it ('A hook blocked the turn from ending 9 consecutive times'), 2026-11-24 00:04–00:05Z. The debt was '2. 📥 #address' (a numbered step whose claims, s389address gens 1–3, never projected onto the row), so state=inbox_or_running never releases. #stophookactiveguard promises the harness cap is never the only guard. A 📥/🚧 row the agent provably cannot move in this turn (claimed this turn but still unprojected, or no claim/close path resolves it) must be released on an unchanged recursive Stop with a systemMessage naming it, and every state needs a bounded refusal count per unchanged debt set. #spec-test-build-install-commit-push";
+        let setup = || {
+            let tmp = TempDir::new().unwrap();
+            fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+            fs::write(
+                tmp.path().join(".agent-doc/project.md"),
+                concat!(
+                    "---\npresets:\n",
+                    "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                    "  '#spec-test-build-install-commit-push': '#dogfood-install: approve all commit + integration + push'\n",
+                    "---\n",
+                ),
+            )
+            .unwrap();
+            let doc = tmp.path().join("agent-doc-bugs.md");
+            let content = format!(
+                "---\nagent_doc_session: sample-bugs\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {ROW}\n\
+                 - keep this queued\n\
+                 <!-- /agent:queue -->\n"
+            );
+            fs::write(&doc, &content).unwrap();
+            agent_doc_snapshot_io::checkpoint_document_baseline(
+                &doc,
+                &content,
+                agent_doc_ops_log_io::log_op,
+            )
+            .unwrap();
+            crate::queue_claim::claim(&doc, ROW, "subagent:stoploop", 600).unwrap();
+            crate::queue_claim::start_attempt(
+                &doc,
+                ROW,
+                "subagent:stoploop",
+                "worker:stoploop",
+                600,
+                1,
+            )
+            .unwrap();
+            (tmp, doc)
+        };
+
+        let (_tmp, doc) = setup();
+        let content = fs::read_to_string(&doc).unwrap();
+        for hand_back in [
+            "**Summary**\nBounded the Stop refusal loop.\n",
+            "NO-WRITTEN-FIX head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n**Summary**\nBounded the Stop refusal loop.\n",
+        ] {
+            assert!(
+                crate::goal_loop_handoff::requeue_nonterminal_hand_back(
+                    &doc,
+                    &content,
+                    ROW,
+                    Some(1),
+                    hand_back,
+                )
+                .unwrap()
+                .is_none(),
+                "a quoted #address is not an address hand-back: {hand_back}"
+            );
+        }
+        // `queue report-complete --prose-only`: the worker changed no repository.
+        let reported_claim = crate::queue_claim::report_attempt(&doc, ROW, Some(1)).unwrap();
+        crate::queue_lineage::record_prose_only(&doc, &reported_claim, "prose hand-back").unwrap();
+        // The report projects its owner onto the row, as report-complete does.
+        let reported = content.replace(
+            &format!("- {ROW}\n"),
+            &format!("- ☑️ [#subagent:stoploop#1] {ROW}\n"),
+        );
+        fs::write(&doc, &reported).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &reported,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let selector = super::AckTextSelector::Owner(
+            agent_doc_document::queue_projection::QueueOwnerProjection {
+                owner: "subagent:stoploop".to_string(),
+                generation: 1,
+            },
+        );
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+            &doc,
+            ROW,
+            Some(&selector),
+            super::AckTextResponse::Summary("Bounded the Stop refusal loop."),
+            &TEST_EFFECTS,
+            &guard,
+        )
+        .unwrap()
+        .expect("the reported row closes with --ack-text --ack-owner");
+        drop(guard);
+        let closed = fs::read_to_string(&doc).unwrap();
+        assert!(
+            closed.contains("- ### ~~[from:dogfood key=stoploopcap]"),
+            "{closed}"
+        );
+
+        let (_tmp, doc) = setup();
+        crate::claim_release_receipt::release_attempt(
+            &doc,
+            ROW,
+            crate::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap()
+        .expect("the old binary requeued the attempt");
+        let attempted = vec!["report-complete, release, and --ack-text".to_string()];
+        let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+        super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+            &doc,
+            ROW,
+            None,
+            super::AckTextResponse::Failed {
+                reason: "No agent command could close the requeued attempt.",
+                attempted: &attempted,
+            },
+            &TEST_EFFECTS,
+            &guard,
+        )
+        .unwrap()
+        .expect("queue fail closes the requeued row");
+        let failed = fs::read_to_string(&doc).unwrap();
+        assert!(
+            failed.contains("- ### ~~❌ [from:dogfood key=stoploopcap]"),
+            "{failed}"
+        );
+        assert!(failed.contains("- keep this queued\n"), "{failed}");
     }
 
     /// Without `--summary`, a strike whose row gets a response tree from

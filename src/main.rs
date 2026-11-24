@@ -6544,6 +6544,28 @@ enum QueueAction {
         /// Path to the session document
         file: PathBuf,
     },
+    /// Move a queue row the agent could not resolve to the terminal ❌ state
+    /// (`#queuefail`). A last resort: first try to resolve the row (land the
+    /// fix, prove there is nothing to do, or hand back the prompt-blocker
+    /// structure with **Evidence:**). The row is struck with `~~❌ …~~` and a
+    /// Response naming `--reason` and every `--attempted` resolution. It is
+    /// never drained, dispatched, requeued, or owed at closeout or Stop, and
+    /// needs no operator action. The operator runs it again by removing the
+    /// strike and the ❌. Refuses a row whose worker may still be running.
+    #[command(name = "fail")]
+    Fail {
+        /// Path to the session document
+        file: PathBuf,
+        /// The exact queue row (leaf text or nest vector, as `--ack-text`)
+        #[arg(long)]
+        item: String,
+        /// Why the agent could not resolve the row
+        #[arg(long)]
+        reason: String,
+        /// One resolution the agent tried (repeat for each)
+        #[arg(long, required = true)]
+        attempted: Vec<String>,
+    },
     /// Remove live queue rows that are already duplicated (`#pruneduplicates`).
     ///
     /// Collapses live rows in one queue whose work text is identical after
@@ -11035,7 +11057,7 @@ fn try_main() -> anyhow::Result<()> {
                     )?;
                     if requeue.address_effect_unproven && !requeue.address_fix_pending {
                         eprintln!(
-                            "[queue] address hand-back for {:?} (owner {}, generation {}) claimed completion without an observed pull-request head change or a review reply; the row stays open and the attempt was requeued (#addressproof). Next: {} and dispatch the same row; its brief carries this hand-back. `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Commit the written fix onto the pull-request head, or post the review reply.",
+                            "[queue] address hand-back for {:?} (owner {}, generation {}) claimed completion without an observed pull-request head change, review reply, or nothing to address on the current head; the row stays open and the attempt was requeued (#addressproof). Next: {} and dispatch the same row; its brief carries this hand-back. `FIX-ON-HEAD` and `NO-WRITTEN-FIX` are not that observation. Commit the written fix onto the pull-request head, or post the review reply. A no-op address settles once the current head has no unresolved review thread, no changes-requested review, and no failing or unfinished required check (#noopaddress); a state that waits on a reviewer is a prompt-blocker with **Evidence:**. Only when resolution fails, end the row as terminal ❌ with `agent-doc queue fail <FILE> --item <row> --reason <why> --attempted <what was tried>` (#queuefail). Never ask the operator to delete or edit the row.",
                             requeue.claim.item_text,
                             requeue.claim.owner,
                             requeue.claim.generation,
@@ -11797,6 +11819,21 @@ fn try_main() -> anyhow::Result<()> {
             QueueAction::PruneNoise { file } => {
                 let queue_effects = CliQueueCommandEffects;
                 agent_doc_queue_io::queue_cmd::prune_noise(&queue_effects, &file)
+            }
+            QueueAction::Fail {
+                file,
+                item,
+                reason,
+                attempted,
+            } => {
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::fail_row(
+                    &queue_effects,
+                    &file,
+                    &item,
+                    &reason,
+                    &attempted,
+                )
             }
             QueueAction::PruneDuplicates {
                 file,

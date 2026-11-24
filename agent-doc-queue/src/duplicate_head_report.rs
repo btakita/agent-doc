@@ -9,7 +9,7 @@
 //! repeated entry (the operator's last known-good queue repeats some heads on
 //! purpose), and no per-row writer provenance survives the merge. So session
 //! check names each suspected copy, with its line and the line of its first
-//! occurrence, for the operator to delete in the editor.
+//! occurrence, and the agent repair (`agent-doc queue prune-duplicates`).
 //!
 //! A head is suspected when the live queue component holds it more often than
 //! the same component (by occurrence index) does in the committed document.

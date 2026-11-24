@@ -22,7 +22,7 @@ use agent_doc_document::queue_projection::strip_priority_markers;
 ///
 /// It overrides a reading that treats a later review, or a different behavior,
 /// as addressing a review whose written fix is not on the current head.
-pub const ADDRESS_FIX_ON_HEAD_RULE: &str = "Address run (#reviewfixonhead): a review is not addressed until its written fix is the code on the exact current head. The written fix is the code change that review states. Land that change, commit it with the repository's conventions, and publish it only to the existing pull-request head before reporting completion. A later review, a comment that the item is met, or different behavior does not replace that written fix. Do not report the review complete, and do not finish this run, while that fix is absent from the current head. The hand-back names each such review on its own line: `FIX-ON-HEAD <review-url> head=<sha>`. Emit that line only when that head's code is the written fix. When every review states no code change, do not invent a commit. Finish that address half with one line `NO-WRITTEN-FIX head=<sha>`. Do not emit that line together with `FIX-ON-HEAD`, and do not emit it when any review states a code change. On a row that also names `#adversarial-pr`, that line ends the address half so the next worker posts the independent review. Neither line is completion by itself (#addressproof). The binary completes the address only when it observes the pull-request head SHA change or a review reply on the addressed thread. A hand-back that claims either fact without that observation stays open.";
+pub const ADDRESS_FIX_ON_HEAD_RULE: &str = "Address run (#reviewfixonhead): a review is not addressed until its written fix is the code on the exact current head. The written fix is the code change that review states. Land that change, commit it with the repository's conventions, and publish it only to the existing pull-request head before reporting completion. A later review, a comment that the item is met, or different behavior does not replace that written fix. Do not report the review complete, and do not finish this run, while that fix is absent from the current head. The hand-back names each such review on its own line: `FIX-ON-HEAD <review-url> head=<sha>`. Emit that line only when that head's code is the written fix. When every review states no code change, do not invent a commit. Finish that address half with one line `NO-WRITTEN-FIX head=<sha>`. Do not emit that line together with `FIX-ON-HEAD`, and do not emit it when any review states a code change. On a row that also names `#adversarial-pr`, that line ends the address half so the next worker posts the independent review. Neither line is completion by itself (#addressproof). The binary completes the address only when it observes the pull-request head SHA change, a review reply on the addressed thread, or nothing to address on the current head (#noopaddress): no unresolved review thread, no changes-requested review, and no failing or unfinished required check. A no-op address hands back `NO-WRITTEN-FIX head=<sha>` once that head is in that state; first wait for its required checks with `gh pr checks <number> --repo <owner>/<repo> --required --watch`. When that state waits on someone else, such as a reviewer who must re-review, hand back the prompt-blocker structure with **Evidence:** naming that observation. A hand-back that claims an effect without that observation stays open. Never ask the operator to delete or edit the row.";
 
 const ABSENT_FIX_PHRASES: &[&str] = &[
     "written fix is not",
@@ -54,7 +54,7 @@ pub fn head_is_address_run(head: &str, presets: &[(String, String)]) -> bool {
 /// True when `item` carries the `#address` preset token.
 pub fn item_mentions_address_preset(item: &str) -> bool {
     let text = strip_priority_markers(item);
-    let text = crate::queue_continuation::mask_inline_code(&text);
+    let text = crate::queue_continuation::mask_directive_scan(&text);
     text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
         .any(|token| token.eq_ignore_ascii_case("#address"))
 }
@@ -195,6 +195,39 @@ mod tests {
         assert!(item_mentions_address_preset("#address [#q-1]"));
         assert!(!item_mentions_address_preset("#adversarial-pr"));
     }
+
+    /// `#directivequote`: agent-loop `agent-doc-bugs.md` (2026-11-24) row
+    /// `stoploopcap` quotes another row's `'2. 📥 #address'`. It was read as an
+    /// address run, so `queue report-complete` requeued every hand-back with
+    /// `#reviewfixonhead` and no agent command could close it. A token inside
+    /// quotes or a code span describes another row and is never a directive.
+    #[test]
+    fn a_quoted_address_token_is_not_an_address_run() {
+        let presets = presets();
+        let row = STOPLOOPCAP_ROW;
+        assert!(!head_is_address_run(row, &presets), "{row}");
+        assert!(!item_mentions_address_preset(row));
+        assert!(!crate::inline_discussion::item_mentions_inline_discussion_goal(row));
+        for quoted in [
+            "the debt was \"#address\" on another row",
+            "the debt was “#address” on another row",
+            "the debt was ‘#address’ on another row",
+            "the debt was `#address` on another row",
+        ] {
+            assert!(!head_is_address_run(quoted, &presets), "{quoted}");
+            assert!(!item_mentions_address_preset(quoted), "{quoted}");
+        }
+        // A real directive still counts, also after an apostrophe or a quote.
+        for real in [
+            "it doesn't land 'yet' https://github.com/sample-org/sample-repo/pull/12: #address",
+            "https://github.com/sample-org/sample-repo/pull/12 'context' #address",
+        ] {
+            assert!(head_is_address_run(real, &presets), "{real}");
+            assert!(item_mentions_address_preset(real), "{real}");
+        }
+    }
+
+    const STOPLOOPCAP_ROW: &str = "[from:dogfood key=stoploopcap] fix: the Claude Stop #transientcloseout gate refused 9 consecutive recursive Stops (stop_hook_active=true, debts=1, unchanged) on sdk-dev.md until Claude Code's block cap overrode it ('A hook blocked the turn from ending 9 consecutive times'), 2026-11-24 00:04–00:05Z. The debt was '2. 📥 #address' (a numbered step whose claims, s389address gens 1–3, never projected onto the row), so state=inbox_or_running never releases. #stophookactiveguard promises the harness cap is never the only guard. A 📥/🚧 row the agent provably cannot move in this turn (claimed this turn but still unprojected, or no claim/close path resolves it) must be released on an unchanged recursive Stop with a systemMessage naming it, and every state needs a bounded refusal count per unchanged debt set. #spec-test-build-install-commit-push";
 
     #[test]
     fn a_superseded_review_without_the_written_fix_does_not_land() {

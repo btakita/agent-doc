@@ -158,9 +158,10 @@ fn refuse_unappliable_patch_target(prefix_kind: &str, name: &str) -> Result<()> 
             "`<!-- patch:{name} -->` targets `agent:{name}`, a runnable queue component whose \
              rows agent-doc owns (claims, strikes, reported markers); a template patch is never \
              applied there, so this response is refused instead of being silently dropped \
-             (#staleretainedwrite). Change queue rows with `agent-doc queue` commands, or ask \
-             the operator to edit the row in the editor, then resend the response without the \
-             `patch:{name}` block."
+             (#staleretainedwrite). Change queue rows with `agent-doc queue` commands (`queue \
+             consume` strikes an answered row, `queue follow-up` adds one, `queue prune-duplicates` \
+             collapses a copy), then resend the response without the `patch:{name}` block. Never \
+             ask the operator to edit the row."
         );
     }
     Ok(())
@@ -2812,6 +2813,13 @@ This is just an example.
             assert!(error.contains(&format!("agent:{name}")), "{error}");
             assert!(error.contains("agent-doc queue"), "{error}");
             assert!(error.contains("never"), "{error}");
+            // `#noopaddress`: the refusal names agent commands, never an
+            // operator edit of the row.
+            assert!(error.contains("queue prune-duplicates"), "{error}");
+            assert!(
+                !error.contains("ask the operator to edit the row in"),
+                "{error}"
+            );
         }
         // The same markers quoted in a fence are an example, not a patch.
         let quoted = "<!-- patch:exchange -->\n```\n<!-- patch:loop -->\nx\n<!-- /patch:loop -->\n```\n<!-- /patch:exchange -->\n";

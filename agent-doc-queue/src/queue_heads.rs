@@ -212,7 +212,7 @@ pub fn queue_skip_diagnostic_for_response(content: &str, response: &str) -> Resu
                 }
                 Some(AddressCompletion::NoEffect { .. }) => {
                     return Ok(format!(
-                        "[queue] kept address head `{queue_head_display}` open. The observed pull-request head and review replies were unchanged (#addressproof). Land the written fix on the pull-request head, or post the review reply."
+                        "[queue] kept address head `{queue_head_display}` open. The observed pull-request head and review replies were unchanged, and the current head was not read as having nothing to address (no unresolved review thread, no changes-requested review, no failing or unfinished required check) (#addressproof). Land the written fix on the pull-request head, or post the review reply. When there is nothing to address, resolve each fully addressed thread and wait for required checks with `gh pr checks <number> --repo <owner>/<repo> --required --watch` (#noopaddress); a state that waits on a reviewer is a prompt-blocker with **Evidence:**. Only when resolution fails, end the row as terminal ❌ with `agent-doc queue fail <FILE> --item <row> --reason <why> --attempted <what was tried>` (#queuefail). Never ask the operator to delete or edit the row."
                     ));
                 }
                 _ => {}

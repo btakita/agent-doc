@@ -48,7 +48,7 @@ pub fn preset_name_loads_inline_discussions(name: &str) -> bool {
 /// True when `item` carries `#address` or `#adversarial-pr` as its own token.
 pub fn item_mentions_inline_discussion_goal(item: &str) -> bool {
     let text = strip_priority_markers(item);
-    let text = crate::queue_continuation::mask_inline_code(&text);
+    let text = crate::queue_continuation::mask_directive_scan(&text);
     text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
         .any(preset_name_loads_inline_discussions)
 }

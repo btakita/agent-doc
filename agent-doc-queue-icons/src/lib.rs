@@ -445,6 +445,8 @@ impl QueueIconSet {
                 ("tree_delete", legend::TREE_DELETE_GLYPH),
                 ("tree_delete", legend::TREE_DELETE_GLYPH_BARE),
                 ("tree_keep", legend::TREE_KEEP_GLYPH),
+                // `#queuefail`: the failed-row glyph is binary-owned too.
+                ("failed", legend::FAILED_ROW_GLYPH),
             ] {
                 if value == built_in_value && name != built_in_name {
                     bail!(
@@ -461,7 +463,8 @@ static QUEUE_ICONS: OnceLock<QueueIconSet> = OnceLock::new();
 
 mod legend;
 pub use legend::{
-    AGENT_DOC_REPLY_GLYPH, ALL_QUEUE_MARKERS, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
+    AGENT_DOC_REPLY_GLYPH, ALL_QUEUE_MARKERS, FAILED_ROW_GLYPH, FAILED_ROW_LEGEND_ENTRY,
+    FAILED_ROW_MEANING, QUEUE_MARKER_ANNOTATIONS, QUEUE_MARKER_LEGEND_ANCHOR,
     QUEUE_MARKER_LEGEND_LINE_PREFIX, QUEUE_MARKER_LEGEND_URL, QUEUE_REPLY_LEGEND_ENTRY,
     QUEUE_REPLY_MEANING, QueueMarker, QueueMarkerAnnotation, TREE_DELETE_GLYPH,
     TREE_DELETE_GLYPH_BARE, TREE_DELETE_LEGEND_ENTRY, TREE_DELETE_MEANING, TREE_KEEP_GLYPH,

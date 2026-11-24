@@ -16,7 +16,7 @@ use agent_doc_document::queue_projection::strip_priority_markers;
 /// already in the chain is kept once.
 pub fn temporal_preset_order(text: &str, presets: &[(String, String)]) -> Vec<String> {
     let text = strip_priority_markers(text);
-    let text = crate::queue_continuation::mask_inline_code(&text);
+    let text = crate::queue_continuation::mask_directive_scan(&text);
     let mut chains: Vec<Vec<String>> = Vec::new();
     let mut expect_continue = false;
     for token in
@@ -65,7 +65,7 @@ pub fn temporal_preset_order(text: &str, presets: &[(String, String)]) -> Vec<St
 /// next worker that a settled earlier preset does not finish the row.
 pub fn item_orders_a_later_preset(item: &str) -> bool {
     let text = strip_priority_markers(item);
-    let text = crate::queue_continuation::mask_inline_code(&text);
+    let text = crate::queue_continuation::mask_directive_scan(&text);
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
     let lowered = collapsed.to_ascii_lowercase();
     let Some(at) = lowered.find(" then ") else {

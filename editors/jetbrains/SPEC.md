@@ -1806,7 +1806,17 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   carries no activation receipt, so a backend with an activated generation refused every snapshot
   (`frontend_authority_absent_or_generation_mismatched`) until the Client reconnected. The backend
   reports a schema-1 snapshot as `frontend/backend plugin mismatch frontend_schema=1 ...` with the
-  reconnect remedy, not as an older build. The 30 s frontend-release poll asks
+  reconnect remedy, not as an older build. It holds that report for a provisional schema 1
+  (GH #441): the frontend names its plugin version in its lease's `frontendInstanceId`
+  (`<uuid>;plugin=<version>`, an opaque string every backend only compares), and a schema-1
+  snapshot from a frontend that names the backend's own version is reported only when the
+  snapshot after a refusal is still schema 1, or when the schema-1 snapshot is accepted (no
+  refusal asks again). A schema 1 from a frontend that names another plugin, or none (0.2.1052
+  and earlier), is reported at once; the backend's `lease opened` line logs
+  `frontend_plugin=<version|unnamed>`. The 30 s frontend-release poll waits for the first lease's
+  schema negotiation (at most 30 s) before it polls, because on a cold start its multi-megabyte
+  package fetch held the Remote Dev link and the schema answer, though the backend returns it from
+  a constant, queued behind it past the 5 s window (GH #441). The poll asks
   `frontendImplementationReleaseIdentity()` (digest and epoch) and fetches the package bytes only
   for a generation the Client has not activated, retrying a refused one after 10 minutes. The
   backend validator accepts schemas 1 through 5. Explicit retirement/release is the

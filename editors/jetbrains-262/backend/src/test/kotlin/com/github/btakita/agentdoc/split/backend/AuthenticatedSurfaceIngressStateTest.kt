@@ -10,6 +10,7 @@ import com.github.btakita.agentdoc.split.FrontendSurfaceIdentity
 import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.split.forSchema
+import com.github.btakita.agentdoc.split.frontendLeaseInstanceId
 import com.intellij.platform.project.ProjectId
 import fleet.util.UID
 import kotlin.test.Test
@@ -447,6 +448,90 @@ class AuthenticatedSurfaceIngressStateTest {
         )
         assertTrue(olderRemedy.startsWith("install the same agent-doc-jetbrains-262-0.2.1052.zip"), olderRemedy)
     }
+
+    /**
+     * GH #441 (Coder, 2026-11-24): both peers ran 0.2.1052. On a cold start the Client's 5 s
+     * schema negotiation went unanswered, so it published schema 1 provisionally and asked again
+     * after the refusal; its next snapshot was schema 5 and was accepted. The backend still showed
+     * the reinstall dialog for that first, provisional snapshot.
+     */
+    @Test
+    fun aProvisionalSchemaOneFromTheBackendsOwnPluginIsNotReported() = runBlocking {
+        val mismatches = mutableListOf<FrontendPluginMismatch>()
+        val state = mismatchReportingState(mismatches, backendPlugin = "0.2.1053")
+        val frontend = frontendLeaseInstanceId("frontend-a", "0.2.1053")
+        val lease = state.open("client-a", frontend)
+
+        val provisional = state.publish("client-a", lease, snapshot(frontend, 1).forSchema(1))
+        assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, provisional.status)
+        assertTrue(mismatches.isEmpty(), "the frontend asks again after this refusal: $mismatches")
+
+        val negotiated = snapshot(frontend, 2).copy(activationReceipt = frontendActivation.encode())
+        assertEquals(SurfaceIngressStatus.ACCEPTED, state.publish("client-a", lease, negotiated).status)
+        assertTrue(mismatches.isEmpty(), mismatches.toString())
+    }
+
+    @Test
+    fun aSchemaOneThatFollowsARefusalIsReportedOnce() = runBlocking {
+        val mismatches = mutableListOf<FrontendPluginMismatch>()
+        val state = mismatchReportingState(mismatches, backendPlugin = "0.2.1053")
+        val frontend = frontendLeaseInstanceId("frontend-a", "0.2.1053")
+        val lease = state.open("client-a", frontend)
+
+        state.publish("client-a", lease, snapshot(frontend, 1).forSchema(1))
+        assertTrue(mismatches.isEmpty(), mismatches.toString())
+        repeat(2) { attempt ->
+            state.publish("client-a", lease, snapshot(frontend, attempt + 2L).forSchema(1))
+        }
+        val mismatch = mismatches.single()
+        assertTrue(mismatch.unansweredNegotiation)
+        assertTrue(mismatch.detail.contains("frontend_schema=1 backend_schema=5"), mismatch.detail)
+    }
+
+    @Test
+    fun aSchemaOneFromAnotherOrAnUnnamedPluginIsReportedAtOnce() = runBlocking {
+        listOf(frontendLeaseInstanceId("frontend-a", "0.2.1046"), "frontend-a").forEach { frontend ->
+            val mismatches = mutableListOf<FrontendPluginMismatch>()
+            val state = mismatchReportingState(mismatches, backendPlugin = "0.2.1053")
+            val lease = state.open("client-a", frontend)
+            state.publish("client-a", lease, snapshot(frontend, 1).forSchema(1))
+            assertTrue(mismatches.single().unansweredNegotiation, "$frontend: $mismatches")
+        }
+    }
+
+    @Test
+    fun anAcceptedProvisionalSchemaOneIsReportedBecauseNoRefusalAsksAgain() = runBlocking {
+        val mismatches = mutableListOf<FrontendPluginMismatch>()
+        // A shell-only backend admits a schema-1 snapshot (no receipt is required), so the
+        // frontend never sees the refusal that would make it ask for the schema again.
+        val state = mismatchReportingState(
+            mismatches,
+            backendPlugin = "0.2.1053",
+            backendReceipt = backendActivation.copy(implSha256 = null, epoch = 0),
+        )
+        val frontend = frontendLeaseInstanceId("frontend-a", "0.2.1053")
+        val lease = state.open("client-a", frontend)
+
+        assertEquals(
+            SurfaceIngressStatus.ACCEPTED,
+            state.publish("client-a", lease, snapshot(frontend, 1).forSchema(1)).status,
+        )
+        assertTrue(mismatches.single().unansweredNegotiation, mismatches.toString())
+    }
+
+    private fun mismatchReportingState(
+        mismatches: MutableList<FrontendPluginMismatch>,
+        backendPlugin: String?,
+        backendReceipt: ActivationReceipt = backendActivation,
+    ) = AuthenticatedSurfaceIngressState(
+        RecordingPublisher(),
+        RecordingForwarder(),
+        backendActivationReceipt = backendReceipt,
+        scheduleDiagnostic = { _, _ -> },
+        log = { _, _ -> },
+        onFrontendPluginMismatch = { _, _, mismatch -> mismatches += mismatch },
+        backendPluginVersion = { backendPlugin },
+    )
 
     @Test
     fun frontendPluginMismatchNamesTheStaleSide() {

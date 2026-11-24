@@ -13,6 +13,7 @@ import com.github.btakita.agentdoc.split.FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_
 import com.github.btakita.agentdoc.split.LEGACY_SURFACE_SNAPSHOT_SCHEMA_VERSION
 import com.github.btakita.agentdoc.split.MAIN_SURFACE_PANE_ID
 import com.github.btakita.agentdoc.split.SURFACE_SNAPSHOT_SCHEMA_VERSION
+import com.github.btakita.agentdoc.split.frontendLeasePluginVersion
 import com.github.btakita.agentdoc.split.isSupportedSurfaceSnapshotSchema
 import com.github.btakita.agentdoc.split.SurfaceIngressAck
 import com.github.btakita.agentdoc.split.SurfaceIngressLease
@@ -175,6 +176,12 @@ internal class AuthenticatedSurfaceIngressState(
             frontendPluginMismatchLine(clientId, generation, mismatch.detail, currentFrontendPluginMismatchRemedy(mismatch)),
         )
     },
+    /**
+     * GH #441: this backend's Agent Doc plugin version. A schema-1 snapshot from a frontend that
+     * names the same version in its lease is provisional (it asks for the schema again after a
+     * refusal), so it is reported only if it is still schema 1 after that refusal.
+     */
+    private val backendPluginVersion: () -> String? = { runCatching { pluginVersion() }.getOrNull() },
 ) {
     private val generation = AtomicLong(generationSeed)
     private val mutex = Mutex()
@@ -224,7 +231,8 @@ internal class AuthenticatedSurfaceIngressState(
             false,
             "[split-surface] lease opened client=$authenticatedClientId generation=${lease.connectionGeneration} " +
                 "layout_authority=${if (layoutAuthority) "remote_measured" else "local_client"} " +
-                "readiness=${mutableLayoutPublicationReadiness.value.wire()}",
+                "readiness=${mutableLayoutPublicationReadiness.value.wire()} " +
+                "frontend_plugin=${frontendLeasePluginVersion(frontendInstanceId) ?: "unnamed"}",
         )
         if (layoutAuthority) {
             scheduleDiagnostic(FRONTEND_AUTHORITY_DIAGNOSTIC_DELAY_MS) { reportStalledPublication(lease.leaseId) }
@@ -283,12 +291,27 @@ internal class AuthenticatedSurfaceIngressState(
             return@withLock rejected(SurfaceIngressStatus.STALE_LEASE, lease, "lease or frontend epoch is stale")
         }
         publications[lease.leaseId]?.takeIf { !it.pluginChecked }?.let { publication ->
-            publication.pluginChecked = true
-            frontendPluginMismatch(
+            val mismatch = frontendPluginMismatch(
                 snapshot,
                 ActivationReceipt.decodeOrNull(snapshot.activationReceipt),
                 backendActivationReceiptProvider().shellDigest,
-            )?.let { detail -> onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, detail) }
+            )
+            if (mismatch != null && provisionalSchemaOne(current, publication, mismatch)) {
+                if (!publication.provisionalDeferred) {
+                    publication.provisionalDeferred = true
+                    log(
+                        false,
+                        "[split-surface] provisional schema-1 snapshot client=$authenticatedClientId " +
+                            "generation=${lease.connectionGeneration} " +
+                            "frontend_plugin=${frontendLeasePluginVersion(current.frontendInstanceId)} " +
+                            "(the same plugin asks for the schema again after a refusal; a plugin mismatch " +
+                            "is reported only if its next snapshot is still schema 1)",
+                    )
+                }
+            } else {
+                publication.pluginChecked = true
+                mismatch?.let { onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, it) }
+            }
         }
         val validation = SurfaceSnapshotValidator.validate(snapshot)
         if (validation != null) {
@@ -352,6 +375,13 @@ internal class AuthenticatedSurfaceIngressState(
             onFrontendReceipt(authenticatedClientId, lease.connectionGeneration, receipt)
         }
         refreshFrontendAuthority()
+        publications[lease.leaseId]?.takeIf { it.provisionalDeferred && !it.pluginChecked }?.let { publication ->
+            // GH #441: only a refusal makes the frontend ask for the schema again, so an accepted
+            // schema-1 snapshot stays schema 1 (no geometry) for the rest of this lease.
+            publication.pluginChecked = true
+            frontendPluginMismatch(snapshot, null, backendActivationReceiptProvider().shellDigest)
+                ?.let { onFrontendPluginMismatch(authenticatedClientId, lease.connectionGeneration, it) }
+        }
         publications[lease.leaseId]?.let { publication ->
             val firstAcceptance = publication.acceptedSequence == 0L
             val recovered = publication.lastRefusal
@@ -383,6 +413,22 @@ internal class AuthenticatedSurfaceIngressState(
             acceptedSequence = snapshot.sequence,
             presentation = delivery.presentation,
         )
+    }
+
+    /**
+     * GH #441: whether [mismatch] is a schema-1 snapshot the frontend published provisionally and
+     * will replace: the lease names this backend's own plugin (whose frontend asks for the schema
+     * again after a refusal) and no snapshot of this lease has been refused yet. A schema 1 that
+     * follows a refusal, or one from a frontend that names another plugin or none, is reported.
+     */
+    private fun provisionalSchemaOne(
+        current: ConnectionState,
+        publication: LeasePublication,
+        mismatch: FrontendPluginMismatch,
+    ): Boolean {
+        if (!mismatch.unansweredNegotiation || publication.refusals > 0) return false
+        val backend = backendPluginVersion()?.takeIf { it.isNotBlank() && it != "unknown" } ?: return false
+        return frontendLeasePluginVersion(current.frontendInstanceId) == backend
     }
 
     private fun admitsFrontendReceipt(current: ConnectionState, receipt: ActivationReceipt?): Boolean {
@@ -508,6 +554,8 @@ internal class AuthenticatedSurfaceIngressState(
         @Volatile var lastRefusal: String? = null
         @Volatile var refusals: Long = 0
         @Volatile var pluginChecked: Boolean = false
+        /** GH #441: a provisional schema-1 snapshot was seen and its mismatch report deferred. */
+        @Volatile var provisionalDeferred: Boolean = false
     }
 
     private data class ConnectionState(

@@ -21,6 +21,7 @@ import com.github.btakita.agentdoc.split.SurfaceIngressStatus
 import com.github.btakita.agentdoc.split.SurfaceRole
 import com.github.btakita.agentdoc.split.SurfaceSnapshotRpcApi
 import com.github.btakita.agentdoc.split.forSchema
+import com.github.btakita.agentdoc.split.frontendLeaseInstanceId
 import com.github.btakita.agentdoc.split.identity
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.application.ApplicationManager
@@ -61,7 +62,12 @@ class FrontendSurfaceSnapshotService(
 ) : Disposable {
     private val started = AtomicBoolean(false)
     private val sequence = AtomicLong(0)
-    private val frontendInstanceId = UUID.randomUUID().toString()
+    /** GH #441: names this frontend's plugin version, so a backend can tell provisional schema 1. */
+    private val frontendInstanceId = frontendLeaseInstanceId(
+        UUID.randomUUID().toString(),
+        frontendPluginDescriptorFact("getVersion"),
+    )
+    private val schemaNegotiationGate = SchemaNegotiationGate()
     private val surfaceIdentities = FrontendSurfaceIdentityTracker()
     private val presentationAdapter = Exact262DetachedPresentationAdapter.create(project, this)
     private val captures = MutableSharedFlow<Unit>(
@@ -111,49 +117,60 @@ class FrontendSurfaceSnapshotService(
 
     private suspend fun pollFrontendImplementationReleases() {
         val poll = FrontendReleasePoll()
-        while (true) {
-            try {
-                // GH #435: ask which generation the backend selected before moving its bytes. The
-                // full release is a multi-megabyte ZIP; fetching it every 30 s congested the
-                // Remote Dev link enough to time out the schema negotiation.
-                val identity = SurfaceSnapshotRpcApi.getInstance().frontendImplementationReleaseIdentity()
-                if (poll.shouldFetch(identity, FrontendReleaseActivation.receipt(), System.currentTimeMillis())) {
-                    SurfaceSnapshotRpcApi.getInstance().frontendImplementationRelease()?.let { release ->
-                        val active = FrontendReleaseActivation.receipt()
-                        if (active.implSha256 != release.implSha256 || active.epoch != release.epoch) {
-                            when (val outcome = activateFrontendImplementationRelease(release)) {
-                                is FrontendActivationOutcome.Activated -> {
-                                    LOG.info(
-                                        "[frontend-impl] activated digest=${outcome.receipt.implSha256} " +
-                                            "epoch=${outcome.receipt.epoch}",
-                                    )
-                                    requestCapture()
-                                }
-                                is FrontendActivationOutcome.Refused -> {
-                                    poll.refused(release.identity(), System.currentTimeMillis())
-                                    LOG.warn("[frontend-impl] refused: ${outcome.reason}")
-                                }
-                                is FrontendActivationOutcome.RestartRequired -> {
-                                    poll.refused(release.identity(), System.currentTimeMillis())
-                                    LOG.warn("[frontend-impl] restart required: ${outcome.reason}")
-                                }
-                                is FrontendActivationOutcome.RolledBack -> {
-                                    poll.refused(release.identity(), System.currentTimeMillis())
-                                    LOG.warn("[frontend-impl] rolled back: ${outcome.reason}")
-                                }
+        runFrontendReleasePoll(
+            gate = schemaNegotiationGate,
+            gateTimeoutMs = FRONTEND_RELEASE_FETCH_NEGOTIATION_WAIT_MS,
+            onGateTimeout = {
+                LOG.info(
+                    "[frontend-impl] no lease negotiated a snapshot schema within " +
+                        "${FRONTEND_RELEASE_FETCH_NEGOTIATION_WAIT_MS}ms; polling the backend release anyway",
+                )
+            },
+            pollOnce = { pollFrontendImplementationReleaseOnce(poll) },
+        )
+    }
+
+    private suspend fun pollFrontendImplementationReleaseOnce(poll: FrontendReleasePoll) {
+        try {
+            // GH #435: ask which generation the backend selected before moving its bytes. The
+            // full release is a multi-megabyte ZIP; fetching it every 30 s congested the
+            // Remote Dev link enough to time out the schema negotiation.
+            val identity = SurfaceSnapshotRpcApi.getInstance().frontendImplementationReleaseIdentity()
+            if (poll.shouldFetch(identity, FrontendReleaseActivation.receipt(), System.currentTimeMillis())) {
+                SurfaceSnapshotRpcApi.getInstance().frontendImplementationRelease()?.let { release ->
+                    val active = FrontendReleaseActivation.receipt()
+                    if (active.implSha256 != release.implSha256 || active.epoch != release.epoch) {
+                        when (val outcome = activateFrontendImplementationRelease(release)) {
+                            is FrontendActivationOutcome.Activated -> {
+                                LOG.info(
+                                    "[frontend-impl] activated digest=${outcome.receipt.implSha256} " +
+                                        "epoch=${outcome.receipt.epoch}",
+                                )
+                                requestCapture()
+                            }
+                            is FrontendActivationOutcome.Refused -> {
+                                poll.refused(release.identity(), System.currentTimeMillis())
+                                LOG.warn("[frontend-impl] refused: ${outcome.reason}")
+                            }
+                            is FrontendActivationOutcome.RestartRequired -> {
+                                poll.refused(release.identity(), System.currentTimeMillis())
+                                LOG.warn("[frontend-impl] restart required: ${outcome.reason}")
+                            }
+                            is FrontendActivationOutcome.RolledBack -> {
+                                poll.refused(release.identity(), System.currentTimeMillis())
+                                LOG.warn("[frontend-impl] rolled back: ${outcome.reason}")
                             }
                         }
                     }
                 }
-            } catch (cancelled: CancellationException) {
-                throw cancelled
-            } catch (failure: Exception) {
-                LOG.info(
-                    "[frontend-impl] backend release candidate unavailable " +
-                        "(${failure.javaClass.simpleName}: ${failure.message})",
-                )
             }
-            delay(FRONTEND_IMPLEMENTATION_POLL_MS)
+        } catch (cancelled: CancellationException) {
+            throw cancelled
+        } catch (failure: Exception) {
+            LOG.info(
+                "[frontend-impl] backend release candidate unavailable " +
+                    "(${failure.javaClass.simpleName}: ${failure.message})",
+            )
         }
     }
 
@@ -189,6 +206,8 @@ class FrontendSurfaceSnapshotService(
         // a refusal asks the backend again instead of pinning schema 1 for the lease's lifetime.
         val negotiation = SnapshotSchemaNegotiation(::askBackendSnapshotSchema)
         negotiation.negotiate()
+        // GH #441: only now may the release poll move the multi-megabyte package over the link.
+        schemaNegotiationGate.settle()
         LOG.info(negotiation.logLine())
         val outcomes = FrontendPublicationLog(lease.connectionGeneration)
         captures.collectLatest {
@@ -373,6 +392,49 @@ internal const val FRONTEND_IMPLEMENTATION_POLL_MS = 30_000L
 
 /** Hang guard for first-lease schema negotiation; authority is already pending during this wait. */
 internal const val FRONTEND_SCHEMA_NEGOTIATION_TIMEOUT_MS = 5_000L
+
+/**
+ * GH #441: the longest the first release poll waits for a lease to negotiate its snapshot schema
+ * (a backend project that is not resolvable yet opens no lease) before it polls anyway.
+ */
+internal const val FRONTEND_RELEASE_FETCH_NEGOTIATION_WAIT_MS = 30_000L
+
+/**
+ * GH #441: settles once the first lease's schema negotiation returned, answered or not.
+ *
+ * On a cold start the release poll and the first lease started together, and the poll's
+ * multi-megabyte package fetch occupied the Remote Dev link while the lease asked for the schema.
+ * The backend answers that ask from a constant, yet the answer queued behind the package, the 5 s
+ * negotiation went unanswered, and the first snapshot was a provisional schema 1.
+ */
+internal class SchemaNegotiationGate {
+    private val settled = CompletableDeferred<Unit>()
+
+    fun settle() {
+        settled.complete(Unit)
+    }
+
+    /** True when the negotiation settled within [timeoutMs]. */
+    suspend fun await(timeoutMs: Long): Boolean = withTimeoutOrNull(timeoutMs) { settled.await() } != null
+}
+
+/**
+ * GH #441: the frontend release poll. Its first poll, which may fetch the whole package, waits for
+ * [gate] (at most [gateTimeoutMs]), so the first lease's schema ask never queues behind it.
+ */
+internal suspend fun runFrontendReleasePoll(
+    gate: SchemaNegotiationGate,
+    gateTimeoutMs: Long,
+    onGateTimeout: () -> Unit,
+    pollOnce: suspend () -> Unit,
+    sleep: suspend (Long) -> Unit = { delay(it) },
+) {
+    if (!gate.await(gateTimeoutMs)) onGateTimeout()
+    while (true) {
+        pollOnce()
+        sleep(FRONTEND_IMPLEMENTATION_POLL_MS)
+    }
+}
 
 /**
  * GH #435: the bounded republish delay after [status] refused a snapshot, or null when another

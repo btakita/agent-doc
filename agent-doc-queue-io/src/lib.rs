@@ -2,6 +2,7 @@
 
 pub mod active_lifecycle;
 pub mod address_effect;
+pub mod attempt_lineage_effect;
 pub mod blocker_disregard;
 pub mod build_slot;
 pub mod claim_release_receipt;

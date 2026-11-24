@@ -2327,6 +2327,48 @@ pub fn close_attempt_for_prompt_blocker(
     Ok(closed)
 }
 
+/// `#attemptlineage`: end the exact attempt whose worker is proven gone and
+/// owes no hand-back
+/// ([`agent_doc_queue::lost_running_recovery::worker_absent_and_settleable`])
+/// once the coordinator settled the row it held. Nothing is left live for the
+/// attempt, so the struck row reads no stale claim. The predicate is checked
+/// again under the ledger lock: a worker that came back meanwhile is kept.
+pub fn settle_absent_worker_attempt(
+    file: &Path,
+    item: &str,
+    generation: u64,
+    source: &str,
+) -> Result<Option<QueueClaim>> {
+    let now = now_secs();
+    let settled = mutate_ledger(file, |ledger| {
+        let Some(index) = ledger.claims.iter().position(|claim| {
+            claim.generation == generation
+                && (claim.identity == claim_identity(item) || claim.item_text == item)
+        }) else {
+            return Ok(None);
+        };
+        let mut claim = ledger.claims[index].clone();
+        claim.project_expiry(now);
+        if !agent_doc_queue::lost_running_recovery::worker_absent_and_settleable(&claim) {
+            return Ok(None);
+        }
+        Ok(Some(ledger.claims.remove(index)))
+    })?;
+    if let Some(claim) = settled.as_ref() {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_absent_worker_settled owner={} generation={} state={:?} source={source} item_bytes={} (#attemptlineage)",
+                claim.owner,
+                claim.generation,
+                claim.state,
+                claim.item_text.trim().len()
+            ),
+        );
+    }
+    Ok(settled)
+}
+
 /// `#blockerreportterminal`: close every retained, abandoned `Running`
 /// attempt (`release --requeue`, including one whose continue already failed
 /// and so reads `replacement_pending`) whose live row an open prompt-blocker

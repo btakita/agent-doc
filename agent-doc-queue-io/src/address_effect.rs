@@ -892,7 +892,7 @@ fn parse_comments(stdout: &str) -> Option<Vec<GhComment>> {
     (!stdout.trim().is_empty()).then_some(all)
 }
 
-fn gh(args: &[&str], timeout: Duration) -> Option<String> {
+pub(crate) fn gh(args: &[&str], timeout: Duration) -> Option<String> {
     let mut command = Command::new("gh");
     command
         .args(args)

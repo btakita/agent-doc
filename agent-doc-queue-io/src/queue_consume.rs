@@ -1169,6 +1169,13 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
         let row_identity = agent_doc_queue::queue_claim::claim_identity(&row.lineage);
         let attempts = crate::queue_claim::claim_states_for_content(file, &content)
             .context("queue consume --ack-text: failed to inspect queue attempt state")?;
+        // `#attemptlineage`: an attempt whose worker is proven gone and owes no
+        // hand-back (a `#promptpressure` requeue, a stopped harness freeze, a
+        // lost attempt whose continue failed) protects no running work. The
+        // coordinator's exact acknowledgement settles it with the row, so no
+        // path ends with "delete the row". A worker that may still return, or
+        // one whose finished result is unreported, still refuses.
+        let mut settled_absent_attempt = None;
         if let Some(attempt) = attempts
             .iter()
             .find(|attempt| attempt.identity == row_identity)
@@ -1180,6 +1187,11 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
                         && attempt.owner == expected_owner.owner
                         && attempt.generation == expected_owner.generation
             );
+            let absent_worker =
+                agent_doc_queue::lost_running_recovery::worker_absent_and_settleable(attempt);
+            if absent_worker {
+                settled_absent_attempt = Some((attempt.item_text.clone(), attempt.generation));
+            }
             // `#queuefail`: a failure closes a row no worker is still working
             // on: a requeued or lost attempt, a quota-blocked one, or a report
             // the coordinator cannot integrate. A worker that may still be
@@ -1206,7 +1218,7 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
                         attempt.generation,
                     );
                 }
-            } else if !reported_owner_matches {
+            } else if !absent_worker && !reported_owner_matches {
                 anyhow::bail!(
                     "{}: --ack-text refuses queue work with a live claim. Complete or recover the \
                      worker attempt before acknowledging {:?}. state={:?} owner={:?} generation={}",
@@ -1217,7 +1229,10 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
                     attempt.generation,
                 );
             }
-            if !response.is_failure() {
+            // A settled absent attempt never reported, so it owes no
+            // integration of its own; the acknowledgement's summary (or the
+            // failure record) is the row's result.
+            if !response.is_failure() && !absent_worker {
                 crate::queue_lineage::require_integrated_claim_repo_work(file, attempt)?;
             }
         }
@@ -1307,6 +1322,19 @@ pub fn acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
             apply_guard,
         )?;
         retire_exact_text_ack_strike(file, &row.lineage, selector, &target, &content);
+        if let Some((item_text, generation)) = settled_absent_attempt.as_ref()
+            && let Err(err) = crate::queue_claim::settle_absent_worker_attempt(
+                file,
+                item_text,
+                *generation,
+                "queue_consume_ack_text",
+            )
+        {
+            eprintln!(
+                "[queue] WARNING: could not settle the absent-worker attempt of generation {generation} in {} (queue_consume_ack_text): {err:#}",
+                file.display()
+            );
+        }
         agent_doc_ops_log_io::log_op(
             file,
             &format!(
@@ -7910,6 +7938,72 @@ mod core_tests {
         assert!(
             receipt.attempt_closed(),
             "the strike must close the row's receipt: {receipt:?}"
+        );
+    }
+
+    /// `#attemptlineage`: the `stgsdkmod` state. Every report of the finished
+    /// row was requeued by `#promptpressure`, which retains the started attempt
+    /// `Running` with the abandon freeze (`worker_liveness=Absent`). The
+    /// coordinator's exact `--ack-text` used to refuse it as a live claim, so
+    /// the agent asked the operator to delete the row. The absent attempt is
+    /// settled with the strike instead; nothing is left live for it.
+    #[test]
+    fn attemptlineage_ack_text_settles_an_absent_worker_attempt_instead_of_refusing() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let target =
+            "open a PR to `sdk-dev` that handles `chat.message.moderated` [#q-fbf061cf35e4]";
+        let content = format!(
+            concat!(
+                "---\nqueue_active: true\n---\n\n",
+                "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n\n",
+                "<!-- agent:run id=main subagents -->\n",
+                "- 📥 [#subagent:stgsdkmod#4] {target}\n",
+                "<!-- /agent:run -->\n",
+            ),
+            target = target,
+        );
+        fs::write(&doc, &content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            &content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let (_, claim) =
+            crate::queue_claim::claim(&doc, target, "subagent:stgsdkmod", 3600).unwrap();
+        crate::queue_claim::start_attempt(
+            &doc,
+            target,
+            "subagent:stgsdkmod",
+            "worker:ae465212a5b46b9c1",
+            3600,
+            claim.generation,
+        )
+        .unwrap();
+        crate::queue_claim::abandon_attempt(&doc, target, Some(claim.generation))
+            .unwrap()
+            .expect("the prompt-pressure requeue retains the started attempt");
+        let retained = crate::queue_claim::load_ledger(&doc).unwrap().claims;
+        assert_eq!(retained.len(), 1);
+        assert!(
+            agent_doc_queue::lost_running_recovery::worker_absent_and_settleable(&retained[0]),
+            "{retained:#?}"
+        );
+
+        super::acknowledge_paused_free_text_queue_head_with_outcome(&doc, target, &TEST_EFFECTS)
+            .expect("an absent-worker attempt does not hold the row against the coordinator")
+            .expect("the exact row is acknowledged");
+
+        let after = fs::read_to_string(&doc).unwrap();
+        assert!(after.contains("~~"), "the row is struck: {after}");
+        assert!(
+            crate::queue_claim::load_ledger(&doc)
+                .unwrap()
+                .claims
+                .is_empty(),
+            "the settled attempt leaves no claim behind"
         );
     }
 

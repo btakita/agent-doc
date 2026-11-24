@@ -188,6 +188,28 @@ pub fn report_owed(claim: &QueueClaim) -> bool {
     published || claim.ended_hand_back_owed().is_some()
 }
 
+/// `#attemptlineage`: the attempt's worker is proven gone and it owes no
+/// hand-back, so the coordinator may settle the row it holds.
+///
+/// That is an explicit requeue of a started worker ([`authorized_running_requeue`],
+/// the state a `#promptpressure` requeue leaves), a stopped harness freeze with
+/// no hand-back ([`is_stopped_harness_freeze`]), or a lost attempt whose
+/// continue already failed. A quota block keeps its partial work, a finished
+/// worker's unreported result is [`report_owed`], and a lost worker still owed
+/// its continue may yet return; none of them is settled this way.
+pub fn worker_absent_and_settleable(claim: &QueueClaim) -> bool {
+    if claim.state == QueueClaimState::QuotaBlocked
+        || claim.quota_block.is_some()
+        || claim.lost_from == Some(QueueClaimState::QuotaBlocked)
+        || report_owed(claim)
+    {
+        return false;
+    }
+    authorized_running_requeue(claim)
+        || is_stopped_harness_freeze(claim)
+        || (claim.state == QueueClaimState::Lost && continue_already_failed(claim))
+}
+
 /// Continue, or retry when a previous continue failed. `None` for every other
 /// claim. Callers project TTL expiry first. A stopped harness freeze remains
 /// `Running` only as transient ledger evidence before this pass; a worker that
@@ -345,6 +367,57 @@ mod tests {
         stored.heartbeat_at_secs = Some(started_at_secs);
         stored.mark_lost();
         stored.clone()
+    }
+
+    /// `#attemptlineage`: only a worker proven gone that owes no hand-back
+    /// leaves a claim the coordinator may settle.
+    #[test]
+    fn attemptlineage_absent_worker_settleable_only_when_nothing_is_owed() {
+        // A lost worker whose continue has not run yet may still return.
+        let lost = lost_running("open a PR", 1_000);
+        assert!(!worker_absent_and_settleable(&lost));
+
+        // A lost worker whose continue failed is gone.
+        let mut failed = lost.clone();
+        failed.lost_continue = Some(LostContinueRecord {
+            attempted_at_secs: 1_100,
+            failed: true,
+            reason: "worker is gone".to_string(),
+            during_turn: false,
+        });
+        assert!(worker_absent_and_settleable(&failed));
+
+        // The `#promptpressure` requeue: Running with the abandon freeze.
+        let mut requeued = lost.clone();
+        requeued.state = QueueClaimState::Running;
+        requeued.lost_from = None;
+        requeued.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 1_200,
+            reason: "requeued".to_string(),
+            abandoned: true,
+        });
+        assert!(authorized_running_requeue(&requeued));
+        assert!(worker_absent_and_settleable(&requeued));
+
+        // A live, unfrozen worker is not absent.
+        let mut running = requeued.clone();
+        running.frozen = None;
+        assert!(!worker_absent_and_settleable(&running));
+
+        // A finished worker's unreported result is owed, not settleable.
+        let mut owed = requeued.clone();
+        owed.frozen = Some(QueueWorkerFreeze {
+            frozen_at_secs: 1_200,
+            reason: "harness reported the worker ended".to_string(),
+            abandoned: false,
+        });
+        owed.publication_state = Some(crate::QueueReportState::Published);
+        assert!(!worker_absent_and_settleable(&owed));
+
+        // A quota block keeps its partial work.
+        let mut quota = failed.clone();
+        quota.state = QueueClaimState::QuotaBlocked;
+        assert!(!worker_absent_and_settleable(&quota));
     }
 
     #[test]

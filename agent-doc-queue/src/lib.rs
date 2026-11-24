@@ -8,6 +8,7 @@ pub mod ack_stays_open;
 pub mod address_completion_proof;
 pub mod address_fix_on_head;
 pub mod answer_ack;
+pub mod attempt_lineage_effect;
 pub mod backlog_sync;
 pub mod blocker_disregard;
 pub mod build_slot;

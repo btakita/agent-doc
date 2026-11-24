@@ -785,7 +785,7 @@ fn prompt_pressure_brief_section(handoff: &GoalLoopHandoff, kind: &PromptPressur
             let pull_request = if crate::prompt_pressure::head_requires_created_pull_request(
                 &handoff.item_text,
             ) {
-                " This row requires a pull request created this turn (#closepressure). Citing a pull request that already existed does not complete it. Open the pull request and include its URL as the effect this turn opened."
+                " This row requires a pull request created this turn (#closepressure). Citing a pull request that already existed does not complete it. Open the pull request and include its URL as the effect this turn opened. A pull request an earlier attempt of this same row opened counts when its receipt or its creation during that attempt proves it (#attemptlineage)."
             } else {
                 ""
             };

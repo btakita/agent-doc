@@ -11191,12 +11191,9 @@ fn try_main() -> anyhow::Result<()> {
                             pressure.incomplete,
                             pressure.complete_by,
                         );
-                    } else if agent_doc_queue::queue_response::hand_back_lacks_required_pull_request(
-                        &pressure.claim.item_text,
-                        &response,
-                    ) {
+                    } else if pressure.close_pressure {
                         eprintln!(
-                            "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not show a pull request this turn created; the row stays open and the attempt was requeued (#closepressure). Citing a pull request that already existed does not complete the task. Create the pull request and include its URL as the effect this turn opened, or return only the review structure. Next: {} and dispatch the same row.",
+                            "[queue] prompt hand-back for {:?} (owner {}, generation {}) does not show a pull request this turn created; the row stays open and the attempt was requeued (#closepressure). Citing a pull request that already existed does not complete the task; a pull request an earlier attempt of this same row opened does, when a recorded receipt or its creation during that attempt proves it (#attemptlineage). Create the pull request and include its URL as the effect this turn opened, or return only the review structure. Next: {} and dispatch the same row.",
                             pressure.claim.item_text,
                             pressure.claim.owner,
                             pressure.claim.generation,

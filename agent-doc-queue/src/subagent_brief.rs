@@ -756,7 +756,9 @@ pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
     "handback and include its result or receipt; returning a prepared artifact does not defer the ",
     "effect to coordinator closeout (`#effectbeforecloseout`). A head that requires a pull request ",
     "is complete only when this turn opened it; citing a pull request that already existed does not ",
-    "complete the task (`#closepressure`). If the effect cannot run, return the ",
+    "complete the task (`#closepressure`). A pull request an earlier attempt of this same row opened ",
+    "is this row's effect, not a pre-existing one: cite its URL and that it was the earlier ",
+    "attempt's (`#attemptlineage`). If the effect cannot run, return the ",
     "exact blocker and leave the task incomplete. This task authorization does not itself grant a ",
     "harness-native tool permission.\n"
 );

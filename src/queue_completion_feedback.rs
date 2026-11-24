@@ -116,6 +116,9 @@ pub(crate) struct PromptPressureRequeue {
     pub external_evidence: Option<String>,
     pub incomplete: String,
     pub complete_by: String,
+    /// `#closepressure`: requeued because the row requires a pull request the
+    /// hand-back neither opened nor traced to an earlier attempt of the row.
+    pub close_pressure: bool,
 }
 
 /// `#promptpressure`: before reporting, requeue a hand-back that does not
@@ -130,6 +133,28 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
     generation: Option<u64>,
     response: &str,
     delivered: bool,
+) -> Result<Option<PromptPressureRequeue>> {
+    requeue_prompt_pressure_hand_back_with(
+        file,
+        item,
+        generation,
+        response,
+        delivered,
+        agent_doc_queue_io::attempt_lineage_effect::github_pull_request_facts,
+    )
+}
+
+/// [`requeue_prompt_pressure_hand_back`] reading a cited pull request's facts
+/// with `observe` (`#attemptlineage`).
+fn requeue_prompt_pressure_hand_back_with(
+    file: &Path,
+    item: &str,
+    generation: Option<u64>,
+    response: &str,
+    delivered: bool,
+    observe: impl FnMut(
+        &agent_doc_queue::attempt_lineage_effect::CitedPullRequest,
+    ) -> Option<agent_doc_queue::attempt_lineage_effect::PullRequestFacts>,
 ) -> Result<Option<PromptPressureRequeue>> {
     let _lock = acquire_completion_lock(
         file,
@@ -238,6 +263,7 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
                 external_evidence: blocker.evidence,
                 incomplete: blocker.incomplete,
                 complete_by: blocker.complete_by,
+                close_pressure: false,
             }));
         }
         let updated = if prior_hold.is_some() {
@@ -288,33 +314,49 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
             external_evidence: blocker.evidence,
             incomplete: blocker.incomplete,
             complete_by: blocker.complete_by,
+            close_pressure: false,
         }));
     }
     // `#closepressure`: a delivered hand-back and execution evidence still
     // leave the row unfinished when the task required a pull request this
     // turn and the response only cites one that already existed.
+    // `#attemptlineage`: a pull request an earlier attempt of this same row
+    // opened is the row's own effect, not one that already existed. A
+    // recorded receipt or verifiable provenance proves it; a pull request the
+    // row never created still requeues.
     if agent_doc_queue::queue_response::hand_back_lacks_required_pull_request(
         &claim.item_text,
         response,
     ) {
-        let claim = agent_doc_queue_io::goal_loop_handoff::requeue_with_prompt_pressure(
-            file,
-            &current,
-            &claim,
-            Some(generation),
-            response,
-            agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
-        )?;
-        return Ok(Some(PromptPressureRequeue {
-            claim: claim.into(),
-            kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
-            review_id: None,
-            external_evidence: None,
-            incomplete: String::new(),
-            complete_by: String::new(),
-        }));
+        match agent_doc_queue_io::attempt_lineage_effect::earlier_attempt_pull_request_with(
+            file, &claim, response, observe,
+        )? {
+            Some(proof) => {
+                agent_doc_queue_io::attempt_lineage_effect::log_accepted(file, &claim, &proof);
+            }
+            None => {
+                let claim = agent_doc_queue_io::goal_loop_handoff::requeue_with_prompt_pressure(
+                    file,
+                    &current,
+                    &claim,
+                    Some(generation),
+                    response,
+                    agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
+                )?;
+                return Ok(Some(PromptPressureRequeue {
+                    claim: claim.into(),
+                    kind: agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose,
+                    review_id: None,
+                    external_evidence: None,
+                    incomplete: String::new(),
+                    complete_by: String::new(),
+                    close_pressure: true,
+                }));
+            }
+        }
     }
     if delivered || !agent_doc_queue::prompt_pressure::prose_blocker_needs_pressure(response) {
+        reopen_close_pressure_requeue(file, &claim, response)?;
         return Ok(None);
     }
     let claim = agent_doc_queue_io::goal_loop_handoff::requeue_with_prompt_pressure(
@@ -332,7 +374,75 @@ pub(crate) fn requeue_prompt_pressure_hand_back(
         external_evidence: None,
         incomplete: String::new(),
         complete_by: String::new(),
+        close_pressure: false,
     }))
+}
+
+/// `#attemptlineage`: reopen the exact attempt a `#closepressure` verdict
+/// requeued once its hand-back passes that gate.
+///
+/// A prompt-pressure requeue retains the started attempt abandoned
+/// (`authorized_running_requeue`), and an abandoned attempt refuses its
+/// report. When the recorded hand-off for this generation and worker is a
+/// `#closepressure` verdict, that verdict is what abandoned the attempt, and a
+/// hand-back that now shows the pull request (created this turn, or proven to
+/// be an earlier attempt's) answers it. The coordinator can then report this
+/// same generation instead of being left with a row no command closes. Any
+/// other requeue (a prose blocker, a plain `release --requeue`) stays
+/// abandoned.
+fn reopen_close_pressure_requeue(
+    file: &Path,
+    claim: &agent_doc_queue::queue_claim::QueueClaim,
+    response: &str,
+) -> Result<()> {
+    let reportable_loss = claim.state == agent_doc_queue::queue_claim::QueueClaimState::Lost
+        || agent_doc_queue::lost_running_recovery::authorized_running_requeue(claim);
+    if !reportable_loss {
+        return Ok(());
+    }
+    let Some(worker_id) = claim
+        .worker
+        .as_ref()
+        .map(|worker| worker.worker_id.as_str())
+    else {
+        return Ok(());
+    };
+    let handoffs = agent_doc_queue_io::goal_loop_handoff::load(file)?;
+    let close_pressure_verdict = handoffs.handoffs.iter().rev().any(|handoff| {
+        handoff.identity == claim.identity
+            && handoff.generation == claim.generation
+            && handoff.worker_id.as_deref() == Some(worker_id)
+            && handoff.prompt_pressure
+                == Some(agent_doc_queue::goal_preset_terminal::PromptPressureKind::Prose)
+            && agent_doc_queue::queue_response::hand_back_lacks_required_pull_request(
+                &handoff.item_text,
+                &handoff.response,
+            )
+    });
+    if !close_pressure_verdict {
+        return Ok(());
+    }
+    if agent_doc_queue_io::queue_claim::reopen_lost_attempt_for_report(
+        file,
+        &claim.item_text,
+        claim.generation,
+        worker_id,
+        true,
+        response,
+    )?
+    .is_some()
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_claim_close_pressure_reopened owner={} generation={} item_bytes={} (#attemptlineage)",
+                claim.owner,
+                claim.generation,
+                claim.item_text.trim().len(),
+            ),
+        );
+    }
+    Ok(())
 }
 
 /// `#blockerreportterminal`: the same prompt-blocker hand-back, reported again
@@ -398,6 +508,7 @@ fn recorded_prompt_blocker_hand_back(
         external_evidence: blocker.evidence,
         incomplete: blocker.incomplete,
         complete_by: blocker.complete_by,
+        close_pressure: false,
     }))
 }
 
@@ -4410,6 +4521,259 @@ The setup pull request is the merged https://github.com/haiven-dev/haiven-sdk/pu
                 claim.owner == "subagent:closepressure-2" && claim.state.blocks_dispatch()
             }),
             "{ledger:?}"
+        );
+    }
+
+    const STGSDKMOD_ROW: &str = "[#q-7256e3fa62d9] follow-up: agent: in `/home/brian/work/btakita/agent-loop/src/haiven-dev/src/haiven-sdk`, open a PR to `sdk-dev` that handles `chat.message.moderated` in the SDK chat client, so a held message moves to accepted or removed. Mirror how web chat (haiven-frontend) shows pending, held and moderated messages, add a test, and re-vendor Unity. [#q-fbf061cf35e4]";
+
+    /// The generation-2..4 hand-back, abridged: #402 is finished, every
+    /// commit is generation 1's, and this generation opened nothing.
+    const STGSDKMOD_HAND_BACK: &str = "**Summary**\n\
+PR https://github.com/haiven-dev/haiven-sdk/pull/402 is finished, and CI passed on head `7913f3cb7190a2bca86b1fc6f4bcd505c91c2a51`: every check completed, none pending, none failed, and GitHub reports it ready to merge with no conflicts.\n\n\
+**What changed**\n\
+- Branch: `fix/sdk-chat-moderated-event`, targeting `sdk-dev`. It is an open PR, not a draft.\n\
+- Commits, both by generation 1. This generation added none.\n\n\
+**Verification**\n\
+- `gh pr view 402`: open, head `7913f3cb7`, ready to merge, no conflicts.\n\n\
+**Action items**\n\
+- human (haiven-sdk reviewer): review and approve https://github.com/haiven-dev/haiven-sdk/pull/402.\n";
+
+    fn stgsdkmod_doc(dir: &Path) -> std::path::PathBuf {
+        fs::create_dir_all(dir.join(".agent-doc")).unwrap();
+        let doc = dir.join("sdk-dev.md");
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sdk-dev\nagent_doc_format: template\n---\n\n<!-- agent:queue -->\n- {STGSDKMOD_ROW}\n<!-- /agent:queue -->\n\n<!-- agent:exchange patch=append -->\n<!-- agent:boundary:keep -->\n<!-- /agent:exchange -->\n"
+            ),
+        )
+        .unwrap();
+        doc
+    }
+
+    /// Start generation `generation` of the row on `worker`. A later
+    /// generation follows a requeue of the one before, as the work pool does.
+    fn stgsdkmod_start(doc: &Path, generation: u64, worker: &str) {
+        let (_, claim) =
+            agent_doc_queue_io::queue_claim::claim(doc, STGSDKMOD_ROW, "subagent:stgsdkmod", 600)
+                .unwrap();
+        assert_eq!(claim.generation, generation);
+        agent_doc_queue_io::queue_claim::start_attempt(
+            doc,
+            STGSDKMOD_ROW,
+            "subagent:stgsdkmod",
+            worker,
+            600,
+            generation,
+        )
+        .unwrap();
+    }
+
+    /// Set each attempt's `Created` receipt to the live ledger's times:
+    /// generation 1 at 21:59:49Z, generation 2 at 00:52:22Z.
+    fn stgsdkmod_backdate_lineage(doc: &Path) -> u64 {
+        const GEN1_CREATED: u64 = 1_795_471_189;
+        const GEN2_CREATED: u64 = 1_795_481_542;
+        let mut ledger = agent_doc_queue_io::queue_lineage::load(doc).unwrap();
+        for attempt in &mut ledger.attempts {
+            let at = match attempt.generation {
+                1 => GEN1_CREATED,
+                2 => GEN2_CREATED,
+                other => GEN2_CREATED + other * 30,
+            };
+            for event in &mut attempt.events {
+                event.at_secs = at;
+            }
+        }
+        let root = agent_doc_fs::find_project_root(doc).unwrap();
+        let conn = agent_doc_sqlite::state_store::open_state_db(&root).unwrap();
+        agent_doc_sqlite::state_store::upsert_queue_document_state_in_db(
+            &conn,
+            &agent_doc_sqlite::state_store::QueueDocumentStateRecord {
+                document_hash: agent_doc_hash::path_hash(doc).unwrap(),
+                state_kind: agent_doc_queue_io::queue_lineage::QUEUE_LINEAGE_STATE_KIND.to_string(),
+                canonical_path: doc.canonicalize().unwrap().display().to_string(),
+                payload_json: serde_json::to_string(&ledger).unwrap(),
+                updated_at_secs: 0,
+            },
+        )
+        .unwrap();
+        GEN1_CREATED
+    }
+
+    fn pr402_facts(
+        created_at_secs: u64,
+    ) -> impl FnMut(
+        &agent_doc_queue::attempt_lineage_effect::CitedPullRequest,
+    ) -> Option<agent_doc_queue::attempt_lineage_effect::PullRequestFacts> {
+        move |pull_request| {
+            (pull_request.number == 402).then(|| {
+                agent_doc_queue::attempt_lineage_effect::PullRequestFacts {
+                    created_at_secs,
+                    head_ref: "fix/sdk-chat-moderated-event".to_string(),
+                    head_sha: "7913f3cb7190a2bca86b1fc6f4bcd505c91c2a51".to_string(),
+                    state: agent_doc_queue::attempt_lineage_effect::PullRequestLifecycle::Open,
+                }
+            })
+        }
+    }
+
+    /// `#attemptlineage`: the `stgsdkmod` sequence. Generation 1 opened
+    /// haiven-sdk #402 at 22:14:28Z and was then frozen; generation 2 found
+    /// it finished and cited it. `#closepressure` requeued that hand-back
+    /// (and generations 3 and 4) because THIS attempt had not opened the pull
+    /// request. A pull request an earlier attempt of the same row opened is
+    /// the row's effect: the report lands.
+    #[test]
+    fn attemptlineage_stgsdkmod_cited_pr_from_an_earlier_generation_reports_the_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = stgsdkmod_doc(dir.path());
+        stgsdkmod_start(&doc, 1, "a1f8f4c4f759dc682");
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            STGSDKMOD_ROW,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+        stgsdkmod_start(&doc, 2, "ae465212a5b46b9c1");
+        let gen1_created = stgsdkmod_backdate_lineage(&doc);
+        let pr402_created = 1_795_475_668; // 2026-11-23T22:14:28Z
+
+        // A pull request that predates the row is still refused.
+        let predates = requeue_prompt_pressure_hand_back_with(
+            &doc,
+            STGSDKMOD_ROW,
+            Some(2),
+            STGSDKMOD_HAND_BACK,
+            true,
+            pr402_facts(gen1_created - 1),
+        )
+        .unwrap()
+        .expect("a pull request the row never created does not complete it");
+        assert!(predates.close_pressure);
+        stgsdkmod_start(&doc, 3, "ae465212a5b46b9c1");
+
+        // Without a receipt or readable facts the citation fails closed.
+        let unknown = requeue_prompt_pressure_hand_back_with(
+            &doc,
+            STGSDKMOD_ROW,
+            Some(3),
+            STGSDKMOD_HAND_BACK,
+            true,
+            |_| None,
+        )
+        .unwrap()
+        .expect("unproven provenance stays refused");
+        assert!(unknown.close_pressure);
+        stgsdkmod_start(&doc, 4, "ae465212a5b46b9c1");
+        stgsdkmod_backdate_lineage(&doc);
+
+        assert!(
+            requeue_prompt_pressure_hand_back_with(
+                &doc,
+                STGSDKMOD_ROW,
+                Some(4),
+                STGSDKMOD_HAND_BACK,
+                true,
+                pr402_facts(pr402_created),
+            )
+            .unwrap()
+            .is_none(),
+            "generation 1 opened #402 during its own attempt"
+        );
+        let outcome = report_complete(
+            &doc,
+            STGSDKMOD_ROW,
+            Some(4),
+            None,
+            None,
+            STGSDKMOD_HAND_BACK,
+        )
+        .expect("the row's own pull request reports the row");
+        assert_eq!(
+            outcome.claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
+        );
+    }
+
+    /// `#attemptlineage`: the ledger the old binary left. Generation 4's
+    /// hand-back was requeued by `#closepressure`, which retains the started
+    /// attempt abandoned, and an abandoned attempt refuses its report. Once
+    /// the same hand-back passes the gate, the coordinator reports that same
+    /// generation: the verdict that abandoned it is answered.
+    #[test]
+    fn attemptlineage_a_close_pressure_requeue_reopens_when_its_hand_back_now_passes() {
+        let dir = tempfile::tempdir().unwrap();
+        let doc = stgsdkmod_doc(dir.path());
+        stgsdkmod_start(&doc, 1, "a1f8f4c4f759dc682");
+        agent_doc_queue_io::claim_release_receipt::release_attempt(
+            &doc,
+            STGSDKMOD_ROW,
+            agent_doc_queue_io::claim_release_receipt::ReleaseKind::Requeue,
+            Some(1),
+        )
+        .unwrap();
+        stgsdkmod_start(&doc, 2, "ae465212a5b46b9c1");
+        stgsdkmod_backdate_lineage(&doc);
+        // The old binary's verdict.
+        requeue_prompt_pressure_hand_back_with(
+            &doc,
+            STGSDKMOD_ROW,
+            Some(2),
+            STGSDKMOD_HAND_BACK,
+            true,
+            |_| None,
+        )
+        .unwrap()
+        .expect("the old verdict requeued generation 2");
+        let abandoned = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .into_iter()
+            .find(|claim| claim.generation == 2)
+            .unwrap();
+        assert!(
+            agent_doc_queue::lost_running_recovery::authorized_running_requeue(&abandoned),
+            "{abandoned:#?}"
+        );
+        assert!(
+            report_complete(
+                &doc,
+                STGSDKMOD_ROW,
+                Some(2),
+                None,
+                None,
+                STGSDKMOD_HAND_BACK
+            )
+            .is_err(),
+            "an abandoned attempt refuses its report until the verdict is answered"
+        );
+
+        assert!(
+            requeue_prompt_pressure_hand_back_with(
+                &doc,
+                STGSDKMOD_ROW,
+                Some(2),
+                STGSDKMOD_HAND_BACK,
+                true,
+                pr402_facts(1_795_475_668),
+            )
+            .unwrap()
+            .is_none()
+        );
+        let outcome = report_complete(
+            &doc,
+            STGSDKMOD_ROW,
+            Some(2),
+            None,
+            None,
+            STGSDKMOD_HAND_BACK,
+        )
+        .expect("the answered verdict reopens the same generation");
+        assert_eq!(
+            outcome.claim.state,
+            agent_doc_queue::queue_claim::QueueClaimState::Reported
         );
     }
 

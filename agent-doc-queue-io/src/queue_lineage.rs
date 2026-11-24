@@ -1514,6 +1514,71 @@ pub struct LineageWorktree {
     pub completed: bool,
 }
 
+/// `#attemptlineage`: what each recorded attempt of `item`'s row lineage
+/// produced, in generation order: when it was created, and every branch, ref,
+/// and commit its receipts name. Attempts that only correlate by an earlier
+/// identity of the same row are included.
+pub fn attempt_effects_for_item(
+    ledger: &QueueLineageLedger,
+    item: &str,
+) -> Vec<agent_doc_queue::attempt_lineage_effect::LineageAttemptEffects> {
+    let identity = claim_identity(item);
+    let mut effects: Vec<agent_doc_queue::attempt_lineage_effect::LineageAttemptEffects> = ledger
+        .attempts
+        .iter()
+        .filter(|attempt| attempt.matches_identity(&identity))
+        .map(|attempt| {
+            let created_at_secs = attempt
+                .events
+                .iter()
+                .find(|event| event.kind == QueueLineageEventKind::Created)
+                .or_else(|| attempt.events.first())
+                .map(|event| event.at_secs);
+            let mut refs = Vec::new();
+            let mut shas = Vec::new();
+            for event in &attempt.events {
+                for value in [&event.branch, &event.pushed_ref, &event.sink_ref]
+                    .into_iter()
+                    .flatten()
+                {
+                    if !value.trim().is_empty() && !refs.contains(value) {
+                        refs.push(value.clone());
+                    }
+                }
+                for value in [&event.source_sha, &event.integration_sha]
+                    .into_iter()
+                    .flatten()
+                {
+                    if !value.trim().is_empty() && !shas.contains(value) {
+                        shas.push(value.clone());
+                    }
+                }
+            }
+            agent_doc_queue::attempt_lineage_effect::LineageAttemptEffects {
+                generation: attempt.generation,
+                created_at_secs,
+                refs,
+                shas,
+                created_pull_requests: Vec::new(),
+            }
+        })
+        .collect();
+    effects.sort_by_key(|attempt| attempt.generation);
+    effects.dedup_by(|later, earlier| {
+        if later.generation != earlier.generation {
+            return false;
+        }
+        earlier.created_at_secs = match (earlier.created_at_secs, later.created_at_secs) {
+            (Some(a), Some(b)) => Some(a.min(b)),
+            (a, b) => a.or(b),
+        };
+        earlier.refs.append(&mut later.refs);
+        earlier.shas.append(&mut later.shas);
+        true
+    });
+    effects
+}
+
 /// Worktrees named by `ledger`, in attempt order. Attempts with no directory
 /// are omitted. Removed attempts stay in the list so the caller can tell a
 /// disposed path from one that was never recorded.

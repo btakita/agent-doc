@@ -116,7 +116,9 @@ pub fn reserved_edge_hint(suffix: &str) -> &'static str {
     match suffix {
         " |+" => "reserved for the deep pipe, which is not implemented yet",
         " |*" => "reserved; did you mean ` |+` (deep pipe)?",
-        " |>" => "reserved for the hand-off pipe, which is not implemented yet; use ` |` to pipe within one task",
+        " |>" => {
+            "reserved for the hand-off pipe, which is not implemented yet; use ` |` to pipe within one task"
+        }
         _ => "reserved for a future edge operator",
     }
 }
@@ -329,6 +331,71 @@ pub fn unpiped_parent_rows(text: &str) -> Vec<StatementRow> {
     out
 }
 
+/// Binary-owned stage glyph on the statement row a worker is running
+/// (`#pipeprompt` stage indicator).
+pub const STAGE_RUNNING_GLYPH: &str = "▶️";
+
+/// Binary-owned stage glyph on a statement row whose stage finished.
+pub const STAGE_DONE_GLYPH: &str = "✅";
+
+/// `row` (one row's content after its list marker) without a leading stage
+/// glyph. Stage glyphs are bookkeeping, never work text.
+pub fn strip_stage_glyph(row: &str) -> &str {
+    let trimmed = row.trim_start();
+    for glyph in [STAGE_RUNNING_GLYPH, STAGE_DONE_GLYPH] {
+        if let Some(rest) = trimmed.strip_prefix(glyph)
+            && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        {
+            return rest.trim_start();
+        }
+    }
+    row
+}
+
+/// A folded statement's text with the stage glyph of every child list row
+/// repainted for `stage` (1-based over [`statement_rows`]; the head is stage
+/// 1). Rows before the stage show [`STAGE_DONE_GLYPH`], the stage row shows
+/// [`STAGE_RUNNING_GLYPH`], later rows none. The head row is never painted:
+/// its own lifecycle glyph already says it runs. `None` strips every stage
+/// glyph (the statement is not running). Every other byte is kept.
+pub fn project_stage_glyphs(text: &str, stage: Option<usize>) -> String {
+    let mut out = String::with_capacity(text.len() + 16);
+    let mut ordinal = 1usize;
+    for (index, line) in text.split_inclusive('\n').enumerate() {
+        let body = line.trim_end_matches(['\n', '\r']);
+        let content = (index > 0 && line_indent_width(body) > 0)
+            .then(|| list_item_content(body))
+            .flatten()
+            .filter(|content| !content.trim().is_empty() && !is_list_comment(content));
+        let Some(content) = content else {
+            out.push_str(line);
+            continue;
+        };
+        ordinal += 1;
+        let marker_len = body.len() - content.len();
+        let work = strip_stage_glyph(content);
+        let glyph = match stage {
+            Some(stage) if ordinal < stage => Some(STAGE_DONE_GLYPH),
+            Some(stage) if ordinal == stage => Some(STAGE_RUNNING_GLYPH),
+            _ => None,
+        };
+        out.push_str(&body[..marker_len]);
+        if let Some(glyph) = glyph {
+            out.push_str(glyph);
+            out.push(' ');
+        }
+        out.push_str(work);
+        out.push_str(&line[body.len()..]);
+    }
+    out
+}
+
+/// `text` with every child row's stage glyph removed ([`project_stage_glyphs`]
+/// with no stage): the form identity and edit comparisons read.
+pub fn strip_stage_glyphs(text: &str) -> String {
+    project_stage_glyphs(text, None)
+}
+
 fn is_list_comment(content: &str) -> bool {
     let trimmed = content.trim();
     trimmed.len() >= 4 && trimmed.starts_with("%%") && trimmed.ends_with("%%")
@@ -337,7 +404,7 @@ fn is_list_comment(content: &str) -> bool {
 /// One row's work text: projection prefix, generated id and the explicit
 /// operator removed.
 pub fn row_work_text(raw: &str) -> String {
-    let work = crate::strip_attempt_projection_prefix(raw).trim();
+    let work = crate::strip_attempt_projection_prefix(strip_stage_glyph(raw)).trim();
     let work = strip_edge_marker(work);
     let work = crate::strip_generated_queue_prompt_id_annotation(&work);
     let work = strip_edge_marker(work.trim());
@@ -557,5 +624,25 @@ mod tests {
         // A ` >` stage folds its own list; rows under it need no operator.
         let folded = "Collect |\n  - summarize >\n    - context\n      - more context";
         assert!(unpiped_parent_rows(folded).is_empty());
+    }
+
+    #[test]
+    fn stage_glyphs_paint_children_and_strip_cleanly() {
+        let text =
+            "Collect |\n  - group |\n    - draft |\n      - under 200 words\n      - %% note %%";
+        let painted = project_stage_glyphs(text, Some(3));
+        assert_eq!(
+            painted,
+            "Collect |\n  - ✅ group |\n    - ▶️ draft |\n      - under 200 words\n      - %% note %%"
+        );
+        assert_eq!(project_stage_glyphs(&painted, Some(3)), painted);
+        assert_eq!(strip_stage_glyphs(&painted), text);
+        assert_eq!(project_stage_glyphs(text, Some(1)), text);
+        assert_eq!(
+            statement_pipeline(&painted),
+            "Collect | group | draft | under 200 words"
+        );
+        assert_eq!(strip_stage_glyph("▶️ draft |"), "draft |");
+        assert_eq!(strip_stage_glyph("▶️draft"), "▶️draft");
     }
 }

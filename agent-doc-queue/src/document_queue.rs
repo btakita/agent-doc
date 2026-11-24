@@ -6379,7 +6379,7 @@ pub fn submitted_group_prompt_with_context_at(
 /// Line that follows a submitted ` |` statement (`#pipeprompt`). The
 /// statement's children ARE the prompt, so it never carries the context-only
 /// [`PROMPT_TREE_HEADER`].
-pub const PIPE_PROMPT_HEADER: &str = "Structured prompt (`#pipeprompt`): each row ending in ` |` passes its result to the rows nested under it, in reading order. Evaluate the whole statement above as ONE task, read as this pipeline:";
+pub const PIPE_PROMPT_HEADER: &str = "Structured prompt (`#pipeprompt`): each row ending in ` |` passes its result to the rows nested under it, in reading order. Evaluate the whole statement above as ONE task. Stage 1 is its top row and each later row is the next stage; as you start stage N, report it with `agent-doc queue claim <FILE> --item <ITEM> --owner <OWNER> --refresh --generation <GENERATION> --stage N` so the row shows ▶️. Read the statement as this pipeline:";
 
 /// Line that follows a submitted ` >` fold (`#foldprompt`).
 pub const FOLD_PROMPT_HEADER: &str = "Folded prompt (`#foldprompt`, ` >`): the row above and its whole nested list are ONE task; the list is that row's context.";
@@ -6432,7 +6432,8 @@ fn submitted_edge_block(
     identity: &str,
     op: agent_doc_element_queue::pipe::EdgeOp,
 ) -> String {
-    let statement = without_binary_markers(identity);
+    let statement =
+        agent_doc_element_queue::pipe::strip_stage_glyphs(&without_binary_markers(identity));
     let ancestors = nest_ancestor_path(entries, index).map(|path| without_binary_markers(&path));
     let tree = match &ancestors {
         Some(ancestors) => prefix_nest_vector(ancestors, &statement),

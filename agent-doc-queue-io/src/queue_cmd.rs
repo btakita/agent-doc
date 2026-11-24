@@ -543,6 +543,11 @@ fn derive_runtime_projection_scoped(
         &repair_claims,
     )?;
     let current = restored_edges.as_deref().unwrap_or(current);
+    let staged = agent_doc_queue::queue_mirror_projection::project_statement_stages(
+        current,
+        &repair_claims,
+    )?;
+    let current = staged.as_deref().unwrap_or(current);
     if let Ok(ledger) = &mut claim_ledger
         && !ledger.claims.is_empty()
         && let Some(view) = agent_doc_queue::queue_claim::ClaimQueueView::from_content(current)

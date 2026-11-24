@@ -147,6 +147,11 @@ head:
   is prose. Adding or removing the operator does not change the row's claim
   identity. While the head is claimed an edit cannot remove it, and while a
   row inside is claimed adding it does not fold the block.
+- Stage indicator: the worker reports the stage it starts with
+  `agent-doc queue claim <FILE> --item <ITEM> --owner <OWNER> --refresh
+  --generation <N> --stage <n>` (stage 1 is the top row). That row shows
+  `▶️` and earlier rows `✅`; the head keeps its own lifecycle glyph. The
+  glyphs are binary bookkeeping and leave when the claim does.
 - The lint reports a ` |` or ` >` row with no children, a missing inner ` |`,
   a code span ending in ` |`, and the reserved suffixes ` ||` and ` |+`
   (deep pipe) and ` |>` (hand-off pipe), which are not implemented yet, plus

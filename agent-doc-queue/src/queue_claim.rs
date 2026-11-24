@@ -212,6 +212,12 @@ pub struct QueueClaim {
     /// `None` when `item_text` is already that row, or for an older claim.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub claim_time_row: Option<String>,
+    /// `#pipeprompt` stage indicator: the 1-based statement row the worker
+    /// last reported running (`queue claim --refresh --stage N`). The head is
+    /// stage 1. Claim projection paints `▶️` on that row and `✅` on earlier
+    /// rows. `None` until the worker reports a stage.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stage: Option<u32>,
     /// When this attempt first became `Reported` (`#reportedcloseout`): the
     /// moment its result became coordinator closeout debt. `None` for an
     /// attempt reported before the field existed, or not reported yet.
@@ -1781,6 +1787,7 @@ impl QueueClaimLedger {
             followed_from: Vec::new(),
             followed_generation: 0,
             claim_time_row: None,
+            stage: None,
             reported_at_secs: None,
             heartbeat_at_secs: None,
             frozen: None,
@@ -6192,6 +6199,7 @@ mod tests {
                     followed_from: Vec::new(),
                     followed_generation: 0,
                     claim_time_row: None,
+                    stage: None,
                     reported_at_secs: None,
                     heartbeat_at_secs: None,
                     frozen: None,
@@ -6218,6 +6226,7 @@ mod tests {
                     followed_from: Vec::new(),
                     followed_generation: 0,
                     claim_time_row: None,
+                    stage: None,
                     reported_at_secs: None,
                     heartbeat_at_secs: None,
                     frozen: None,

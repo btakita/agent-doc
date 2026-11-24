@@ -1030,6 +1030,8 @@ fn queue_row_work(body: &str, identity: Option<&str>) -> String {
         work = rest.trim_start();
     }
     work = agent_doc_element_queue::strip_attempt_projection_prefix(work);
+    // `#pipeprompt`: a statement row's stage glyph is binary bookkeeping.
+    work = agent_doc_element_queue::pipe::strip_stage_glyph(work);
     let annotation = identity.map(|identity| format!("[#{identity}]"));
     let without_identity = annotation.as_deref().map_or_else(
         || work.to_string(),
@@ -5160,6 +5162,29 @@ mod tests {
         );
         assert_eq!(rebased.matches("[#poolrow-8ac1]").count(), 1, "{rebased}");
         assert!(rebased.contains(DUPWRITE_CLAIM_REPORTED), "{rebased}");
+    }
+
+    /// `#pipeprompt` stage indicator: a `▶️` / `✅` repaint of a statement row
+    /// is binary bookkeeping, the same class as a lifecycle marker. When the
+    /// older target repainted a stage glyph on a row the operator kept typing,
+    /// that repaint is a stale copy and reverts to the base row, exactly as a
+    /// `📥` repaint does.
+    #[test]
+    fn dupwrite_stage_glyph_repaint_is_a_stale_copy_of_a_typed_row() {
+        let statement = |child: &str| {
+            dupwrite_doc(&format!(
+                "- ### 🚧 [#subagent:pipe#1] Collect the issues | [#q-0123456789ab]\n  - {child}\n    - draft a summary\n"
+            ))
+        };
+        let base = statement("group them by |");
+        let typed = statement("group them by component |");
+        for glyph in ["▶️", "✅", "📥"] {
+            let repainted = statement(&format!("{glyph} group them by |"));
+            let stale = neutralize_stale_queue_row_copies(&base, &repainted, &typed)
+                .unwrap_or_else(|| panic!("{glyph}: the repaint is a stale copy"));
+            assert_eq!((stale.reverted, stale.advanced), (1, 0), "{glyph}");
+            assert_eq!(stale.target, base, "{glyph}");
+        }
     }
 
     /// `#dupwrite`: a lifecycle marker is binary-owned. When the older target

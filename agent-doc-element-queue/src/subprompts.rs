@@ -264,7 +264,8 @@ pub fn strike_subprompt_block(block: &str) -> String {
             continue;
         }
         let marker_len = body.len() - content.len();
-        let work = crate::struck_work_text(content);
+        // `#pipeprompt`: a stage glyph is bookkeeping, never struck text.
+        let work = crate::struck_work_text(crate::pipe::strip_stage_glyph(content));
         out.push_str(&body[..marker_len]);
         out.push_str("~~");
         if last == index {

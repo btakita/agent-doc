@@ -1209,6 +1209,7 @@ fn restored_reported_claim(
         followed_from,
         followed_generation: attempt.generation,
         claim_time_row: None,
+        stage: None,
         reported_at_secs: Some(now),
         heartbeat_at_secs: None,
         frozen: None,
@@ -1631,6 +1632,32 @@ pub fn start_attempt_with_owner_session(
         ),
     }
     outcome
+}
+
+/// Record the statement stage `claim`'s worker reports running
+/// (`queue claim --refresh --stage N`, `#pipeprompt`). Fenced to the exact
+/// identity, owner and generation the refresh returned; claim projection
+/// then paints the stage glyphs.
+pub fn record_stage(file: &Path, claim: &QueueClaim, stage: u32) -> Result<QueueClaim> {
+    if stage == 0 {
+        bail!("queue claim --stage is 1-based: stage 1 is the statement's top row");
+    }
+    mutate_ledger(file, |ledger| {
+        let Some(held) = ledger.claims.iter_mut().find(|held| {
+            held.identity == claim.identity
+                && held.owner == claim.owner
+                && held.generation == claim.generation
+        }) else {
+            bail!(
+                "queue claim --stage: {} generation {} no longer holds {:?}",
+                claim.owner,
+                claim.generation,
+                claim.item_text
+            );
+        };
+        held.stage = Some(stage);
+        Ok(held.clone())
+    })
 }
 
 /// Extend `owner`'s live claim on `item` to `now + ttl_secs`

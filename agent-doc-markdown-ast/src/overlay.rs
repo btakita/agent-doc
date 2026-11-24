@@ -1496,7 +1496,9 @@ pub fn edge_block_end(lines: &[&str], parent: usize, item_content: &str) -> Opti
             {
                 break;
             }
-            let child_work = content.trim();
+            // A stage glyph (`▶️`, `✅`) is the block's own bookkeeping; any
+            // other projection is a row's own attempt.
+            let child_work = agent_doc_element_queue::pipe::strip_stage_glyph(content.trim());
             if agent_doc_element_queue::strip_attempt_projection_prefix(child_work) != child_work {
                 return None;
             }
@@ -1668,7 +1670,7 @@ pub fn pipe_statement_lints(content: &str) -> Vec<PipeLint> {
                         ),
                     );
                 }
-                let work = row.trim();
+                let work = agent_doc_element_queue::pipe::strip_stage_glyph(row.trim());
                 if agent_doc_element_queue::strip_attempt_projection_prefix(work) != work {
                     push(
                         PipeLintKind::ClaimedRowInStatement,

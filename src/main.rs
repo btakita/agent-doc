@@ -5885,6 +5885,11 @@ enum QueueAction {
         /// `--refresh` for generated claims.
         #[arg(long, requires = "refresh")]
         generation: Option<u64>,
+        /// With `--refresh`: the 1-based ` |` statement stage the worker is
+        /// running now (`#pipeprompt`; stage 1 is the top row). The row shows
+        /// `▶️` and earlier rows `✅`.
+        #[arg(long, value_name = "N", requires = "refresh")]
+        stage: Option<u32>,
         /// Harness the worker will run on (`claude`, `codex`, `grok`,
         /// `opencode`, `cursor`). Omit it to use this coordinator's harness.
         /// A coordinator whose own harness is out of usage passes this to
@@ -10610,12 +10615,17 @@ fn try_main() -> anyhow::Result<()> {
                 ttl_secs,
                 refresh,
                 generation,
+                stage,
                 harness,
             } => {
                 if refresh {
-                    let claim = agent_doc_queue_io::queue_claim::refresh_attempt(
+                    let mut claim = agent_doc_queue_io::queue_claim::refresh_attempt(
                         &file, &item, &owner, ttl_secs, generation,
                     )?;
+                    if let Some(stage) = stage {
+                        claim =
+                            agent_doc_queue_io::queue_claim::record_stage(&file, &claim, stage)?;
+                    }
                     let queue_effects = CliQueueCommandEffects;
                     agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
                         &queue_effects,

@@ -480,3 +480,76 @@ fn removing_the_operator_from_a_claimed_head_is_refused() {
         None
     );
 }
+
+fn staged_claim(stage: Option<u32>, state: &str) -> crate::queue_claim::QueueClaim {
+    let mut claim = edge_claim("Collect the issues |\n  - group them |\n    - draft", state);
+    claim.stage = stage;
+    claim
+}
+
+const STAGED: &str = "- ### 🚧 [#subagent:pipe#3] Collect the issues | [#q-0123456789ab]\n  - group them |\n    - draft\n- next\n";
+
+#[test]
+fn stage_glyphs_follow_the_reported_stage_and_leave_with_the_claim() {
+    use crate::queue_mirror_projection::project_statement_stages;
+    let doc = queue_doc(STAGED);
+    // No report yet: stage 1 is the head, which its lifecycle glyph marks.
+    assert_eq!(
+        project_statement_stages(&doc, &[staged_claim(None, "running")]).unwrap(),
+        None
+    );
+    let painted = project_statement_stages(&doc, &[staged_claim(Some(3), "running")])
+        .unwrap()
+        .expect("stage 3 paints");
+    assert_eq!(
+        painted,
+        queue_doc(
+            "- ### 🚧 [#subagent:pipe#3] Collect the issues | [#q-0123456789ab]\n  - ✅ group them |\n    - ▶️ draft\n- next\n"
+        )
+    );
+    // Idempotent, and the glyphs leave when the claim does.
+    assert_eq!(
+        project_statement_stages(&painted, &[staged_claim(Some(3), "running")]).unwrap(),
+        None
+    );
+    assert_eq!(
+        project_statement_stages(&painted, &[staged_claim(Some(3), "lost")]).unwrap(),
+        Some(doc.clone())
+    );
+    assert_eq!(
+        project_statement_stages(&painted, &[]).unwrap(),
+        Some(doc.clone())
+    );
+
+    // Glyphs are bookkeeping: the statement still folds, keeps its claim
+    // identity, and submits without them.
+    let body = |text: &str| {
+        text.strip_prefix("<!-- agent:run -->\n")
+            .and_then(|rest| rest.strip_suffix("<!-- /agent:run -->\n"))
+            .unwrap()
+            .to_string()
+    };
+    let plain = parsed(&body(&doc));
+    let staged = parsed(&body(&painted));
+    assert_eq!(staged.len(), 2);
+    assert_eq!(executable_prompt_indexes(&staged), vec![0, 1]);
+    assert_eq!(
+        crate::queue_claim::claim_identity_at(&staged, 0),
+        crate::queue_claim::claim_identity_at(&plain, 0)
+    );
+    assert_eq!(
+        submitted_prompt_at(&staged, 0),
+        submitted_prompt_at(&plain, 0)
+    );
+    assert!(agent_doc_markdown_ast::overlay::pipe_statement_lints(&painted).is_empty());
+
+    // A strike closes the statement without its glyphs.
+    let nodes = agent_doc_markdown_ast::mutations::item_nodes(&painted, "queue").unwrap();
+    let closed =
+        agent_doc_markdown_ast::mutations::consume_node(&painted, "queue", &nodes[0].node_key)
+            .unwrap();
+    assert!(
+        closed.contains("  - ~~group them |~~\n    - ~~draft~~\n"),
+        "{closed}"
+    );
+}

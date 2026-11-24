@@ -6727,6 +6727,55 @@ mod tests {
         assert_eq!(moved.len(), 1);
     }
 
+    /// `#pipeprompt` stage indicator, the `#selfsteer3` class: projecting
+    /// `▶️` / `✅` onto a claimed statement's rows changes nothing authored,
+    /// so it is retired as a repaint; an operator edit of a stage row still
+    /// forwards to the owner.
+    #[test]
+    fn retire_claimed_bookkeeping_treats_stage_glyph_repaints_as_bookkeeping() {
+        let owner = "subagent:pipe";
+        let qid = " [#q-0123456789ab]";
+        let statement = |group: &str, draft: &str| {
+            format!(
+                "Collect the issues |{qid}\n  - {group}group them |\n    - {draft}draft a summary"
+            )
+        };
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(&statement("", ""), owner, 100, 3600);
+        let claim = ledger.claims[0].clone();
+        let item = |previous: &str, verbatim: &str| SteeringItem {
+            source: SteeringSource::Queue,
+            change: SteeringChange::Edited,
+            dispatch: SteeringDispatch::ForwardToOwner,
+            current_item: false,
+            verbatim: verbatim.to_string(),
+            previous: Some(previous.to_string()),
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: Some(owner.to_string()),
+            generation: Some(1),
+            worker_id: None,
+            explicit: false,
+            vector: None,
+            prompt_tree: None,
+            queue_mode: None,
+        };
+        let projected = |text: &str| format!("🚧 [#{owner}#1] {text}");
+        let repaint = item(
+            &projected(&statement("▶️ ", "")),
+            &projected(&statement("✅ ", "▶️ ")),
+        );
+        let operator = item(
+            &projected(&statement("▶️ ", "")),
+            &projected(&statement("▶️ ", "").replace("draft a summary", "draft a short summary")),
+        );
+        let mut items = vec![repaint, operator.clone()];
+        let retired = retire_claimed_bookkeeping(&mut items, |_| Some(claim.clone()));
+        assert_eq!(retired.repaints, 1, "{items:?}");
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].verbatim, operator.verbatim);
+    }
+
     /// `#barereplymarker`: generated packet rows carry only a bare trailing
     /// `▫️`. Refreshing them is not steering; an operator answer typed under
     /// the item selects that item, even when the answer also ends in the glyph.

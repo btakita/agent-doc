@@ -938,6 +938,7 @@ fn route_claimed_items(
                 followed_from: Vec::new(),
                 followed_generation: 0,
                 claim_time_row: None,
+                stage: None,
                 reported_at_secs: None,
                 heartbeat_at_secs: None,
                 frozen: None,

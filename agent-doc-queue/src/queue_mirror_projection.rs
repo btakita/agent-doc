@@ -460,6 +460,114 @@ pub fn restore_claimed_edge_markers(
     Ok(changed.then_some(out))
 }
 
+/// Repaint the stage glyphs of every ` |` statement (`#pipeprompt` stage
+/// indicator).
+///
+/// A statement whose head holds a live claim (found by its exact
+/// `[#owner#generation]` annotation) shows `▶️` on the stage its worker last
+/// reported (`queue claim --refresh --stage N`, stage 1 by default) and `✅`
+/// on earlier rows; every other statement shows none, so the glyphs leave
+/// when the claim does. The head row is never painted. Glyphs are binary
+/// bookkeeping: identity, steering and stale-copy repair strip them.
+/// `Ok(None)` when nothing changed.
+pub fn project_statement_stages(
+    content: &str,
+    claims: &[crate::queue_claim::QueueClaim],
+) -> Result<Option<String>> {
+    use agent_doc_element_queue::pipe::{
+        EdgeOp, STAGE_DONE_GLYPH, STAGE_RUNNING_GLYPH, project_stage_glyphs, unpiped_parent_rows,
+    };
+    use agent_doc_element_queue::subprompts::{line_indent_width, list_item_content};
+
+    if !content.contains(" |") {
+        return Ok(None);
+    }
+    let Ok(components) = element::parse(content) else {
+        return Ok(None);
+    };
+    let runnable = components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "queue" | "run" | "loop"))
+        .map(|component| component.open_end..component.close_start)
+        .collect::<Vec<_>>();
+    let lines = content.split_inclusive('\n').collect::<Vec<_>>();
+    let mut starts = Vec::with_capacity(lines.len());
+    let mut offset = 0usize;
+    for line in &lines {
+        starts.push(offset);
+        offset += line.len();
+    }
+    let body = |index: usize| lines[index].trim_end_matches(['\n', '\r']);
+    let mut out = String::with_capacity(content.len() + 16);
+    let mut changed = false;
+    let mut index = 0usize;
+    while index < lines.len() {
+        let in_queue = runnable.iter().any(|range| range.contains(&starts[index]));
+        let head = in_queue
+            .then(|| list_item_content(body(index)))
+            .flatten()
+            .filter(|row| EdgeOp::of_row(row) == EdgeOp::Pipe);
+        let Some(head) = head else {
+            out.push_str(lines[index]);
+            index += 1;
+            continue;
+        };
+        let indent = line_indent_width(body(index));
+        let mut end = index + 1;
+        let mut last = index;
+        while end < lines.len() {
+            let line = body(end);
+            if !line.trim().is_empty() {
+                if line_indent_width(line) <= indent {
+                    break;
+                }
+                last = end;
+            }
+            end += 1;
+        }
+        let block_end = last + 1;
+        let mut statement = head.to_string();
+        for line in &lines[index + 1..block_end] {
+            statement.push('\n');
+            statement.push_str(line.trim_end_matches(['\n', '\r']));
+        }
+        let work = head
+            .strip_prefix("### ")
+            .or_else(|| head.strip_prefix("## "))
+            .unwrap_or(head);
+        let stage = agent_doc_document::queue_projection::owner_projection(work)
+            .and_then(|owner| {
+                claims.iter().find(|claim| {
+                    claim.state != crate::queue_claim::QueueClaimState::Lost
+                        && claim.owner == owner.owner
+                        && claim.generation == owner.generation
+                })
+            })
+            .filter(|_| block_end > index + 1 && unpiped_parent_rows(&statement).is_empty())
+            .map(|claim| claim.stage.unwrap_or(1) as usize);
+        let has_glyphs =
+            statement.contains(STAGE_RUNNING_GLYPH) || statement.contains(STAGE_DONE_GLYPH);
+        out.push_str(lines[index]);
+        if stage.is_none() && !has_glyphs {
+            for line in &lines[index + 1..block_end] {
+                out.push_str(line);
+            }
+        } else {
+            let projected = project_stage_glyphs(&statement, stage);
+            let mut projected_lines = projected.split('\n').skip(1);
+            for line in &lines[index + 1..block_end] {
+                let original = line.trim_end_matches(['\n', '\r']);
+                let repainted = projected_lines.next().unwrap_or(original);
+                changed |= repainted != original;
+                out.push_str(repainted);
+                out.push_str(&line[original.len()..]);
+            }
+        }
+        index = block_end;
+    }
+    Ok(changed.then_some(out))
+}
+
 /// Remove empty list placeholders from every queue body.
 ///
 /// A retained rebase can copy an editor gap such as `      - ` back into the

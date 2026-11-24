@@ -36,8 +36,10 @@ use crate::document_queue::strip_queue_effect_annotation;
 /// Normalize a queue head for comparison: progress, pin and priority markers
 /// are cosmetic and never read as an operator edit.
 pub fn normalize_queue_head_text(text: &str) -> String {
+    // `#pipeprompt`: a statement's stage glyphs are binary bookkeeping.
+    let text = agent_doc_element_queue::pipe::strip_stage_glyphs(text);
     agent_doc_document::queue_projection::strip_priority_markers(
-        &agent_doc_document::queue_projection::strip_in_progress_marker(text),
+        &agent_doc_document::queue_projection::strip_in_progress_marker(&text),
     )
     .replace("\r\n", "\n")
     .trim()

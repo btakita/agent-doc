@@ -191,7 +191,19 @@ fn striking_one_justdoit_never_takes_an_older_rows_handback() {
             "no answer row hangs off the tree root:\n{tree}"
         );
         if !old_rows.is_empty() {
-            assert!(struck.starts_with(&live[..live.find(&old_rows).unwrap()]));
+            // Nothing before the old tree moved. The exchange gained only the
+            // strike's queue-response record (`#exchangeresponseid`).
+            let from_close = |d: &str| d[d.find("<!-- /agent:exchange -->").unwrap()..].to_string();
+            let live_tail = from_close(&live);
+            assert!(
+                from_close(&struck).starts_with(&live_tail[..live_tail.find(&old_rows).unwrap()])
+            );
+            assert_eq!(
+                agent_doc_document::queue_response_record::record_heading_lines(&struck).len(),
+                1,
+                "{struck}"
+            );
+            assert!(struck.starts_with(&live[..live.find("<!-- /agent:exchange -->").unwrap()]));
             let old_start = struck.find(&format!("- ### {OLD_ROOT}")).unwrap();
             let old_tree = &struck[old_start..struck.find(&format!("- ### {STEP2_ROOT}")).unwrap()];
             assert!(

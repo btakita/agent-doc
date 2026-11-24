@@ -88,6 +88,7 @@ pub fn handback_details_token(owner: &str) -> String {
 /// plan file stays visible on the row). `None` when nothing was left out.
 pub(crate) fn details_value(
     owner: &str,
+    response_id: Option<&str>,
     summary_trimmed: bool,
     omitted: &[&str],
     what_changed: &str,
@@ -106,7 +107,14 @@ pub(crate) fn details_value(
         [] => unreachable!("sections is not empty"),
     };
     let verb = if sections.len() == 1 { "is" } else { "are" };
-    let mut value = format!("{list} {verb} in the {}.", handback_details_token(owner));
+    let mut value = format!("{list} {verb} in the {}", handback_details_token(owner));
+    // `#exchangeresponseid`: name the exact exchange entry, whose heading
+    // carries this tree's id.
+    if let Some(response_id) = response_id {
+        value.push_str(" under ");
+        value.push_str(response_id);
+    }
+    value.push('.');
     let files = markdown_files(what_changed);
     if !files.is_empty() {
         value.push_str(" What changed names ");
@@ -218,11 +226,11 @@ pub(crate) fn generated_completed_guidance(value: &str) -> Option<bool> {
 }
 
 /// One document line: its start offset, its indent, and its trimmed text.
-struct Line<'a> {
-    start: usize,
-    end: usize,
-    indent: usize,
-    text: &'a str,
+pub(crate) struct Line<'a> {
+    pub(crate) start: usize,
+    pub(crate) end: usize,
+    pub(crate) indent: usize,
+    pub(crate) text: &'a str,
 }
 
 fn lines_from(document: &str, from: usize) -> Vec<Line<'_>> {
@@ -250,10 +258,12 @@ fn line_iter(document: &str, from: usize) -> impl Iterator<Item = Line<'_>> {
 /// The struck row's own `**Response [#r-…]**` child: the lines beneath it
 /// and the indent of its direct children. A response under a nested row
 /// belongs to that row.
-struct OwnResponse<'a> {
+pub(crate) struct OwnResponse<'a> {
     /// Every line beneath the Response row, blank lines included.
-    block: Vec<Line<'a>>,
-    detail_indent: usize,
+    pub(crate) block: Vec<Line<'a>>,
+    pub(crate) detail_indent: usize,
+    /// The tree's public response id (`[#r-…]`).
+    pub(crate) id: Option<&'a str>,
 }
 
 impl OwnResponse<'_> {
@@ -281,7 +291,11 @@ impl OwnResponse<'_> {
     }
 }
 
-fn own_response(document: &str, item_start: usize, item_end: usize) -> Option<OwnResponse<'_>> {
+pub(crate) fn own_response(
+    document: &str,
+    item_start: usize,
+    item_end: usize,
+) -> Option<OwnResponse<'_>> {
     let line_start = document[..item_start].rfind('\n').map_or(0, |at| at + 1);
     let item_indent = document[line_start..]
         .chars()
@@ -310,6 +324,13 @@ fn own_response(document: &str, item_start: usize, item_end: usize) -> Option<Ow
         line.indent == child_indent && line.text.starts_with("- **Response [#r-")
     })?;
     let response_indent = scope[response_at].indent;
+    // The current `**Response [#r-…]**` marker or the legacy
+    // `**Response [#r-…]:** summary` row.
+    let id = scope[response_at]
+        .text
+        .strip_prefix("- **Response ")
+        .and_then(|rest| rest.find(']').map(|end| &rest[..=end]))
+        .filter(|id| agent_doc_markdown_ast::exchange_tree::is_compact_response_id(id));
     let mut block: Vec<Line<'_>> = scope
         .into_iter()
         .skip(response_at + 1)
@@ -326,6 +347,7 @@ fn own_response(document: &str, item_start: usize, item_end: usize) -> Option<Ow
     Some(OwnResponse {
         block,
         detail_indent,
+        id,
     })
 }
 
@@ -621,7 +643,7 @@ pub fn slim_handback_response_details(document: &str) -> Option<(String, usize)>
         }
         removed.sort_by_key(|range| range.start);
         let details = (!response.has_label(DETAILS_LABEL))
-            .then(|| details_value(&found.owner, false, &omitted, &what_changed))
+            .then(|| details_value(&found.owner, response.id, false, &omitted, &what_changed))
             .flatten();
         let action_items_removed = removed.iter().any(|range| {
             document[range.clone()]

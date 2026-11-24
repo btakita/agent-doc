@@ -105,8 +105,12 @@ pub fn detect_bypassed_response_write_between(
     // attested response/legacy body + keyed marker) was written by `queue report-complete`, not
     // by an agent bypassing the write path. Recognize it structurally, by line
     // position in the current document, never by its prose.
-    let completion_headings =
+    let mut completion_headings =
         agent_doc_document::subagent_completion::completion_cell_heading_lines(&cur_norm);
+    // `#exchangeresponseid`: so is an attested queue-response record, which a
+    // queue strike writes for a response tree with no exchange response.
+    completion_headings
+        .extend(agent_doc_document::queue_response_record::record_heading_lines(&cur_norm));
     let diff = similar::TextDiff::from_lines(&snap_norm, &cur_norm);
     for change in diff.iter_all_changes() {
         if change.tag() != similar::ChangeTag::Insert {
@@ -293,6 +297,27 @@ mod tests {
             detect_bypassed_response_write_between(&snapshot, &current).as_deref(),
             Some("### Re: bypassed — gpt-5 [#r-0123456789ab]")
         );
+    }
+
+    /// `#exchangeresponseid`: a strike's attested queue-response record is
+    /// binary-owned, not a bypassed response; an edited one is ordinary text.
+    #[test]
+    fn a_queue_response_record_is_not_a_bypassed_response_write() {
+        let snapshot = session_doc("### Re: earlier — gpt-5\n\nDone.\n");
+        let record = agent_doc_document::queue_response_record::record(
+            "#justdoit",
+            "[#r-0123456789ab]",
+            &["- **Summary:** Applied the edits.".to_string()],
+        )
+        .unwrap();
+        let current = session_doc(&format!("### Re: earlier — gpt-5\n\nDone.\n\n{record}\n"));
+        assert_eq!(
+            detect_bypassed_response_write_between(&snapshot, &current),
+            None
+        );
+
+        let edited = current.replace("Applied", "Reverted");
+        assert!(detect_bypassed_response_write_between(&snapshot, &edited).is_some());
     }
 
     #[test]

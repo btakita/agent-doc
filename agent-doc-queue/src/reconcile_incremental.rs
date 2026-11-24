@@ -312,6 +312,10 @@ pub struct QueueSyncResponses {
     pub struck_trees: usize,
     /// The generated `Queue markers:` line was refreshed.
     pub legend_refreshed: bool,
+    /// Response ids whose hand-back exchange entry was tagged, and Details
+    /// rows that now name their id (`#exchangeresponseid`).
+    pub exchange_linked: Vec<String>,
+    pub exchange_details: usize,
 }
 
 /// The response passes `agent-doc queue sync` runs, in its order: retained
@@ -349,6 +353,17 @@ pub fn queue_sync_response_chain(
     {
         out.document = synced.document;
         out.struck_trees = synced.struck_trees;
+    }
+    // `#exchangeresponseid`: repair existing documents. A tree whose
+    // hand-back cell or record is provably its exchange entry (the id
+    // recomputes from that attested hand-back) gets the id on that entry's
+    // heading. No record is invented here for a tree an older binary wrote.
+    if let Some(linked) =
+        crate::exchange_response_link::link_response_trees_to_exchange(None, &out.document)
+    {
+        out.document = linked.document;
+        out.exchange_linked = linked.annotated;
+        out.exchange_details = linked.details;
     }
     if let Some(refreshed) =
         agent_doc_document::status_projection::refresh_stale_queue_marker_legend(&out.document)

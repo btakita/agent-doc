@@ -849,8 +849,12 @@ fn response_heading_marker_counts(doc: &str) -> std::collections::BTreeMap<Strin
     // unrelated, unchanged `### Re:` heading that merely moved during
     // component projection can be selected from the line diff as the alleged
     // patchback.
-    let completion_headings =
+    let mut completion_headings =
         agent_doc_document::subagent_completion::completion_cell_heading_lines(doc);
+    // `#exchangeresponseid`: an attested queue-response record is binary-owned
+    // the same way.
+    completion_headings
+        .extend(agent_doc_document::queue_response_record::record_heading_lines(doc));
     let mut offset = 0usize;
     for (line_index, line) in doc.split_inclusive('\n').enumerate() {
         let line_start = offset;

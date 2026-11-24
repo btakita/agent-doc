@@ -144,12 +144,192 @@ pub fn cell_with_response(
 pub fn is_completion_heading(line: &str) -> bool {
     let line = line.trim();
     let line = line.strip_suffix(" (HEAD)").unwrap_or(line);
+    let line = split_heading_response_id(line).0;
     if let Some(detail) = line.strip_prefix(LEGACY_HEADING_PREFIX) {
         return !detail.trim().is_empty();
     }
     line.strip_prefix(HEADING_PREFIX)
         .and_then(|rest| rest.strip_suffix(HEADING_ATTRIBUTION_SUFFIX))
         .is_some_and(|topic| !topic.trim().is_empty())
+}
+
+/// `#exchangeresponseid`: split the public response id a binary heading
+/// carries at its end (`… — agent-doc [#r-…]`) off the heading.
+///
+/// Only the trailing id counts. The queue item a heading quotes may itself
+/// mention a response id (`“`[#r-…]` was not printed …”`); that id belongs to
+/// another response and is never this cell's.
+pub fn split_heading_response_id(heading: &str) -> (&str, Option<&str>) {
+    let trimmed = heading.trim_end();
+    if let Some(open) = trimmed.rfind(" [#r-") {
+        let id = &trimmed[open + 1..];
+        if agent_doc_markdown_ast::exchange_tree::is_compact_response_id(id) {
+            return (&trimmed[..open], Some(id));
+        }
+    }
+    (heading, None)
+}
+
+/// `#exchangeresponseid`: `line` (a heading line, its ending kept) with its
+/// trailing response id set to `response_id`. `None` when it already carries
+/// exactly that id or `response_id` is not a public response id.
+pub fn heading_line_with_response_id(line: &str, response_id: &str) -> Option<String> {
+    if !agent_doc_markdown_ast::exchange_tree::is_compact_response_id(response_id) {
+        return None;
+    }
+    let content_end = line.trim_end_matches(['\n', '\r']).len();
+    let (content, ending) = line.split_at(content_end);
+    let content = content.trim_end();
+    let (content, head) = match content.strip_suffix(" (HEAD)") {
+        Some(rest) => (rest, " (HEAD)"),
+        None => (content, ""),
+    };
+    let (base, existing) = split_heading_response_id(content);
+    if existing == Some(response_id) {
+        return None;
+    }
+    Some(format!("{} {response_id}{head}{ending}", base.trim_end()))
+}
+
+/// `#exchangeresponseid`: the trailing response id of each attested
+/// completion cell's heading, by completion key.
+pub fn completion_cell_response_ids(text: &str) -> std::collections::HashMap<String, String> {
+    let lines: Vec<&str> = text.lines().collect();
+    completion_cell_line_ranges(text)
+        .into_iter()
+        .filter_map(|range| {
+            let evidence = completion_evidence_for_range(&lines, &range)?;
+            let heading = lines[range.start].trim();
+            let heading = heading.strip_suffix(" (HEAD)").unwrap_or(heading);
+            let id = split_heading_response_id(heading).1?;
+            Some((evidence.key, id.to_string()))
+        })
+        .collect()
+}
+
+/// `#exchangeresponseid`: tag the heading of the attested completion cell
+/// keyed `key` with `response_id`, the id of the response tree a queue row
+/// shows for that cell's hand-back. The heading is outside the response
+/// digest, so the cell stays attested. `None` when no such cell exists or it
+/// already carries that id.
+pub fn annotate_completion_cell_response_id(
+    text: &str,
+    key: &str,
+    response_id: &str,
+) -> Option<String> {
+    let lines: Vec<&str> = text.lines().collect();
+    let range = completion_cell_line_ranges(text)
+        .into_iter()
+        .find(|range| {
+            completion_evidence_for_range(&lines, range).is_some_and(|evidence| evidence.key == key)
+        })?;
+    replace_line(text, range.start, |line| {
+        heading_line_with_response_id(line, response_id)
+    })
+}
+
+/// Replace 0-based line `index` of `text` (ending included) through `edit`.
+pub(crate) fn replace_line(
+    text: &str,
+    index: usize,
+    edit: impl FnOnce(&str) -> Option<String>,
+) -> Option<String> {
+    let mut start = 0usize;
+    for (at, line) in text.split_inclusive('\n').enumerate() {
+        if at == index {
+            let replacement = edit(line)?;
+            let mut out = String::with_capacity(text.len() + replacement.len());
+            out.push_str(&text[..start]);
+            out.push_str(&replacement);
+            out.push_str(&text[start + line.len()..]);
+            return Some(out);
+        }
+        start += line.len();
+    }
+    None
+}
+
+/// A retired completion cell kept as a plain hand-back record
+/// ([`retain_completion_cells_as_handback_records`]).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct HandbackRecord {
+    /// 0-based line of the record heading in the scanned text.
+    pub line: usize,
+    pub owner: String,
+    pub item: String,
+    /// The response id the heading carries, when tagged.
+    pub response_id: Option<String>,
+    /// The worker's response, unquoted.
+    pub response: String,
+}
+
+/// Every hand-back record in `text`: the record heading followed directly by
+/// the quoted `> **Subagent response:**` body it kept from its cell.
+pub fn handback_records(text: &str) -> Vec<HandbackRecord> {
+    let lines: Vec<&str> = text.lines().collect();
+    let mut records = Vec::new();
+    for (index, line) in lines.iter().enumerate() {
+        let trimmed = line.trim();
+        let trimmed = trimmed.strip_suffix(" (HEAD)").unwrap_or(trimmed);
+        let (heading, response_id) = split_heading_response_id(trimmed);
+        let Some(detail) = heading.strip_prefix(HANDBACK_RECORD_HEADING_PREFIX) else {
+            continue;
+        };
+        let Some(owner_end) = detail.strip_prefix('`').and_then(|rest| rest.find('`')) else {
+            continue;
+        };
+        let owner = detail[1..owner_end + 1].to_string();
+        let Some(item) = detail[owner_end + 2..]
+            .trim_start()
+            .strip_prefix("for queue item “")
+            .and_then(|rest| rest.strip_suffix('”'))
+        else {
+            continue;
+        };
+        if lines.get(index + 1).map(|line| line.trim()) != Some("> **Subagent response:**") {
+            continue;
+        }
+        let response = lines[index + 2..]
+            .iter()
+            .take_while(|line| line.trim_start().starts_with('>'))
+            .map(|line| {
+                line.strip_prefix("> ")
+                    .or_else(|| line.strip_prefix('>'))
+                    .unwrap_or(line)
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+            .trim()
+            .to_string();
+        if owner.is_empty() || item.is_empty() || response.is_empty() {
+            continue;
+        }
+        records.push(HandbackRecord {
+            line: index,
+            owner,
+            item: item.to_string(),
+            response_id: response_id.map(str::to_string),
+            response,
+        });
+    }
+    records
+}
+
+/// `#exchangeresponseid`: tag the hand-back record heading at 0-based `line`
+/// with `response_id`. `None` when that line is no record heading or already
+/// carries the id.
+pub fn annotate_handback_record_response_id(
+    text: &str,
+    line: usize,
+    response_id: &str,
+) -> Option<String> {
+    handback_records(text)
+        .iter()
+        .any(|record| record.line == line)
+        .then_some(())?;
+    replace_line(text, line, |heading| {
+        heading_line_with_response_id(heading, response_id)
+    })
 }
 
 /// True when `line` is a keyed completion marker.
@@ -425,6 +605,7 @@ fn completion_evidence_for_range(
 }
 
 fn completion_heading_owner_item(heading: &str) -> Option<(String, String)> {
+    let heading = split_heading_response_id(heading).0;
     let detail = if let Some(detail) = heading
         .strip_prefix(HEADING_PREFIX)
         .and_then(|rest| rest.strip_suffix(HEADING_ATTRIBUTION_SUFFIX))
@@ -616,6 +797,14 @@ pub fn retain_completion_cells_as_handback_records(
             "\n"
         };
         out.push_str(&handback_record_heading(&evidence.owner, &evidence.item));
+        // `#exchangeresponseid`: the record keeps the response id its cell's
+        // heading carried, so the row's tree still resolves to it.
+        let cell_heading = lines[range.start].trim();
+        let cell_heading = cell_heading.strip_suffix(" (HEAD)").unwrap_or(cell_heading);
+        if let Some(response_id) = split_heading_response_id(cell_heading).1 {
+            out.push(' ');
+            out.push_str(response_id);
+        }
         out.push_str(newline);
         // The quoted response lines, without the digest and the keyed marker.
         for line in &lines[digest_index + 1..range.end - 1] {
@@ -1056,6 +1245,59 @@ mod tests {
             "a model-attributed heading is not the legacy binary grammar"
         );
         assert_eq!(strip_completion_cells(forged), forged);
+    }
+
+    /// `#exchangeresponseid`: a heading tagged with its tree's response id is
+    /// still the same attested cell; the quoted item's own id is not the
+    /// cell's.
+    #[test]
+    fn a_tagged_heading_stays_an_attested_cell() {
+        let item = "`[#r-35be26482ddb]` was not printed";
+        let current = format!(
+            "{}\n",
+            cell_with_response("subagent:a", item, "k1", "Done.").unwrap()
+        );
+        assert_eq!(
+            split_heading_response_id(current.lines().next().unwrap()).1,
+            None
+        );
+        let tagged = annotate_completion_cell_response_id(&current, "k1", "[#r-0123456789ab]")
+            .expect("tagged");
+        let heading = tagged.lines().next().unwrap();
+        assert!(
+            heading.ends_with(" — agent-doc [#r-0123456789ab]"),
+            "{heading}"
+        );
+        assert!(is_completion_heading(heading));
+        assert_eq!(completion_evidence(&tagged), completion_evidence(&current));
+        assert_eq!(completion_response(&tagged, "k1").as_deref(), Some("Done."));
+        assert_eq!(
+            completion_cell_response_ids(&tagged)
+                .get("k1")
+                .map(String::as_str),
+            Some("[#r-0123456789ab]")
+        );
+        assert!(annotate_completion_cell_response_id(&tagged, "k1", "[#r-0123456789ab]").is_none());
+        assert!(
+            annotate_completion_cell_response_id(&current, "other", "[#r-0123456789ab]").is_none()
+        );
+
+        let (record, kept) = retain_completion_cells_as_handback_records(&tagged, |_| true);
+        assert_eq!(kept.len(), 1);
+        let records = handback_records(&record);
+        assert_eq!(records.len(), 1, "{record}");
+        assert_eq!(records[0].owner, "subagent:a");
+        assert_eq!(records[0].item, item);
+        assert_eq!(records[0].response_id.as_deref(), Some("[#r-0123456789ab]"));
+        assert_eq!(records[0].response, "Done.");
+
+        let (untagged, _) = retain_completion_cells_as_handback_records(&current, |_| true);
+        let records = handback_records(&untagged);
+        assert_eq!(records[0].response_id, None);
+        let tagged_record =
+            annotate_handback_record_response_id(&untagged, records[0].line, "[#r-0123456789ab]")
+                .expect("record tagged");
+        assert_eq!(tagged_record, record);
     }
 
     #[test]

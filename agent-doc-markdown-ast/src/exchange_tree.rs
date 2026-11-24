@@ -95,8 +95,15 @@ fn is_h3_heading(trimmed: &str) -> bool {
     trimmed.starts_with("### ") || trimmed == "###"
 }
 
+/// The heading's own public response id: the LAST compact id in it.
+///
+/// [`annotate_response_heading`] appends a response's id at the end of its
+/// heading, while the topic before it may quote another response's id (a
+/// queue item such as “`[#r-…]` was not printed …”, `#exchangeresponseid`).
+/// The quoted id belongs to that other response and is never this heading's.
 fn compact_response_id_range(text: &str) -> Option<Range<usize>> {
     let mut offset = 0usize;
+    let mut last = None;
     while let Some(relative_start) = text[offset..].find("[#r-") {
         let start = offset + relative_start;
         let Some(relative_end) = text[start..].find(']') else {
@@ -104,11 +111,11 @@ fn compact_response_id_range(text: &str) -> Option<Range<usize>> {
         };
         let end = start + relative_end + 1;
         if is_compact_response_id(&text[start..end]) {
-            return Some(start..end);
+            last = Some(start..end);
         }
         offset = start + 1;
     }
-    None
+    last
 }
 
 /// Return the public response id embedded in an H3 response heading.

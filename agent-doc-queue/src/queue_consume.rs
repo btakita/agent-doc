@@ -104,13 +104,19 @@ pub fn retire_consumed_completion_feedback(
     consumed_heads: &[String],
 ) -> (String, HashSet<String>) {
     let mut retired_keys = HashSet::new();
+    // `#exchangeresponseid`: a cell tagged with the id of a tree a queue row
+    // still shows is that response's exchange entry; it is kept as a record.
+    let cell_ids = agent_doc_document::subagent_completion::completion_cell_response_ids(content);
     let (content, kept) =
         agent_doc_document::subagent_completion::retain_completion_cells_as_handback_records(
             content,
             |evidence| {
-                content.contains(&crate::response_tree_sync::handback_details_token(
+                (content.contains(&crate::response_tree_sync::handback_details_token(
                     &evidence.owner,
-                )) && consumed_heads.iter().any(|head| {
+                )) || cell_ids.get(&evidence.key).is_some_and(|id| {
+                    agent_doc_markdown_ast::exchange_tree::response_id_lookup_marker(id)
+                        .is_some_and(|marker| content.contains(&marker))
+                })) && consumed_heads.iter().any(|head| {
                     crate::queue_claim::completion_evidence_matches_row(&evidence.item, head)
                 })
             },
@@ -6691,7 +6697,7 @@ fn stopped_response_id(scope: &str, summary: &str) -> String {
     format!("[#r-{}]", &hash[..12])
 }
 
-fn handback_response_id(
+pub(crate) fn handback_response_id(
     scope: &str,
     handback: &agent_doc_document::worker_handback::WorkerHandback,
 ) -> String {
@@ -6866,6 +6872,8 @@ pub(crate) struct RowHandback {
     /// the row's tree can point at the full hand-back there instead of
     /// copying it (`#handbackrowstructure`).
     pub(crate) in_document: bool,
+    /// The key of the completion cell it was read from.
+    pub(crate) key: String,
 }
 
 /// The labelled worker hand-back whose completion cell names `row_text`.
@@ -6915,6 +6923,7 @@ fn structured_handback_for_row(
                     handback,
                     owner: evidence.owner.clone(),
                     in_document: source_index == 0,
+                    key: evidence.key.clone(),
                 },
             ));
         }
@@ -6964,6 +6973,17 @@ impl<'a> DocumentHandbacks<'a> {
             document: self.document,
         };
         structured_handback_for_row(self.document, "", row).filter(|found| found.in_document)
+    }
+
+    /// The scope a response id of the queue row at byte `row_start` is
+    /// derived from (`#parentscopedanswer`).
+    pub(crate) fn scope_for_row(&self, row_text: &str, row_start: usize) -> String {
+        response_scope(RowRef {
+            text: row_text,
+            start: row_start,
+            lineages: &self.lineages,
+            document: self.document,
+        })
     }
 }
 
@@ -7032,6 +7052,7 @@ fn handback_response_row_child(
         }
         if let Some(details) = crate::response_tree_sync::details_value(
             &found.owner,
+            Some(&response_id),
             summary_trimmed,
             &omitted,
             &what_changed,
@@ -7134,8 +7155,18 @@ fn handback_sections_missing_from_response(
     }
     if found.in_document
         && !response_scope.contains(crate::response_tree_sync::DETAILS_LABEL)
-        && let Some(details) =
-            crate::response_tree_sync::details_value(&found.owner, false, &omitted, &what_changed)
+        && let Some(details) = crate::response_tree_sync::details_value(
+            &found.owner,
+            agent_doc_markdown_ast::exchange_tree::response_id_from_lookup_marker(
+                response_line
+                    .trim()
+                    .trim_start_matches("- ")
+                    .trim_start_matches("* "),
+            ),
+            false,
+            &omitted,
+            &what_changed,
+        )
     {
         rendered.push_str(&section_indent);
         rendered.push_str("- ");
@@ -7283,6 +7314,12 @@ pub fn attach_ack_summary_response(
     if let Some((synced, _)) = crate::response_tree_sync::reconcile_tree_scoped_guidance(&out) {
         out = synced;
     }
+    // `#exchangeresponseid`: the summary tree has an exchange entry too.
+    if let Some(linked) =
+        crate::exchange_response_link::link_response_trees_to_exchange(Some(after), &out)
+    {
+        out = linked.document;
+    }
     Ok(AckSummaryResponse {
         document: out,
         bare_rows: Vec::new(),
@@ -7416,6 +7453,12 @@ pub fn mark_failed_rows(
                 out.insert_str(node.item.start_byte + open + 2, &format!("{glyph} "));
             }
         }
+    }
+    // `#exchangeresponseid`: a failure is a response; it has an exchange entry.
+    if let Some(linked) =
+        crate::exchange_response_link::link_response_trees_to_exchange(Some(after), &out)
+    {
+        out = linked.document;
     }
     Ok(out)
 }
@@ -7606,6 +7649,15 @@ pub fn attach_stopped_row_responses(
     // (a sibling that just closed no longer keeps the root open).
     if let Some((synced, _)) = crate::response_tree_sync::reconcile_tree_scoped_guidance(&out) {
         out = synced;
+    }
+    // `#exchangeresponseid`: every tree this strike minted has an exchange
+    // entry carrying its id: the hand-back's own completion cell, tagged,
+    // or a queue-response record. Trees already in `after` (a coordinator
+    // response's, minted from its exchange heading) gain only proven links.
+    if let Some(linked) =
+        crate::exchange_response_link::link_response_trees_to_exchange(Some(after), &out)
+    {
+        out = linked.document;
     }
     Ok(out)
 }
@@ -13519,6 +13571,12 @@ mod tests {
     /// An already-struck bare row is not backfilled. A sibling with no
     /// hand-back stays bare. A summary child already on the row still gains
     /// the file name.
+    /// The `[#r-…]` id of the first response tree in `text`.
+    fn tree_response_id(text: &str) -> &str {
+        let at = text.find("**Response [#r-").expect("a response tree") + "**Response ".len();
+        &text[at..=at + text[at..].find(']').unwrap()]
+    }
+
     #[test]
     fn struck_plan_row_keeps_the_handback_markdown_filename() {
         let work = "Create a plan md file so I can review. [#q-a317f23fc43e]";
@@ -13566,7 +13624,8 @@ mod tests {
         // markdown file stays named on the row.
         assert!(
             tree.contains(&format!(
-                "**Details:** What changed, Verification, Notes and Next actions are in the `subagent:planreview` hand-back in agent:exchange. What changed names `{filename}`."
+                "**Details:** What changed, Verification, Notes and Next actions are in the `subagent:planreview` hand-back in agent:exchange under {}. What changed names `{filename}`.",
+                tree_response_id(tree)
             )),
             "{tree}"
         );
@@ -13807,7 +13866,11 @@ mod tests {
         );
 
         // With both cells present, cw2's row takes only cw2's hand-back.
-        let both = gh_struck.replace(&gh_cell, &format!("{gh_cell}\n\n{ack_cell}"));
+        // `#exchangeresponseid`: the gh cell's heading now carries its tree's
+        // id, so the second cell is placed after its keyed marker.
+        let gh_marker = agent_doc_document::subagent_completion::marker("ghkeyring-key");
+        let both = gh_struck.replace(&gh_marker, &format!("{gh_marker}\n\n{ack_cell}"));
+        assert_ne!(both, gh_struck);
         let ack_struck = both.replacen(
             &format!("\n  - {LEAF}\n"),
             &format!("\n  - {struck_published}\n"),

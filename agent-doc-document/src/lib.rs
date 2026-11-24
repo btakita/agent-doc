@@ -17,6 +17,7 @@ pub mod element_models;
 pub mod outline_projection;
 pub mod place;
 pub mod queue_projection;
+pub mod queue_response_record;
 pub mod singleton_repair;
 pub mod status_projection;
 pub mod status_sync_tree;

@@ -2665,6 +2665,17 @@ pub fn sync_with_effects(effects: &impl QueueCommandEffects, file: &Path) -> Res
             ),
         );
     }
+    if !chain.exchange_linked.is_empty() || chain.exchange_details > 0 {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_exchange_response_ids_linked file={} source=queue_sync ids={} details={} (#exchangeresponseid)",
+                file.display(),
+                chain.exchange_linked.join(","),
+                chain.exchange_details
+            ),
+        );
+    }
     if chain.legend_refreshed {
         agent_doc_ops_log_io::log_op(
             file,

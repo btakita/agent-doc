@@ -8442,7 +8442,16 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                         .context(
                             "queue maintenance: queue component vanished before backlog/done strike",
                         )?;
-                        q.replace_content(&current_content, &new_body)
+                        let struck_content = q.replace_content(&current_content, &new_body);
+                        // `#exchangeresponseid`: the abbreviated strike tree
+                        // gets an exchange record carrying its id.
+                        match agent_doc_queue::exchange_response_link::link_response_trees_to_exchange(
+                            Some(&current_content),
+                            &struck_content,
+                        ) {
+                            Some(linked) => linked.document,
+                            None => struck_content,
+                        }
                     };
                     activation.entries_after = new_entries;
                     mutated = true;

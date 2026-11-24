@@ -3832,13 +3832,47 @@ fn respindexorphan_struck_handback_projections_never_orphan_and_commit_indexes_t
     );
 
     assert_ok(&run_agent_doc(dir.path(), &["commit", path]), "commit");
-    let index = agent_doc_archive_io::parse_response_index(
-        &String::from_utf8(git(dir.path(), &["show", "HEAD:session.response-index.md"]).stdout)
-            .unwrap(),
+    // `#exchangeresponseid`: each id resolves in the commit, through the
+    // committed index or through the exchange entry whose heading carries it
+    // (the hand-back record its completion cell was retired to).
+    let committed_index = std::process::Command::new("git")
+        .current_dir(dir.path())
+        .args(["show", "HEAD:session.response-index.md"])
+        .output()
+        .unwrap();
+    let index = if committed_index.status.success() {
+        agent_doc_archive_io::parse_response_index(
+            &String::from_utf8(committed_index.stdout).unwrap(),
+        )
+        .unwrap()
+    } else {
+        Default::default()
+    };
+    let committed_doc = String::from_utf8(
+        git(
+            dir.path(),
+            &[
+                "show",
+                &format!("HEAD:{}", doc.file_name().unwrap().to_str().unwrap()),
+            ],
+        )
+        .stdout,
     )
     .unwrap();
+    let exchange_start = committed_doc.find("<!-- agent:exchange").unwrap();
+    let exchange_end = committed_doc.find("<!-- /agent:exchange -->").unwrap();
+    let exchange_ids = agent_doc_queue::exchange_response_link::exchange_response_ids(
+        &committed_doc[exchange_start..exchange_end],
+    );
     for response_id in &projected {
-        assert!(index.contains_key(response_id), "{response_id}: {index:?}");
+        assert!(
+            index.contains_key(response_id) || exchange_ids.contains(response_id),
+            "{response_id}: {index:?}\n{committed_doc}"
+        );
+        assert!(
+            exchange_ids.contains(response_id),
+            "every response has an exchange entry carrying its id: {response_id}\n{committed_doc}"
+        );
     }
 
     // The operator deletes the finished trees by hand: whatever still cites

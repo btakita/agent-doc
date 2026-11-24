@@ -29,6 +29,12 @@ fn struck_tree(document: &str) -> &str {
     &document[start..end]
 }
 
+/// The `[#r-…]` id of the first response tree in `text`.
+fn tree_response_id(text: &str) -> &str {
+    let at = text.find("**Response [#r-").expect("a response tree") + "**Response ".len();
+    &text[at..=at + text[at..].find(']').unwrap()]
+}
+
 fn guidance(document: &str) -> &str {
     struck_tree(document)
         .lines()
@@ -124,7 +130,10 @@ fn copied_handback_sections_move_behind_a_details_row() {
     }
     assert!(
         tree.contains(
-            "      - **Details:** What changed, Verification, Notes and Next actions are in the `subagent:more368` hand-back in agent:exchange. What changed names `/work/sample-org/tasks/plans/sdk-cli-public-shadow-builds.md`.\n"
+            &format!(
+                "      - **Details:** What changed, Verification, Notes and Next actions are in the `subagent:more368` hand-back in agent:exchange under {}. What changed names `/work/sample-org/tasks/plans/sdk-cli-public-shadow-builds.md`.\n",
+                tree_response_id(tree)
+            )
         ),
         "{tree}"
     );

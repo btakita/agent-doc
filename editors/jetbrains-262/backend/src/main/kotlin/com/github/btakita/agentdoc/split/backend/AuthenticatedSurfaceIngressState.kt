@@ -562,7 +562,8 @@ internal fun frontendPluginMismatch(
  * GH #435/#439: how to put this backend's ZIP into the JetBrains Client. It names the real asset
  * (a `<version>` placeholder rendered as an empty HTML tag in the Client notification, which showed
  * `agent-doc-jetbrains-262-.zip`) and the directory a Client started by Toolbox or Gateway actually
- * loads: the backend IDE's data directory name with `plugins/frontend`, not `JetBrainsClient<v>`.
+ * loads: the backend IDE's data directory name with `plugins/frontend` on Windows and macOS and with
+ * `frontend` on Linux, whose plugins path has no `plugins` segment; not `JetBrainsClient<v>`.
  * The text carries no angle brackets because the notification body is HTML.
  */
 internal fun frontendPluginMismatchRemedy(version: String?, ideDataDir: String?): String {
@@ -572,8 +573,9 @@ internal fun frontendPluginMismatchRemedy(version: String?, ideDataDir: String?)
     val ide = ideDataDir?.takeIf(String::isNotBlank) ?: "IntelliJIdea2026.3"
     return "install the same $asset in the JetBrains Client: quit the Client, delete every " +
         "agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folder from its plugins " +
-        "directory (a Client started by Toolbox or Gateway loads them from $ide/plugins/frontend in its " +
-        "JetBrains data directory, for example %APPDATA%\\JetBrains\\$ide\\plugins\\frontend on Windows), extract " +
+        "directory (a Client started by Toolbox or Gateway loads them from %APPDATA%\\JetBrains\\$ide\\plugins\\frontend " +
+        "on Windows, ~/Library/Application Support/JetBrains/$ide/plugins/frontend on macOS, or " +
+        "~/.local/share/JetBrains/$ide/frontend on Linux), extract " +
         "the ZIP there, save the release's jetbrains-frontend-release-ed25519.pub in that directory as " +
         ".agent-doc-frontend-release/trusted-ed25519-public-keys, and start the Client again " +
         "(`agent-doc upgrade` on the backend prints the exact download URLs and steps; run on the Client " +

@@ -547,8 +547,9 @@ rather than acting on a half-upgraded pair.
   `jetbrains-frontend-release-ed25519.pub` to
   `.agent-doc-frontend-release/trusted-ed25519-public-keys` in each Client
   plugins directory it reconciles, including a Toolbox/Gateway thin client's
-  `<IDE data dir>/plugins/frontend`; a backend-side upgrade prints that step
-  for a Client on another machine (GH #439). Before
+  `<IDE data dir>/plugins/frontend` (Linux: `<IDE data dir>/frontend`, since
+  IntelliJ's Linux plugins path has no `plugins` segment); a backend-side
+  upgrade prints that step for a Client on another machine (GH #439). Before
   enabling a swap, verify on both
   exact platform ranges that scope stays on the same descriptor, module graph
   and registrations, both JVMs report the same digest and epoch, and the

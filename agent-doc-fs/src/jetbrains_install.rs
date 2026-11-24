@@ -137,18 +137,30 @@ pub fn jetbrains_plugin_dirs_in_roots(search_roots: &[PathBuf]) -> Vec<PathBuf> 
                     continue;
                 }
                 let plugins = path.join("plugins");
+                let mut plugin_roots = Vec::with_capacity(2);
                 if plugins.is_dir() {
-                    // GH #439: a Toolbox/Gateway thin client for this IDE
-                    // loads its frontend plugins from `plugins/frontend`.
-                    let frontend = plugins.join(JETBRAINS_CLIENT_FRONTEND_DIR);
+                    // A Linux data root is its own plugins path, so its Agent
+                    // Doc tree stays a target even beside a stray `plugins/`
+                    // (GH #439: the 0.35.589 Linux Client step created one).
+                    if has_agent_doc_plugin_tree(&path) {
+                        plugin_roots.push(path.clone());
+                    }
+                    plugin_roots.push(plugins);
+                } else {
+                    // Modern IDEs commonly expose the product-version data root itself as
+                    // `idea.plugins.path` (Linux `PathManager` has no `plugins` segment).
+                    plugin_roots.push(path);
+                }
+                for plugins_dir in plugin_roots {
+                    // GH #439: a Toolbox/Gateway thin client for this IDE loads its
+                    // frontend plugins from `<IDE plugins path>/frontend`:
+                    // `plugins/frontend` on Windows and macOS, `<data dir>/frontend`
+                    // on Linux.
+                    let frontend = plugins_dir.join(JETBRAINS_CLIENT_FRONTEND_DIR);
                     if has_agent_doc_plugin_tree(&frontend) {
                         dirs.push(frontend);
                     }
-                    dirs.push(plugins);
-                } else {
-                    // Modern IDEs commonly expose the product-version data root itself as
-                    // `idea.plugins.path`.
-                    dirs.push(path);
+                    dirs.push(plugins_dir);
                 }
             }
         }
@@ -158,10 +170,13 @@ pub fn jetbrains_plugin_dirs_in_roots(search_roots: &[PathBuf]) -> Vec<PathBuf> 
     dirs
 }
 
-/// GH #439: the child of an IDE's `plugins` directory from which a JetBrains
-/// Client started by Toolbox or Gateway loads its frontend plugins (Windows
-/// `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`). It is the
-/// Client's `PathManager.getPluginsPath()`.
+/// GH #439: the child of an IDE's plugins path from which a JetBrains Client
+/// started by Toolbox or Gateway loads its frontend plugins. It is the Client's
+/// `PathManager.getPluginsPath()`: Windows
+/// `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`, macOS
+/// `~/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend`,
+/// Linux `~/.local/share/JetBrains/IntelliJIdea2026.3/frontend` (IntelliJ's
+/// Linux plugins path is the data directory itself, with no `plugins` segment).
 pub const JETBRAINS_CLIENT_FRONTEND_DIR: &str = "frontend";
 
 const AGENT_DOC_PLUGIN_TREES: [&str; 3] = [
@@ -176,27 +191,36 @@ fn has_agent_doc_plugin_tree(plugins_dir: &Path) -> bool {
         .any(|tree| plugins_dir.join(tree).is_dir())
 }
 
-/// GH #439: whether `dir` is `<IDE data dir>/plugins/frontend`, a thin
-/// client's plugins directory.
+/// GH #439: the versioned IDE data directory a thin client's frontend plugins
+/// directory belongs to: the grandparent of `<IDE data dir>/plugins/frontend`
+/// (Windows, macOS) or the parent of `<IDE data dir>/frontend` (Linux).
+fn client_frontend_ide_data_dir(dir: &Path) -> Option<&Path> {
+    if dir.file_name()? != JETBRAINS_CLIENT_FRONTEND_DIR {
+        return None;
+    }
+    let parent = dir.parent()?;
+    let data_dir = if parent.file_name()? == "plugins" {
+        parent.parent()?
+    } else {
+        parent
+    };
+    is_jetbrains_ide_data_dir(&data_dir.file_name()?.to_string_lossy()).then_some(data_dir)
+}
+
+/// GH #439: whether `dir` is a thin client's plugins directory:
+/// `<IDE data dir>/plugins/frontend` (Windows, macOS) or
+/// `<IDE data dir>/frontend` (Linux).
 pub fn is_jetbrains_client_frontend_dir(dir: &Path) -> bool {
-    dir.file_name()
-        .is_some_and(|name| name == JETBRAINS_CLIENT_FRONTEND_DIR)
-        && dir
-            .parent()
-            .is_some_and(|plugins| plugins.file_name().is_some_and(|name| name == "plugins"))
-        && dir
-            .parent()
-            .and_then(Path::parent)
-            .and_then(Path::file_name)
-            .is_some_and(|name| is_jetbrains_ide_data_dir(&name.to_string_lossy()))
+    client_frontend_ide_data_dir(dir).is_some()
 }
 
 /// The versioned IDE data directory name (`IntelliJIdea2026.3`) a plugins
 /// directory belongs to: the directory itself, its `plugins` parent, or the
-/// grandparent of a thin client's `plugins/frontend`.
+/// IDE data directory of a thin client's `plugins/frontend` or (Linux)
+/// `frontend`.
 pub fn jetbrains_ide_data_dir_name(target_dir: &Path) -> Option<String> {
-    let named = if is_jetbrains_client_frontend_dir(target_dir) {
-        target_dir.parent()?.parent()
+    let named = if let Some(data_dir) = client_frontend_ide_data_dir(target_dir) {
+        Some(data_dir)
     } else if target_dir.file_name().is_some_and(|name| name == "plugins") {
         target_dir.parent()
     } else {
@@ -1017,9 +1041,9 @@ mod tests {
         assert!(!is_jetbrains_ide_data_dir("JetBrainsToolbox2026.3"));
     }
 
-    /// GH #439: a JetBrains Client started by Toolbox or Gateway for an
-    /// `IntelliJIdea2026.3` backend loads its frontend plugins from
-    /// `IntelliJIdea2026.3/plugins/frontend`, not from `JetBrainsClient<v>`.
+    /// GH #439: on Windows and macOS a JetBrains Client started by Toolbox or
+    /// Gateway for an `IntelliJIdea2026.3` backend loads its frontend plugins
+    /// from `IntelliJIdea2026.3/plugins/frontend`, not from `JetBrainsClient<v>`.
     /// That directory is a reconcile target once it holds an Agent Doc tree.
     #[test]
     fn thin_client_frontend_plugins_dir_is_discovered_and_versioned() {
@@ -1055,6 +1079,64 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["0.2.1029"]
         );
+    }
+
+    /// GH #439 review 7118503929: IntelliJ's Linux plugins path is the IDE data
+    /// directory itself (`PathManager.getDefaultPluginPathFor` has an empty
+    /// Linux suffix), so a Linux Toolbox/Gateway thin client loads its frontend
+    /// plugins from `~/.local/share/JetBrains/IntelliJIdea2026.3/frontend`.
+    /// That directory is the Client target, versioned from its data directory,
+    /// and the local IDE's plugins in the data root stay a target beside it.
+    #[test]
+    fn linux_thin_client_frontend_dir_is_discovered_beside_the_ide_data_root() {
+        let tmp = tempfile::tempdir().unwrap();
+        let ide = tmp.path().join("IntelliJIdea2026.3");
+        let frontend = ide.join(JETBRAINS_CLIENT_FRONTEND_DIR);
+        let other = tmp.path().join("PyCharm2026.3");
+        let empty_frontend = other.join(JETBRAINS_CLIENT_FRONTEND_DIR);
+        for (dir, version) in [(&ide, "0.2.1043"), (&frontend, "0.2.1029")] {
+            let lib = dir.join("agent-doc-jetbrains/lib");
+            std::fs::create_dir_all(&lib).unwrap();
+            std::fs::write(lib.join(format!("agent.doc-{version}.jar")), b"jar").unwrap();
+        }
+        std::fs::create_dir_all(&empty_frontend).unwrap();
+
+        // Scenario A of the review: the real Linux layout.
+        assert_eq!(
+            jetbrains_plugin_dirs_in_roots(&[tmp.path().to_path_buf()]),
+            [ide.clone(), frontend.clone(), other.clone()]
+        );
+        assert!(is_jetbrains_client_frontend_dir(&frontend));
+        assert!(!is_jetbrains_client_frontend_dir(&ide));
+        assert!(!is_jetbrains_client_frontend_dir(&empty_frontend.join("x")));
+        assert!(!is_jetbrains_client_frontend_dir(
+            &tmp.path().join("custom/frontend")
+        ));
+        assert_eq!(jetbrains_platform_build(&frontend), Some(263));
+        assert_eq!(
+            jetbrains_ide_data_dir_name(&frontend).as_deref(),
+            Some("IntelliJIdea2026.3")
+        );
+        assert_eq!(
+            jetbrains_ide_data_dir_name(&ide).as_deref(),
+            Some("IntelliJIdea2026.3")
+        );
+        assert_eq!(
+            installed_artifacts_in(&frontend)
+                .into_iter()
+                .map(|artifact| artifact.version)
+                .collect::<Vec<_>>(),
+            ["0.2.1029"]
+        );
+
+        // Scenario B: following the 0.35.589 Linux step created a stray
+        // `plugins/frontend`; the data root's own tree and the real Linux
+        // Client directory are still reconciled.
+        let stray = ide.join("plugins").join(JETBRAINS_CLIENT_FRONTEND_DIR);
+        std::fs::create_dir_all(stray.join("agent-doc-jetbrains-262/lib")).unwrap();
+        let dirs = jetbrains_plugin_dirs_in_roots(&[tmp.path().to_path_buf()]);
+        assert!(dirs.contains(&ide), "{dirs:?}");
+        assert!(dirs.contains(&frontend), "{dirs:?}");
     }
 
     #[test]

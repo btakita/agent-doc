@@ -844,15 +844,23 @@ The runtime version warning cache lives at `~/.cache/agent-doc/version-cache.jso
   the backend's exact `agent-doc-jetbrains-262-<v>.zip` (no `<version>`
   placeholder, which the HTML notification rendered as an empty tag).
 - A JetBrains Client started by Toolbox or Gateway for an `IntelliJIdea2026.3`
-  backend loads its plugins from `IntelliJIdea2026.3/plugins/frontend` under
-  its JetBrains data root (Windows
-  `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`);
-  `JetBrainsClient<YYYY.N>/plugins` is only a standalone Client's directory.
-  Discovery reconciles `<IDE data dir>/plugins/frontend` as a Client target when
-  it holds an Agent Doc tree, so `agent-doc upgrade` run on the Client machine
-  installs the same modular ZIP there. The Client steps printed on a backend
-  name that directory using the reconciled backend's data directory name. For
-  every Client target (thin-client `plugins/frontend` or
+  backend loads its plugins from the Client's `PathManager.getPluginsPath()`,
+  which is that IDE's plugins path plus `frontend`: Windows
+  `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`, macOS
+  `~/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend`,
+  Linux `~/.local/share/JetBrains/IntelliJIdea2026.3/frontend` (IntelliJ's
+  Linux plugins path is the data directory itself, with no `plugins` segment).
+  A standalone Client's directory is `JetBrainsClient<YYYY.N>/plugins`
+  (Linux: `JetBrainsClient<YYYY.N>`). Discovery reconciles
+  `<IDE data dir>/plugins/frontend` and `<IDE data dir>/frontend` as Client
+  targets when they hold an Agent Doc tree, labelled
+  `IntelliJIdea2026.3/plugins/frontend` or `IntelliJIdea2026.3/frontend`; the
+  Linux data root's own plugins stay a target beside it. So `agent-doc upgrade`
+  run on the Client machine installs the same modular ZIP there. The Client
+  steps printed on a backend name that directory per OS using the reconciled
+  backend's data directory name; when several modular backend IDEs were
+  reconciled, they name each and keep the `<IDE><YYYY.N>` placeholder in the
+  paths. For every Client target (thin-client `frontend` directory or
   `JetBrainsClient`/Gateway roots) the upgrade also adds the release asset
   `jetbrains-frontend-release-ed25519.pub` (verified against the GitHub asset
   digest and parsed as an Ed25519 X.509 public key) to

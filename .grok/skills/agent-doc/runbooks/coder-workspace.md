@@ -93,8 +93,10 @@ creates one with the receipt's attach command.
   save `jetbrains-frontend-release-ed25519.pub` as
   `.agent-doc-frontend-release/trusted-ed25519-public-keys` there, restart).
   A Client started by Toolbox or Gateway loads plugins from the backend IDE's
-  data directory name plus `plugins/frontend`, e.g.
-  `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`, not
+  data directory name plus `plugins/frontend` on Windows and macOS, e.g.
+  `%APPDATA%\JetBrains\IntelliJIdea2026.3\plugins\frontend`, and plus
+  `frontend` on Linux (no `plugins` segment), e.g.
+  `~/.local/share/JetBrains/IntelliJIdea2026.3/frontend`, not
   `JetBrainsClient<YYYY.N>`. If agent-doc is installed on the Client machine,
   quit the Client and run `agent-doc upgrade` there instead: it installs into
   that directory and writes the key. Until the Client matches, the backend

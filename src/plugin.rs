@@ -1046,7 +1046,8 @@ fn print_jetbrains_remote_dev_install_scope(package_range: JetbrainsPackageRange
 const JETBRAINS_REMOTE_DEV_LOCAL_RECONCILE_NOTICE: &str = "Remote Dev peer scope: only plugin directories visible to this process were reconciled; a Client/Gateway on another machine was not verified or updated. Install the matching modular ZIP in that peer (or use JetBrains Marketplace synchronization), then restart both peers.";
 
 /// GH #435: a JetBrains Client or Gateway data directory (`JetBrainsClient2026.3`),
-/// or (GH #439) a thin client's `IntelliJIdea2026.3/plugins/frontend`.
+/// or (GH #439) a thin client's `IntelliJIdea2026.3/plugins/frontend` (Windows,
+/// macOS) or `IntelliJIdea2026.3/frontend` (Linux).
 fn is_jetbrains_client_label(label: &str) -> bool {
     ["JetBrainsClient", "JetBrainsGateway", "Gateway"]
         .iter()
@@ -1105,8 +1106,11 @@ const JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE: &str = "trusted-ed25519-public-keys"
 /// operator's machine; nothing on the Remote Dev backend can replace it, and a
 /// running Client keeps its jars mapped, so the Client must be quit before the
 /// swap. A Client started by Toolbox or Gateway for an `IntelliJIdea2026.3`
-/// backend loads its plugins from `IntelliJIdea2026.3/plugins/frontend`;
-/// `JetBrainsClient<YYYY.N>/plugins` is only the standalone Client's. Every
+/// backend loads its plugins from `IntelliJIdea2026.3/plugins/frontend` on
+/// Windows and macOS and from `IntelliJIdea2026.3/frontend` on Linux, whose
+/// plugins path has no `plugins` segment; `JetBrainsClient<YYYY.N>` is only the
+/// standalone Client's. With several modular backend IDEs reconciled, the steps
+/// name each one and keep the `<IDE><YYYY.N>` placeholder in the paths. Every
 /// agent-doc folder name (`agent-doc-jetbrains` from an agent-doc install,
 /// `agent-doc-jetbrains-262`/`-263` from a hand-extracted ZIP) is removed,
 /// because two folders with one plugin id conflict. The Client also needs the
@@ -1116,12 +1120,23 @@ fn jetbrains_remote_dev_client_steps(
     release: &str,
     package_version: &str,
     remote_hint: Option<&str>,
-    ide_data_dir: Option<&str>,
+    ide_data_dirs: &[String],
 ) -> Vec<String> {
     let asset = format!("agent-doc-jetbrains-262-{package_version}.zip");
     let release = release.trim_start_matches('v');
     let download = format!("https://github.com/{GITHUB_REPO}/releases/download/v{release}");
-    let ide = ide_data_dir.unwrap_or("<IDE><YYYY.N>");
+    const IDE_PLACEHOLDER: &str = "<IDE><YYYY.N>";
+    let (ide, backend) = match ide_data_dirs {
+        [one] => (one.as_str(), format!("this {one} backend")),
+        [] => (IDE_PLACEHOLDER, format!("a {IDE_PLACEHOLDER} backend")),
+        several => (
+            IDE_PLACEHOLDER,
+            format!(
+                "the backend IDE it connects to ({}; written {IDE_PLACEHOLDER} below)",
+                several.join(" or ")
+            ),
+        ),
+    };
     let headline = match remote_hint {
         Some(hint) => format!(
             "JetBrains Client frontend NOT updated ({hint}; the Client runs on your local machine). On the machine that runs JetBrains Client/Gateway:"
@@ -1133,7 +1148,7 @@ fn jetbrains_remote_dev_client_steps(
         "  If agent-doc is installed there, quit JetBrains Client and run `agent-doc upgrade`: it installs the ZIP into the Client plugins directory below and writes the release key. Otherwise:".to_string(),
         format!("  1. Download {download}/{asset}"),
         "  2. Quit JetBrains Client completely (every window). A running Client keeps its plugin jars mapped, so they cannot be replaced in place.".to_string(),
-        format!("  3. Open the Client plugins directory. A Client started by Toolbox or Gateway for this {ide} backend loads plugins from Windows %APPDATA%\\JetBrains\\{ide}\\plugins\\frontend, macOS ~/Library/Application Support/JetBrains/{ide}/plugins/frontend, Linux ~/.local/share/JetBrains/{ide}/plugins/frontend; a standalone JetBrains Client uses JetBrainsClient<YYYY.N>/plugins instead. The Client idea.log line `[split-surface] frontend surface publisher started` names the loaded folder as plugin_path=."),
+        format!("  3. Open the Client plugins directory. A Client started by Toolbox or Gateway for {backend} loads plugins from Windows %APPDATA%\\JetBrains\\{ide}\\plugins\\frontend, macOS ~/Library/Application Support/JetBrains/{ide}/plugins/frontend, Linux ~/.local/share/JetBrains/{ide}/frontend (no plugins segment on Linux; $XDG_DATA_HOME replaces ~/.local/share when set). A standalone JetBrains Client uses Windows %APPDATA%\\JetBrains\\JetBrainsClient<YYYY.N>\\plugins, macOS ~/Library/Application Support/JetBrains/JetBrainsClient<YYYY.N>/plugins, Linux ~/.local/share/JetBrains/JetBrainsClient<YYYY.N> instead. The Client idea.log line `[split-surface] frontend surface publisher started` names the loaded folder as plugin_path=."),
         format!("  4. Delete the agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders there, then extract {asset} into that directory (it creates agent-doc-jetbrains-262/)."),
         format!("  5. Download {download}/{JETBRAINS_FRONTEND_RELEASE_PUBLIC_KEY_ASSET} and save it in that directory as {JETBRAINS_FRONTEND_RELEASE_DIR}/{JETBRAINS_FRONTEND_TRUSTED_KEYS_FILE} (no extension). Without it the Client logs `[frontend-impl] refused: ... not configured on the JetBrains Client host` and the backend refuses layout snapshots."),
         format!("  6. Start the Client and reconnect. Its idea.log must show `[split-surface] frontend surface publisher started ... plugin={package_version}`; a backend idea.log line `[split-surface] frontend/backend plugin mismatch` means the Client still runs another build."),
@@ -4911,7 +4926,7 @@ impl PluginReconcileReport {
                     release,
                     &version,
                     remote_dev_session_hint(&std::env::vars().collect()),
-                    self.modular_ide_data_dir().as_deref(),
+                    &self.modular_ide_data_dirs(),
                 ));
             }
         }
@@ -4940,22 +4955,27 @@ impl PluginReconcileReport {
             .max_by(|left, right| compare_dotted_versions(left, right))
     }
 
-    /// GH #439: the newest modular IDE data directory (`IntelliJIdea2026.3`)
-    /// this process reconciled. A Client started by Toolbox or Gateway for that
-    /// backend loads its plugins from the same-named directory's
-    /// `plugins/frontend` on the Client machine.
-    fn modular_ide_data_dir(&self) -> Option<String> {
-        self.targets
+    /// GH #439: every modular backend IDE data directory (`IntelliJIdea2026.3`)
+    /// this process reconciled, sorted and distinct. A Client started by
+    /// Toolbox or Gateway for one of those backends loads its plugins from the
+    /// same-named directory's `plugins/frontend` (Linux: `frontend`) on the
+    /// Client machine. Several are all named: which one the operator's Client
+    /// connects to is not visible here (review 7118503929 finding 2).
+    fn modular_ide_data_dirs(&self) -> Vec<String> {
+        let mut names = self
+            .targets
             .iter()
             .filter(|target| target.family == PluginEditorFamily::JetBrains)
             .filter_map(|target| {
                 let path = Path::new(&target.label);
                 let build = agent_doc_fs::jetbrains_install::jetbrains_platform_build(path)?;
                 let name = agent_doc_fs::jetbrains_install::jetbrains_ide_data_dir_name(path)?;
-                (build >= 262 && !is_jetbrains_client_label(&target.label)).then_some((build, name))
+                (build >= 262 && !is_jetbrains_client_label(&target.label)).then_some(name)
             })
-            .max()
-            .map(|(_, name)| name)
+            .collect::<Vec<_>>();
+        names.sort();
+        names.dedup();
+        names
     }
 
     fn has_modular_jetbrains_target(&self) -> bool {
@@ -5124,16 +5144,23 @@ fn printed_reconcile_summary(
 
 /// The operator-facing name of a JetBrains plugins directory: the IDE data
 /// directory (`IntelliJIdea2026.3`) rather than its `plugins` child. A thin
-/// client's frontend directory keeps its `plugins/frontend` suffix (GH #439),
-/// so it reads as the Client, not as the IDE beside it.
+/// client's frontend directory keeps its suffix (GH #439): `plugins/frontend`
+/// on Windows and macOS, `frontend` on Linux, so it reads as the Client, not as
+/// the IDE beside it.
 fn jetbrains_target_label(target_dir: &Path) -> String {
     if agent_doc_fs::jetbrains_install::is_jetbrains_client_frontend_dir(target_dir)
         && let Some(name) = agent_doc_fs::jetbrains_install::jetbrains_ide_data_dir_name(target_dir)
     {
-        return format!(
-            "{name}/plugins/{}",
-            agent_doc_fs::jetbrains_install::JETBRAINS_CLIENT_FRONTEND_DIR
-        );
+        let frontend = agent_doc_fs::jetbrains_install::JETBRAINS_CLIENT_FRONTEND_DIR;
+        let under_plugins = target_dir
+            .parent()
+            .and_then(Path::file_name)
+            .is_some_and(|parent| parent == "plugins");
+        return if under_plugins {
+            format!("{name}/plugins/{frontend}")
+        } else {
+            format!("{name}/{frontend}")
+        };
     }
     let named = if target_dir.file_name().is_some_and(|name| name == "plugins") {
         target_dir.parent()
@@ -7529,15 +7556,12 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
                 .as_deref(),
             Some("0.2.1041")
         );
-        assert_eq!(
-            backend_only.modular_ide_data_dir().as_deref(),
-            Some("IntelliJIdea2026.3")
-        );
+        assert_eq!(backend_only.modular_ide_data_dirs(), ["IntelliJIdea2026.3"]);
         let steps = super::jetbrains_remote_dev_client_steps(
             "v0.35.590",
             "0.2.1041",
             Some("this is a Coder workspace"),
-            Some("IntelliJIdea2026.3"),
+            &["IntelliJIdea2026.3".to_string()],
         )
         .join("\n");
         for needle in [
@@ -7545,10 +7569,15 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             "https://github.com/btakita/agent-doc/releases/download/v0.35.590/agent-doc-jetbrains-262-0.2.1041.zip",
             "Quit JetBrains Client completely",
             // GH #439: a Toolbox/Gateway thin client loads from the backend
-            // IDE's `plugins/frontend`, not `JetBrainsClient<YYYY.N>`.
+            // IDE's `plugins/frontend` (Linux: `frontend`, review 7118503929),
+            // not `JetBrainsClient<YYYY.N>`.
+            "for this IntelliJIdea2026.3 backend",
             "Windows %APPDATA%\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend",
-            "~/.local/share/JetBrains/IntelliJIdea2026.3/plugins/frontend",
-            "a standalone JetBrains Client uses JetBrainsClient<YYYY.N>/plugins instead",
+            "macOS ~/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend",
+            "Linux ~/.local/share/JetBrains/IntelliJIdea2026.3/frontend (",
+            "Windows %APPDATA%\\JetBrains\\JetBrainsClient<YYYY.N>\\plugins",
+            "macOS ~/Library/Application Support/JetBrains/JetBrainsClient<YYYY.N>/plugins",
+            "Linux ~/.local/share/JetBrains/JetBrainsClient<YYYY.N> instead",
             "Delete the agent-doc-jetbrains, agent-doc-jetbrains-262 and agent-doc-jetbrains-263 folders",
             "https://github.com/btakita/agent-doc/releases/download/v0.35.590/jetbrains-frontend-release-ed25519.pub",
             ".agent-doc-frontend-release/trusted-ed25519-public-keys",
@@ -7559,8 +7588,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             assert!(steps.contains(needle), "missing {needle:?}: {steps}");
         }
         assert!(
-            super::jetbrains_remote_dev_client_steps("0.35.590", "0.2.1041", None, None)[0]
+            !steps.contains("/.local/share/JetBrains/IntelliJIdea2026.3/plugins"),
+            "the Linux thin-client path has no plugins segment: {steps}"
+        );
+        assert!(
+            super::jetbrains_remote_dev_client_steps("0.35.590", "0.2.1041", None, &[])[0]
                 .starts_with("If a JetBrains Client/Gateway on another machine connects"),
+        );
+        assert!(
+            super::jetbrains_remote_dev_client_steps("0.35.590", "0.2.1041", None, &[])
+                .join("\n")
+                .contains("for a <IDE><YYYY.N> backend loads plugins from")
         );
         let summary = backend_only.summary("0.35.590");
         assert!(
@@ -7594,6 +7632,28 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
         assert_eq!(
             with_local_thin_client.unreconciled_client_package_version(),
             None
+        );
+        // Review 7118503929 scenario A: the Linux thin client
+        // `IntelliJIdea2026.3/frontend` beside the Linux data-root IDE is the
+        // Client too.
+        let with_local_linux_thin_client = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "IntelliJIdea2026.3", "0.2.1041", O::Unchanged),
+                reconcile_target(
+                    JetBrains,
+                    "IntelliJIdea2026.3/frontend",
+                    "0.2.1041",
+                    O::Installed,
+                ),
+            ],
+        };
+        assert_eq!(
+            with_local_linux_thin_client.unreconciled_client_package_version(),
+            None
+        );
+        assert_eq!(
+            with_local_linux_thin_client.modular_ide_data_dirs(),
+            ["IntelliJIdea2026.3"]
         );
         assert!(
             !with_local_client
@@ -9644,9 +9704,17 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             !summary.contains(&super::between_restarts_guidance()),
             "{summary}"
         );
-        // Hot-upgraded and unchanged targets need no action line.
+        // Hot-upgraded and unchanged targets need no action line. GoLand2026.2
+        // is still named among the modular backends in the Client step
+        // (review 7118503929 finding 2), never in a line of its own.
         assert!(!summary.contains("IntelliJIdea2026.1"), "{summary}");
-        assert!(!summary.contains("GoLand2026.2"), "{summary}");
+        assert!(
+            summary
+                .lines()
+                .filter(|line| line.contains("GoLand2026.2"))
+                .all(|line| line.contains("GoLand2026.2 or PyCharm2026.2 or RustRover2026.2 or WebStorm2026.2; written <IDE><YYYY.N> below")),
+            "{summary}"
+        );
         // The conditional wording survives only where a reload may still land.
         let hedged = summary
             .lines()
@@ -9857,6 +9925,115 @@ aaaabbbbccccddddeeeeffff00001111222233334444555566667777888899cd *agent-doc-jetb
             "/h/.local/share/JetBrains/IntelliJIdea2026.3/plugins"
         )));
         assert!(!super::is_jetbrains_client_label("IntelliJIdea2026.3"));
+
+        // Review 7118503929: the Linux thin client loads from
+        // `~/.local/share/JetBrains/IntelliJIdea2026.3/frontend` (no `plugins`
+        // segment), versioned from its IDE data directory.
+        let linux = Path::new("/h/.local/share/JetBrains/IntelliJIdea2026.3/frontend");
+        let label = super::jetbrains_target_label(linux);
+        assert_eq!(label, "IntelliJIdea2026.3/frontend");
+        assert!(super::is_jetbrains_client_label(&label));
+        assert!(super::is_jetbrains_client_target(linux));
+        assert_eq!(
+            super::jetbrains_platform_build(Path::new(&label)),
+            Some(263)
+        );
+        assert_eq!(
+            super::jetbrains_package_range(linux).unwrap(),
+            super::JetbrainsPackageRange::Modular262To263
+        );
+        assert!(!super::is_jetbrains_client_target(Path::new(
+            "/h/.local/share/JetBrains/IntelliJIdea2026.3"
+        )));
+        assert!(super::is_jetbrains_client_target(Path::new(
+            "/h/.local/share/JetBrains/JetBrainsClient2026.3"
+        )));
+        assert!(!super::is_jetbrains_client_target(Path::new(
+            "/h/custom-ide/frontend"
+        )));
+    }
+
+    /// Review 7118503929 scenario A, end to end on disk: a Linux Toolbox thin
+    /// client's `IntelliJIdea2026.3/frontend` beside a local IntelliJ whose
+    /// plugins live in the data root. Discovery returns both; only the
+    /// frontend directory is the Client (trust key, Client count), and the
+    /// summary then prints no hand-install steps.
+    #[test]
+    fn linux_thin_client_layout_is_discovered_as_the_client() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let tmp = TempDir::new().unwrap();
+        let ide = tmp.path().join("IntelliJIdea2026.3");
+        let frontend = ide.join("frontend");
+        for (dir, version) in [(&ide, "0.2.1043"), (&frontend, "0.2.1029")] {
+            let lib = dir.join("agent-doc-jetbrains/lib");
+            fs::create_dir_all(&lib).unwrap();
+            fs::write(lib.join(format!("agent.doc-{version}.jar")), b"jar").unwrap();
+        }
+
+        let dirs = jetbrains_plugin_dirs_in_roots(&[tmp.path().to_path_buf()]);
+        assert_eq!(dirs, [ide.clone(), frontend.clone()]);
+        let labels = dirs
+            .iter()
+            .map(|dir| super::jetbrains_target_label(dir))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            labels,
+            ["IntelliJIdea2026.3", "IntelliJIdea2026.3/frontend"]
+        );
+        assert_eq!(
+            dirs.iter()
+                .map(|dir| super::is_jetbrains_client_target(dir))
+                .collect::<Vec<_>>(),
+            [false, true]
+        );
+
+        let report = super::PluginReconcileReport {
+            targets: labels
+                .iter()
+                .map(|label| reconcile_target(JetBrains, label, "0.2.1046", O::Installed))
+                .collect(),
+        };
+        assert_eq!(report.unreconciled_client_package_version(), None);
+        assert!(!report.summary("0.35.590").contains("NOT updated"));
+    }
+
+    /// Review 7118503929 finding 2: with several modular backend IDEs, the
+    /// Client steps no longer name whichever sorts last; they name each and
+    /// keep the `<IDE><YYYY.N>` placeholder in the paths.
+    #[test]
+    fn client_steps_name_every_modular_backend_ide() {
+        use super::{PluginEditorFamily::JetBrains, PluginTargetOutcome as O};
+        let report = super::PluginReconcileReport {
+            targets: vec![
+                reconcile_target(JetBrains, "PyCharm2026.3", "0.2.1046", O::Installed),
+                reconcile_target(JetBrains, "IntelliJIdea2026.3", "0.2.1046", O::Installed),
+                reconcile_target(JetBrains, "IntelliJIdea2026.2", "0.2.1046", O::Installed),
+                reconcile_target(JetBrains, "IntelliJIdea2025.3", "0.2.1040", O::Unchanged),
+            ],
+        };
+        let names = report.modular_ide_data_dirs();
+        assert_eq!(
+            names,
+            ["IntelliJIdea2026.2", "IntelliJIdea2026.3", "PyCharm2026.3"]
+        );
+        let steps = super::jetbrains_remote_dev_client_steps("0.35.590", "0.2.1046", None, &names)
+            .join("\n");
+        for needle in [
+            "for the backend IDE it connects to (IntelliJIdea2026.2 or IntelliJIdea2026.3 or PyCharm2026.3; written <IDE><YYYY.N> below)",
+            "Windows %APPDATA%\\JetBrains\\<IDE><YYYY.N>\\plugins\\frontend",
+            "Linux ~/.local/share/JetBrains/<IDE><YYYY.N>/frontend (",
+        ] {
+            assert!(steps.contains(needle), "missing {needle:?}: {steps}");
+        }
+        assert!(
+            !steps.contains("JetBrains\\PyCharm2026.3\\plugins"),
+            "{steps}"
+        );
+        assert!(
+            report
+                .summary("0.35.590")
+                .contains("IntelliJIdea2026.3 or PyCharm2026.3")
+        );
     }
 
     /// GH #439: `agent-doc upgrade` wrote the backend handoff but never the

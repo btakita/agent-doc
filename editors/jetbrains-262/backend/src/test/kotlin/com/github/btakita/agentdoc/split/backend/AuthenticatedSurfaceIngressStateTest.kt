@@ -423,7 +423,14 @@ class AuthenticatedSurfaceIngressStateTest {
         // GH #439: the full asset name, the thin-client directory and the trust file; no `<...>`
         // placeholder, which the HTML notification body rendered as `agent-doc-jetbrains-262-.zip`.
         assertTrue(line.contains("agent-doc-jetbrains-262-0.2.1043.zip"), line)
-        assertTrue(line.contains("%APPDATA%\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend"), line)
+        assertTrue(line.contains("%APPDATA%\\JetBrains\\IntelliJIdea2026.3\\plugins\\frontend on Windows"), line)
+        assertTrue(
+            line.contains("~/Library/Application Support/JetBrains/IntelliJIdea2026.3/plugins/frontend on macOS"),
+            line,
+        )
+        // Review 7118503929: IntelliJ's Linux plugins path has no `plugins` segment.
+        assertTrue(line.contains("~/.local/share/JetBrains/IntelliJIdea2026.3/frontend on Linux"), line)
+        assertFalse(line.contains("IntelliJIdea2026.3/plugins/frontend in its"), line)
         assertTrue(line.contains("delete every agent-doc-jetbrains, agent-doc-jetbrains-262"), line)
         assertTrue(line.contains(".agent-doc-frontend-release/trusted-ed25519-public-keys"), line)
         assertFalse(line.contains('<') || line.contains('>'), line)

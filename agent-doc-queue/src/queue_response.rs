@@ -3198,6 +3198,32 @@ mod tests {
         );
     }
 
+    /// `#pipeprompt` × `#presetorder`: the echo of a pipe statement whose
+    /// address stage settled with `NO-WRITTEN-FIX` defers the head until the
+    /// piped adversarial review runs.
+    #[test]
+    fn piped_preset_echo_defers_until_the_later_stage_runs() {
+        let head =
+            "https://github.com/sample-org/sample-repo/pull/12: #address |\n  - #adversarial-pr";
+        let doc = format!(
+            "---\nqueue_active: true\nprompt_presets:\n  '#address': 'Address every actionable review item on the exact current head.'\n  '#adversarial-pr': 'Post one independent COMMENTED review on the current head.'\n---\n\n<!-- agent:queue auto -->\n- {head}\n<!-- /agent:queue -->\n"
+        );
+        let quoted = head.replace('\n', "\n> ");
+        let address_only = format!(
+            "### Re: address\n\n> **Queue prompt:** {quoted}\n\nNO-WRITTEN-FIX head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\nINLINE-THREADS-LOADED 0 head=fa3a3f449986d565f21aeb6e0f792323bc8d1d58\n"
+        );
+        assert!(latest_echo_cell_skips_later_ordered_preset(
+            &doc,
+            &address_only,
+            head
+        ));
+        assert!(response_defers_queue_head(&doc, &address_only, head));
+        let done = format!("{address_only}PRESET-DONE #adversarial-pr\n");
+        assert!(!latest_echo_cell_skips_later_ordered_preset(
+            &doc, &done, head
+        ));
+    }
+
     #[test]
     fn inline_discussion_goal_defers_until_root_threads_are_on_the_head() {
         let head = "https://github.com/haiven-dev/haiven-api/pull/869: #address";

@@ -4,10 +4,18 @@
 //! in that order. `#address then #adversarial-pr` runs address, then the
 //! adversarial review. Settling the earlier preset, including
 //! `NO-WRITTEN-FIX`, does not finish the row.
+//!
+//! A `#pipeprompt` statement orders its preset stages the same way:
+//! `- #address |` over `- #adversarial-pr` is `#address then
+//! #adversarial-pr`. Its stages come from
+//! [`agent_doc_element_queue::pipe::statement_stage_pipelines`], so ordered
+//! children, nested ` |` rows, a ` |+` deep pipe, and fan-out branches all
+//! read in run order.
 
 use agent_doc_document::queue_projection::strip_priority_markers;
 
-/// Preset names `text` joins with temporal `then`, in that order.
+/// Preset names `text` runs in temporal order: a `#pipeprompt` statement's
+/// preset stages ([`pipe_preset_order`]), else presets joined with `then`.
 ///
 /// A chain is known presets whose consecutive pairs have `then` between them.
 /// Other words are gaps and do not break a `then`. A preset with no preceding
@@ -15,16 +23,69 @@ use agent_doc_document::queue_projection::strip_priority_markers;
 /// returned (the first chain on a tie). Inline code is masked, and a preset
 /// already in the chain is kept once.
 pub fn temporal_preset_order(text: &str, presets: &[(String, String)]) -> Vec<String> {
+    let piped = pipe_preset_order(text, presets);
+    if !piped.is_empty() {
+        return piped;
+    }
+    then_preset_order(text, presets)
+}
+
+/// The preset stages of a ` |` / ` |+` statement (`#pipeprompt`), in run
+/// order, when at least two stages name a preset.
+///
+/// Each stage contributes its own `then` chain, or else its first preset in
+/// directive position (`#gh-fix <url>`, `<url>: #address`). A prose stage is
+/// a gap. Fan-out branches all follow their parent's stage, so every branch's
+/// preset is a later preset. A ` >` fold, context children, and a single-row
+/// ` | ` are not stages.
+pub fn pipe_preset_order(text: &str, presets: &[(String, String)]) -> Vec<String> {
+    let text = text.trim();
+    if !crate::document_queue::is_pipe_statement_text(text) {
+        return Vec::new();
+    }
+    let mut order: Vec<String> = Vec::new();
+    for stage in agent_doc_element_queue::pipe::statement_stage_pipelines(text)
+        .iter()
+        .flatten()
+    {
+        for name in stage_presets(stage, presets) {
+            if !order.iter().any(|seen| seen.eq_ignore_ascii_case(&name)) {
+                order.push(name);
+            }
+        }
+    }
+    if order.len() >= 2 { order } else { Vec::new() }
+}
+
+fn stage_presets(stage: &str, presets: &[(String, String)]) -> Vec<String> {
+    let chain = then_preset_order(stage, presets);
+    if !chain.is_empty() {
+        return chain;
+    }
+    let text = strip_priority_markers(stage);
+    let text = crate::queue_continuation::mask_directive_scan(&text);
+    directive_tokens(&text)
+        .find_map(|token| {
+            presets
+                .iter()
+                .find(|(name, _)| token.eq_ignore_ascii_case(name))
+                .map(|(name, _)| name.clone())
+        })
+        .into_iter()
+        .collect()
+}
+
+fn directive_tokens(text: &str) -> impl Iterator<Item = &str> {
+    text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
+        .filter(|token| !token.is_empty())
+}
+
+fn then_preset_order(text: &str, presets: &[(String, String)]) -> Vec<String> {
     let text = strip_priority_markers(text);
     let text = crate::queue_continuation::mask_directive_scan(&text);
     let mut chains: Vec<Vec<String>> = Vec::new();
     let mut expect_continue = false;
-    for token in
-        text.split(|ch: char| !(ch.is_ascii_alphanumeric() || matches!(ch, '#' | '-' | '_')))
-    {
-        if token.is_empty() {
-            continue;
-        }
+    for token in directive_tokens(&text) {
         if token.eq_ignore_ascii_case("then") {
             if chains.last().is_some_and(|chain| !chain.is_empty()) {
                 expect_continue = true;
@@ -61,9 +122,22 @@ pub fn temporal_preset_order(text: &str, presets: &[(String, String)]) -> Vec<St
         .unwrap_or_default()
 }
 
-/// True when `item` has `then` and a later `#` token, so a brief can tell the
-/// next worker that a settled earlier preset does not finish the row.
+/// True when `item` has `then` and a later `#` token, or is a `#pipeprompt`
+/// statement with a `#` directive in a stage after its first, so a brief can
+/// tell the next worker that a settled earlier preset does not finish the row.
 pub fn item_orders_a_later_preset(item: &str) -> bool {
+    if crate::document_queue::is_pipe_statement_text(item.trim())
+        && agent_doc_element_queue::pipe::statement_stage_pipelines(item.trim())
+            .iter()
+            .any(|stages| {
+                stages.iter().skip(1).any(|stage| {
+                    let text = strip_priority_markers(stage);
+                    crate::queue_continuation::mask_directive_scan(&text).contains('#')
+                })
+            })
+    {
+        return true;
+    }
     let text = strip_priority_markers(item);
     let text = crate::queue_continuation::mask_directive_scan(&text);
     let collapsed = text.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -283,6 +357,100 @@ mod tests {
         assert!(!item_orders_a_later_preset("#address"));
         assert!(!item_orders_a_later_preset(
             "`#address then #adversarial-pr`"
+        ));
+    }
+
+    /// `#pipeprompt` × `#presetorder`: a pipe statement's preset stages are a
+    /// temporal preset order. `- #address |` over `- #adversarial-pr` runs
+    /// address, then the adversarial review, exactly like `then`.
+    #[test]
+    fn pipe_statement_preset_stages_are_a_temporal_order() {
+        let presets = presets();
+        let address_then_review = vec!["#address".to_string(), "#adversarial-pr".to_string()];
+        for statement in [
+            "#address |\n  - #adversarial-pr",
+            "https://github.com/sample-org/sample-repo/pull/12: #address |\n  - #adversarial-pr",
+            "🚧 [#subagent:pipe#2] #address | [#q-0123456789ab]\n  - #adversarial-pr",
+            "📥 #address |\n  - ▶️ #adversarial-pr",
+            "#address |+\n  - #adversarial-pr",
+            "#address |\n  1. #adversarial-pr",
+            "#address |\n  - %% a list comment %%\n  - #adversarial-pr",
+        ] {
+            assert_eq!(
+                temporal_preset_order(statement, &presets),
+                address_then_review,
+                "{statement}"
+            );
+            assert!(item_orders_a_later_preset(statement), "{statement}");
+            let order = temporal_preset_order(statement, &presets);
+            let head = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+            assert_eq!(
+                first_unmet_later_preset(
+                    &order,
+                    &format!("NO-WRITTEN-FIX head={head}\n"),
+                    &presets
+                )
+                .as_deref(),
+                Some("#adversarial-pr"),
+                "{statement}"
+            );
+        }
+        // Chains: an ordered list, nested pipes, and a deep pipe keep reading order.
+        let three = vec![
+            "#rebase".to_string(),
+            "#address".to_string(),
+            "#adversarial-pr".to_string(),
+        ];
+        for statement in [
+            "#rebase |\n  1. #address\n  2. #adversarial-pr",
+            "#rebase |\n  - #address |\n    - #adversarial-pr",
+            "#rebase |+\n  - #address\n    - #adversarial-pr",
+            "#rebase |\n  - #address then #adversarial-pr",
+            "#rebase |\n  - summarize the diff |\n    - #address |\n      - #adversarial-pr",
+        ] {
+            assert_eq!(
+                temporal_preset_order(statement, &presets),
+                three,
+                "{statement}"
+            );
+        }
+        // Fan-out: every branch runs after the parent's stage.
+        assert_eq!(
+            temporal_preset_order("#address |\n  - #adversarial-pr\n  - #note", &presets),
+            vec![
+                "#address".to_string(),
+                "#adversarial-pr".to_string(),
+                "#note".to_string()
+            ]
+        );
+        // A preset with a gh-fix style argument is still that stage's preset.
+        assert_eq!(
+            temporal_preset_order(
+                "#gh-issue https://github.com/sample-org/sample-repo/issues/7 |\n  - #upgrade",
+                &presets
+            ),
+            vec!["#gh-issue".to_string(), "#upgrade".to_string()]
+        );
+        // Not an order: no pipe (context children), one preset stage, a prose
+        // or quoted mention, a code span, or a single-row inline pipe.
+        for text in [
+            "#address\n  - #adversarial-pr",
+            "#address |\n  - update the title",
+            "Collect the open issues |\n  - #address",
+            "#address |\n  - explain why the #adversarial-pr review was stale",
+            "#address |\n  - `#adversarial-pr`",
+            "#address |\n  - \"#adversarial-pr\"",
+            "#address | #adversarial-pr",
+            "#address >\n  - #adversarial-pr",
+        ] {
+            assert!(temporal_preset_order(text, &presets).is_empty(), "{text}");
+        }
+        assert!(!item_orders_a_later_preset(
+            "#address |\n  - update the title"
+        ));
+        assert!(!item_orders_a_later_preset("#address\n  - #adversarial-pr"));
+        assert!(!item_orders_a_later_preset(
+            "#address |\n  - `#adversarial-pr`"
         ));
     }
 

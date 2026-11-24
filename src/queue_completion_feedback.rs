@@ -2960,6 +2960,26 @@ mod tests {
     /// alone (`#addressproof`).
     #[test]
     fn no_written_fix_does_not_skip_a_later_preset() {
+        no_written_fix_keeps_the_later_preset_open(
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr",
+        );
+    }
+
+    /// `#pipeprompt` × `#presetorder`: a pipe statement's preset stages are a
+    /// temporal order. `- #address |` over `- #adversarial-pr` with a
+    /// `NO-WRITTEN-FIX` hand-back stays open until the adversarial review runs,
+    /// for the nested ` |` and ` |+` forms alike.
+    #[test]
+    fn no_written_fix_does_not_skip_a_later_piped_preset() {
+        for row in [
+            "https://github.com/sample-org/sample-repo/pull/12: #address |\n  - #adversarial-pr",
+            "https://github.com/sample-org/sample-repo/pull/12: #address |+\n  - #adversarial-pr",
+        ] {
+            no_written_fix_keeps_the_later_preset_open(row);
+        }
+    }
+
+    fn no_written_fix_keeps_the_later_preset_open(row: &str) {
         let dir = tempfile::tempdir().unwrap();
         fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
         fs::write(
@@ -2973,8 +2993,6 @@ mod tests {
         )
         .unwrap();
         let doc = dir.path().join("sdk-dev.md");
-        const ROW: &str =
-            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr";
         const HEAD: &str = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
         fs::write(
             &doc,
@@ -2985,15 +3003,15 @@ mod tests {
                  <!-- agent:boundary:keep -->\n\
                  <!-- /agent:exchange -->\n\n\
                  <!-- agent:queue subagents -->\n\
-                 - {ROW}\n\
+                 - {row}\n\
                  <!-- /agent:queue -->\n"
             ),
         )
         .unwrap();
-        agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-address", 600).unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, row, "subagent:pr12-address", 600).unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(
             &doc,
-            ROW,
+            row,
             "subagent:pr12-address",
             "worker:pr12-address",
             600,
@@ -3008,7 +3026,7 @@ mod tests {
              NO-WRITTEN-FIX head={HEAD}\n\
              INLINE-THREADS-LOADED 0 head={HEAD}\n"
         );
-        let requeue = requeue_nonterminal_goal_hand_back(&doc, ROW, Some(1), &prose)
+        let requeue = requeue_nonterminal_goal_hand_back(&doc, row, Some(1), &prose)
             .unwrap()
             .expect("a no-change address half does not skip the later preset");
         assert!(!requeue.address_fix_pending);
@@ -3019,7 +3037,7 @@ mod tests {
             Some("#adversarial-pr")
         );
         let brief =
-            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, ROW)
+            agent_doc_queue_io::subagent_dispatch::subagent_authorization_for_item(&doc, row)
                 .unwrap();
         let preamble = &brief.subagent_prompt_preamble;
         assert!(preamble.contains("not permission to skip"), "{preamble}");
@@ -3032,7 +3050,7 @@ mod tests {
         assert!(!preamble.contains("Land that written fix"), "{preamble}");
 
         let (outcome, _) =
-            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr12-review", 600)
+            agent_doc_queue_io::queue_claim::claim(&doc, row, "subagent:pr12-review", 600)
                 .expect("the requeued row is dispatchable for the later preset");
         assert_eq!(
             outcome,
@@ -3047,7 +3065,7 @@ mod tests {
             .unwrap();
         agent_doc_queue_io::queue_claim::start_attempt(
             &doc,
-            ROW,
+            row,
             "subagent:pr12-review",
             "worker:pr12-review",
             600,
@@ -3056,7 +3074,7 @@ mod tests {
         .unwrap();
         let done = format!("{prose}PRESET-DONE #adversarial-pr\n");
         assert!(
-            requeue_nonterminal_goal_hand_back(&doc, ROW, Some(generation), &done)
+            requeue_nonterminal_goal_hand_back(&doc, row, Some(generation), &done)
                 .unwrap()
                 .is_none(),
             "PRESET-DONE after the address receipt finishes the ordered row"

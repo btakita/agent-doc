@@ -1280,21 +1280,26 @@ mod tests {
             "  '#address': 'Address every actionable review item on the exact current head.'\n",
             "  '#adversarial-pr': 'Post one independent COMMENTED review on the current head.'\n",
         );
-        let item =
-            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr";
-        let content = doc(frontmatter, "subagents", &[item], &[]);
-        let preamble = subagent_authorization("prs.md", &content, item).subagent_prompt_preamble;
-        let rule_at = preamble
-            .find("(#presetorder)")
-            .expect("an ordered item carries the temporal preset rule");
-        let rule = &preamble[rule_at..];
-        let address = rule.find("#address").expect("address phase");
-        let adversarial = rule.find("#adversarial-pr").expect("later phase");
-        assert!(address < adversarial, "{rule}");
-        assert!(rule.contains("not permission to skip"), "{rule}");
-        assert!(rule.contains("PRESET-DONE"), "{rule}");
-        assert!(rule.contains("1. #address"), "{rule}");
-        assert!(rule.contains("2. #adversarial-pr"), "{rule}");
+        // `#pipeprompt`: a pipe statement's preset stages are the same order.
+        for item in [
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr",
+            "https://github.com/sample-org/sample-repo/pull/12: #address |\n  - #adversarial-pr",
+        ] {
+            let content = doc(frontmatter, "subagents", &[item], &[]);
+            let preamble =
+                subagent_authorization("prs.md", &content, item).subagent_prompt_preamble;
+            let rule_at = preamble.find("(#presetorder)").unwrap_or_else(|| {
+                panic!("an ordered item carries the temporal preset rule: {preamble}")
+            });
+            let rule = &preamble[rule_at..];
+            let address = rule.find("#address").expect("address phase");
+            let adversarial = rule.find("#adversarial-pr").expect("later phase");
+            assert!(address < adversarial, "{rule}");
+            assert!(rule.contains("not permission to skip"), "{rule}");
+            assert!(rule.contains("PRESET-DONE"), "{rule}");
+            assert!(rule.contains("1. #address"), "{rule}");
+            assert!(rule.contains("2. #adversarial-pr"), "{rule}");
+        }
 
         let address_only = "https://github.com/sample-org/sample-repo/pull/12: #address";
         let address_doc = doc(frontmatter, "subagents", &[address_only], &[]);

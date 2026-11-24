@@ -335,6 +335,17 @@ pub fn statement_rows(text: &str) -> Vec<StatementRow> {
 /// (sequential hand-offs for ordered children, parallel workers for
 /// unordered ones) will live here too.
 pub fn statement_pipelines(text: &str) -> Vec<String> {
+    statement_stage_pipelines(text)
+        .into_iter()
+        .map(|stages| stages.join(PIPE_PATH_JOIN))
+        .collect()
+}
+
+/// [`statement_pipelines`] before the join: each pipeline as its stages' work
+/// text, in run order. Readers that need a stage boundary (`#presetorder`
+/// reads each stage's preset) use this instead of splitting a rendered
+/// pipeline on ` | `, which a stage's own prose may contain.
+pub fn statement_stage_pipelines(text: &str) -> Vec<Vec<String>> {
     let rows = statement_rows(text);
     if rows.is_empty() {
         return Vec::new();
@@ -375,33 +386,33 @@ pub fn statement_pipelines(text: &str) -> Vec<String> {
         index: usize,
         depth: &dyn Fn(usize) -> usize,
         children: &dyn Fn(usize) -> Vec<usize>,
-    ) -> Vec<String> {
+    ) -> Vec<Vec<usize>> {
         let row = &rows[index];
         let kids = children(index);
         if kids.is_empty() || !row.op.pipes() {
-            return vec![row.text.clone()];
+            return vec![vec![index]];
         }
         if row.op == EdgeOp::DeepPipe {
             return vec![
                 subtree(rows, index, depth)
                     .into_iter()
-                    .map(|at| rows[at].text.as_str())
-                    .filter(|text| !text.is_empty())
-                    .collect::<Vec<_>>()
-                    .join(PIPE_PATH_JOIN),
+                    .filter(|&at| !rows[at].text.is_empty())
+                    .collect(),
             ];
         }
         if kids.iter().all(|&kid| rows[kid].ordered) {
             // Chain: each step takes the previous step's result.
-            let mut paths = vec![row.text.clone()];
+            let mut paths = vec![vec![index]];
             for kid in kids {
                 let steps = render(rows, kid, depth, children);
                 paths = paths
                     .iter()
                     .flat_map(|path| {
-                        steps
-                            .iter()
-                            .map(move |step| format!("{path}{PIPE_PATH_JOIN}{step}"))
+                        steps.iter().map(move |step| {
+                            let mut joined = path.clone();
+                            joined.extend(step);
+                            joined
+                        })
                     })
                     .collect();
             }
@@ -410,10 +421,17 @@ pub fn statement_pipelines(text: &str) -> Vec<String> {
         // Fan out: each child takes the parent's result independently.
         kids.into_iter()
             .flat_map(|kid| render(rows, kid, depth, children))
-            .map(|branch| format!("{}{PIPE_PATH_JOIN}{branch}", row.text))
+            .map(|branch| {
+                let mut path = vec![index];
+                path.extend(branch);
+                path
+            })
             .collect()
     }
     render(&rows, 0, &depth, &children)
+        .into_iter()
+        .map(|path| path.into_iter().map(|at| rows[at].text.clone()).collect())
+        .collect()
 }
 
 /// Rows of a pipe statement that have children but no operator. A statement

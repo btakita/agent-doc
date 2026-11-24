@@ -110,15 +110,25 @@ creates one with the receipt's attach command.
   plugin. The Client's frontend publishes schema 1 when its 5 s schema
   negotiation got no answer from the backend (Client `idea.log`: `snapshot
   schema negotiated version=1 backend_offered=none`). Schema 1 carries no
-  geometry and no activation receipt, so the backend refuses every snapshot
-  with `frontend_authority_absent_or_generation_mismatched`, although both
-  peers can run the same build. Plugin 0.2.1046 kept schema 1 until the lease
-  ended: restart JetBrains Client (or close and reopen the project) to
-  reconnect. 0.2.1052 and later ask again after a refusal, and poll the
-  backend's frontend release by digest instead of moving its ZIP every 30 s,
-  which had congested the link. `agent-doc upgrade` on the backend reads the
-  backend `idea.log` and prints `JetBrains Client frontend stuck on snapshot
-  schema 1` with this repair while that lease is still open.
+  geometry and no activation receipt. A backend whose peer activated refuses
+  every such snapshot with
+  `frontend_authority_absent_or_generation_mismatched`, although both peers
+  can run the same build. A backend whose peer has not activated yet (right
+  after a backend IDE restart) accepts it without geometry and shows the
+  `publishes layout without geometry` warning. Plugin 0.2.1046 kept schema 1
+  until the lease ended: restart JetBrains Client (or close and reopen the
+  project) to reconnect. 0.2.1052 and later ask again after a refusal, and
+  poll the backend's frontend release by digest instead of moving its ZIP
+  every 30 s, which had congested the link. If the backend did receive the
+  late ask, its peer activates within 30 s, it refuses the next schema 1
+  without ending the lease (backend `idea.log`: `[split-surface] snapshot
+  awaits frontend activation`), and the Client logs `snapshot schema
+  negotiated version=5 ... after_refusal=DELIVERY_FAILED`, then
+  `[frontend-impl] activated` and `snapshot accepted` on the same lease: no
+  repair needed. `agent-doc upgrade` on the backend reads the backend
+  `idea.log` and prints `JetBrains Client frontend stuck on snapshot schema
+  1` with the reconnect repair while that lease is still open and no snapshot
+  was accepted after the warning.
 - Client shell refusal (GH #440): a Client on an older shell cannot load the
   backend's frontend release, then publishes schema 1. A reconnect cannot fix
   that. Since 0.2.1055 the backend withholds the release from such a Client
@@ -165,8 +175,11 @@ creates one with the receipt's attach command.
     `INVALID_SCHEMA`, or `DELIVERY_FAILED` with
     `diagnostic=frontend_authority_absent_or_generation_mismatched` after a
     `snapshot schema negotiated version=5`, is a Client build that does not
-    match the backend: install the matching ZIP in the Client. After
-    `version=1 backend_offered=none` it is the schema-1 lease above.
+    match the backend: install the matching ZIP in the Client. A few such
+    refusals between `version=5 ... after_refusal=DELIVERY_FAILED` and
+    `[frontend-impl] activated` are the Client fetching the release, not a
+    mismatch. After `version=1 backend_offered=none` it is the schema-1 lease
+    above.
   - Backend `idea.log`: `[split-surface] frontend/backend ingress accepted`
     (or `deferred`), `lease opened ... layout_authority=remote_measured`,
     `snapshot refused ... status=<STATUS> diagnostic=<why>`,

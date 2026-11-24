@@ -379,7 +379,28 @@ internal class AuthenticatedSurfaceIngressState(
             null
         }
         if (current.activationRevoked || !admitsFrontendReceipt(current, receipt)) {
-            if (!current.activationRevoked && current.acceptedSequence > 0) {
+            if (!current.activationRevoked && current.acceptedSequence > 0 &&
+                awaitsFrontendActivation(current, snapshot, receipt)
+            ) {
+                // GH #435 review (cycle 1): this lease's accepted snapshots carried no activation
+                // receipt (a shell-only backend admitted them; on a cold backend that is a late
+                // first schema answer's provisional schema 1), so the fence never granted it an
+                // activation to revoke. Refuse like any not-yet-activated snapshot: the Client
+                // asks for the schema again after this refusal and its next snapshot carries the
+                // paired receipt, which this lease then admits.
+                if (!current.awaitingActivation) {
+                    connections[authenticatedClientId] = current.copy(awaitingActivation = true)
+                    refreshFrontendAuthority()
+                    log(
+                        false,
+                        "[split-surface] snapshot awaits frontend activation client=$authenticatedClientId " +
+                            "generation=${lease.connectionGeneration} sequence=${snapshot.sequence} " +
+                            "schema=${snapshot.schemaVersion} accepted_sequence=${current.acceptedSequence} " +
+                            "(the backend peer activated after this lease's receipt-less snapshots were " +
+                            "accepted; the lease stays open for the Client's activated snapshot)",
+                    )
+                }
+            } else if (!current.activationRevoked && current.acceptedSequence > 0) {
                 connections[authenticatedClientId] = current.copy(activationRevoked = true, activationReceipt = null)
                 refreshFrontendAuthority()
                 if (current.layoutAuthority) {
@@ -419,6 +440,7 @@ internal class AuthenticatedSurfaceIngressState(
             acceptedSequence = snapshot.sequence,
             acceptedSurfaces = snapshot.surfaces.associate { it.paneId to it.surfaceGeneration },
             activationReceipt = receipt ?: current.activationReceipt,
+            awaitingActivation = false,
         )
         if (receipt != null && receipt != current.activationReceipt) {
             onFrontendReceipt(authenticatedClientId, lease.connectionGeneration, receipt)
@@ -484,6 +506,32 @@ internal class AuthenticatedSurfaceIngressState(
         if (!mismatch.unansweredNegotiation || publication.refusals > 0) return false
         val backend = backendPluginVersion()?.takeIf { it.isNotBlank() && it != "unknown" } ?: return false
         return frontendLeasePluginVersion(current.frontendInstanceId) == backend
+    }
+
+    /**
+     * GH #435 review (cycle 1): whether a fence refusal of [current], which already had a snapshot
+     * accepted, waits for the Client's activation instead of revoking the lease. Only a lease whose
+     * accepted snapshots carried no activation receipt waits: the shell-only backend admitted them
+     * under the R1 rule, so the fence never granted this lease an activation it could now take
+     * back. A lease that had a receipt accepted (shell-only or activated) still revokes on the
+     * first mismatch, and so does a lease whose Client is proven unable to load this backend's
+     * release (GH #440): no snapshot of that Client can ever pass the fence, so its layout is
+     * held, not left on the last receipt-less snapshot.
+     */
+    private fun awaitsFrontendActivation(
+        current: ConnectionState,
+        snapshot: FrontendSurfaceSnapshot,
+        receipt: ActivationReceipt?,
+    ): Boolean {
+        if (current.activationReceipt != null) return false
+        return frontendShellRefusal(
+            snapshot,
+            receipt,
+            backendActivationReceiptProvider().shellDigest,
+            clientShellEvidence.evidence(current.clientId),
+            backendPluginVersion(),
+            frontendLeasePluginVersion(current.frontendInstanceId),
+        ) == null
     }
 
     private fun admitsFrontendReceipt(current: ConnectionState, receipt: ActivationReceipt?): Boolean {
@@ -586,7 +634,7 @@ internal class AuthenticatedSurfaceIngressState(
         val layoutConnections = connections.values.filter { it.layoutAuthority }
         mutableLayoutPublicationReadiness.value = when {
             layoutConnections.isEmpty() -> LayoutPublicationReadiness.INACTIVE
-            layoutConnections.any { it.acceptedSequence == 0L || it.activationRevoked } ->
+            layoutConnections.any { it.acceptedSequence == 0L || it.activationRevoked || it.awaitingActivation } ->
                 LayoutPublicationReadiness.CONNECTED_BLOCKED
             else -> LayoutPublicationReadiness.ACCEPTED
         }
@@ -624,6 +672,12 @@ internal class AuthenticatedSurfaceIngressState(
         val layoutAuthority: Boolean,
         val activationReceipt: ActivationReceipt? = null,
         val activationRevoked: Boolean = false,
+        /**
+         * GH #435 review (cycle 1): the backend peer activated after this lease's receipt-less
+         * snapshots were accepted, and the fence refused the next one without revoking
+         * ([awaitsFrontendActivation]). Layout readiness is blocked until a snapshot is accepted.
+         */
+        val awaitingActivation: Boolean = false,
     )
 
     private companion object {

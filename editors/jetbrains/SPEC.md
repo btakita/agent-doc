@@ -528,8 +528,16 @@ rather than acting on a half-upgraded pair.
   epoch, ingress requires a matching schema-5 receipt from a distinct frontend
   JVM before it publishes either presentation or measured layout. The receipt
   must agree on shell digest, SPI, implementation digest and epoch. A mismatch
-  after an accepted snapshot withdraws the rejected lease's published authority
-  and holds the remote layout lane until the next authenticated lease. When a
+  after an accepted receipt withdraws the rejected lease's published authority
+  and holds the remote layout lane until the next authenticated lease. A lease
+  whose accepted snapshots carried no receipt (the shell-only backend admitted
+  them, e.g. a provisional schema 1 before the peer activated) has no
+  activation to withdraw: when the backend peer activates, its next refused
+  snapshot blocks layout readiness and logs `[split-surface] snapshot awaits
+  frontend activation`, without retiring the controller generation, and the
+  same lease's first admitted schema-5 receipt is accepted (GH #435 review,
+  cycle 1). A Client proven to run another shell (GH #440) can never pass the
+  fence, so its receipt-less lease is still revoked and held. When a
   backend generation changes, its shell must replace or rebind its ingress and
   retire the former generation's leases.
 - **Activation prerequisites.** The R2 frontend shell now has the production
@@ -1849,8 +1857,18 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   returns it from a constant, queued behind it past the 5 s window (GH #441). An unanswered ask
   does not release the poll; the answer to the first ask or to a re-ask after a refusal does. If
   the first answer reaches the Client after 5 s, the package therefore stays off the link and the
-  re-ask can still bring schema 5, so the next snapshot is not a schema 1 that the backend would
-  report. The backend validator accepts schemas 1 through 5.
+  re-ask after the next refusal can still bring schema 5. On a backend whose peer already
+  activated, that refusal is the provisional schema 1 itself. On a backend whose peer has not
+  activated yet (every backend IDE restart), the shell-only backend accepts the provisional
+  schema 1, so no refusal asks again and the #441 report above is shown; when the backend
+  received that ask, the poll's 30 s cap then calls `frontendReleaseOffer`, which activates the
+  backend peer, the Client's next schema 1 is refused without revoking the lease ("Ingress
+  fence"), and the re-ask brings schema 5, whose paired receipt the same lease accepts once the
+  Client activated the release. A Client log `snapshot schema negotiated version=5 ...
+  after_refusal=DELIVERY_FAILED` is then followed, once the Client logged `[frontend-impl]
+  activated`, by `snapshot accepted` on that lease. When the
+  backend never received the ask, the lease keeps schema 1 and needs a reconnect. The backend
+  validator accepts schemas 1 through 5.
 
   **Frozen shared RPC contract (GH #435).** The Client frontend is shell code only a Client
   plugin update replaces, so `SurfaceSnapshotRpcApi` is frozen at its shipped shape (0.2.1046's
@@ -1879,8 +1897,12 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   minutes; every other answer is null, which every shipped Client treats as nothing to activate.
   No release discovery or backend peer activation runs for a Client before its schema answer. The
   backend peer activates only for a negotiated Client on its own shell, before that Client's
-  snapshot reaches the ingress fence, so its not-yet-activated snapshots are refused before any is
-  accepted rather than revoked after. A Client on another shell never activates the backend peer,
+  shell-proving snapshot (schema 5) or its release offer reaches the ingress fence, so its
+  not-yet-activated schema-5 snapshots are refused before any is accepted. A Client whose first
+  answer was late can have had a provisional schema 1 accepted by the still shell-only backend
+  before its offer activates the peer; that lease carried no receipt, so the fence refuses its
+  next snapshots without revoking it and accepts its re-asked schema 5 with the paired receipt
+  (GH #435 review, cycle 1). A Client on another shell never activates the backend peer,
   so the backend stays shell-only for it and admits its shell-only snapshots ("Ingress fence"
   above); a backend that already activated for another Client still holds it. The backend logs
   `[frontend-impl] client shell mismatch ...` (receipt only) or `[frontend-impl] client plugin

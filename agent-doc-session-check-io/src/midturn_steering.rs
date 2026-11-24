@@ -851,15 +851,28 @@ fn route_claimed_items(
             lineage_identity.and_then(|id| attempts.get(&id).cloned())
         };
         core::apply_claim_attempts(items, claim_for);
-        // `#selfsteer`: a claimed row's addition is the claimer's own
-        // bookkeeping unless the operator edited it since the claim.
-        let retired = core::retire_claimed_additions(items, claim_for);
-        if retired > 0 && !status_only {
+        // `#selfsteer` / `#selfsteer2`: a claimed row's addition, and a
+        // binary repaint of it (start, heartbeat refresh, brief, prompt-id
+        // admission), is the claimer's own bookkeeping unless the operator
+        // edited it since the claim.
+        let retired = core::retire_claimed_bookkeeping(items, claim_for);
+        if retired.additions > 0 && !status_only {
             agent_doc_ops_log_io::log_op(
                 file,
                 &format!(
-                    "midturn_steering_claimed_additions_retired file={} count={retired} (#selfsteer)",
-                    file.display()
+                    "midturn_steering_claimed_additions_retired file={} count={} (#selfsteer)",
+                    file.display(),
+                    retired.additions
+                ),
+            );
+        }
+        if retired.repaints > 0 && !status_only {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "midturn_steering_claimed_repaints_retired file={} count={} (#selfsteer2)",
+                    file.display(),
+                    retired.repaints
                 ),
             );
         }
@@ -8955,6 +8968,164 @@ mod tests {
                     && !previous.contains("also cover the wake path")),
             "{item:?}"
         );
+    }
+
+    /// `#selfsteer2` (agent-doc-bugs.md, 2026-11-24, the rel590 row): a running
+    /// claimed row the hook already acknowledged is repainted by the binary,
+    /// never by the operator: preflight admits its generated `[#q-…]` id (the
+    /// claim follows it) and the coordinator's heartbeat `queue claim
+    /// --refresh --generation N` re-projects its `🚧 [#owner#N]` prefix. The
+    /// next hook minted `dispatch=forward_to_owner change=edited` whose
+    /// verbatim was only that repaint, framed as an operator edit, both in the
+    /// running turn and on the next cycle's first hook (the seed carried the
+    /// pre-id text as an "unsurfaced claimed edit"). A claimed row whose
+    /// authored text is unchanged is the binary's bookkeeping; a real operator
+    /// edit of the same row still forwards to its owner as an edit.
+    #[test]
+    fn heartbeat_refresh_repaint_of_a_claimed_row_is_not_operator_steering() {
+        let row =
+            "[from:chat key=rel590] agent: release + publish agent-doc v0.35.590 from main #rel590";
+        let qid = " [#q-e9a6c8313871]";
+        let owner = "subagent:rel590";
+        let doc = |rows: &str| {
+            format!(
+                "---\nagent_doc_steering_debounce_ms: 0\n---\n# S\n\n<!-- agent:queue -->\n- current task\n{rows}<!-- /agent:queue -->\n"
+            )
+        };
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("plan.md");
+        let baseline = doc(&format!("- {row}\n"));
+        std::fs::write(&file, &baseline).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&file, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &file,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        coordinator_claims_and_starts(&file, row, owner);
+        let hook = |label: &str| {
+            let output = post_tool_use_document_response(
+                &file,
+                now_ms(),
+                |_, _, _, _| Ok(None),
+                &mut || false,
+            )
+            .unwrap();
+            assert!(
+                output.is_none(),
+                "{label}: the binary's own repaint of a claimed row minted operator steering: {output:?}"
+            );
+        };
+        hook("claim + start");
+
+        // Preflight queue maintenance admits the row's generated prompt id;
+        // the coordinator's heartbeat then refreshes + re-projects the claim.
+        let projected = std::fs::read_to_string(&file).unwrap();
+        let admitted = projected.replace(row, &format!("{row}{qid}"));
+        assert_ne!(admitted, projected, "fixture must admit the prompt id");
+        std::fs::write(&file, &admitted).unwrap();
+        let refreshed = agent_doc_queue_io::queue_claim::refresh_attempt(
+            &file,
+            &format!("{row}{qid}"),
+            owner,
+            3600,
+            Some(1),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
+            &SelfSteerDiskEffects,
+            &file,
+            &refreshed.item_text,
+            false,
+        )
+        .unwrap();
+        let repainted = std::fs::read_to_string(&file).unwrap();
+        assert!(
+            repainted.contains(&format!("[#{owner}#1]")) && repainted.contains(qid.trim()),
+            "fixture must carry the refresh repaint: {repainted}"
+        );
+        hook("in-turn heartbeat refresh");
+
+        // The same repaint seen from the next cycle: the seed's agent-channel
+        // history predates the admitted id.
+        let fixture = |content: &str| {
+            let dir = tempfile::tempdir().unwrap();
+            std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            let file = dir.path().join("plan.md");
+            std::fs::write(&file, content).unwrap();
+            (dir, file)
+        };
+        let (_next_dir, next) = fixture(&baseline);
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&next, Some(&baseline), Some(&baseline))
+                .unwrap();
+        seed_for_cycle(
+            &next,
+            &cycle.cycle_id,
+            &baseline,
+            Some("current task"),
+            Vec::new(),
+        )
+        .unwrap();
+        coordinator_claims_and_starts(&next, row, owner);
+        assert!(
+            post_tool_use_document_response(&next, now_ms(), |_, _, _, _| Ok(None), &mut || false)
+                .unwrap()
+                .is_none()
+        );
+        let projected = std::fs::read_to_string(&next).unwrap();
+        close_cycle(&next, &projected);
+        let admitted = projected.replace(row, &format!("{row}{qid}"));
+        std::fs::write(&next, &admitted).unwrap();
+        let refreshed = agent_doc_queue_io::queue_claim::refresh_attempt(
+            &next,
+            &format!("{row}{qid}"),
+            owner,
+            3600,
+            Some(1),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_cmd::project_claim_item_runtime_state_with_effects(
+            &SelfSteerDiskEffects,
+            &next,
+            &refreshed.item_text,
+            false,
+        )
+        .unwrap();
+        let woken = std::fs::read_to_string(&next).unwrap();
+        let cycle =
+            agent_doc_cycle_state_io::start_preflight(&next, Some(&woken), Some(&woken)).unwrap();
+        seed_for_cycle(&next, &cycle.cycle_id, &woken, None, Vec::new()).unwrap();
+        let output =
+            post_tool_use_document_response(&next, now_ms(), |_, _, _, _| Ok(None), &mut || false)
+                .unwrap();
+        assert!(
+            output.is_none(),
+            "next cycle: the seed carried the binary's repaint as operator steering: {output:?}"
+        );
+
+        // A real operator edit of the claimed row still forwards to its owner.
+        let edited = repainted.replace(
+            &format!("{row}{qid}"),
+            &format!("{row}: also post on GH #435{qid}"),
+        );
+        assert_ne!(edited, repainted, "fixture must edit the claimed row");
+        std::fs::write(&file, &edited).unwrap();
+        let report = observe(&file, CONSUMER_HOOK, true)
+            .unwrap()
+            .expect("the operator's edit surfaces");
+        assert_eq!(report.items.len(), 1, "{report:?}");
+        let item = &report.items[0];
+        assert_eq!(item.dispatch, core::SteeringDispatch::ForwardToOwner);
+        assert_eq!(item.owner.as_deref(), Some(owner));
+        assert_eq!(item.change, core::SteeringChange::Edited, "{item:?}");
+        assert!(item.verbatim.contains("also post on GH #435"), "{item:?}");
     }
 
     /// `#steerworks` items 1 + 3 (agent-doc-bugs.md, 2026-10-04): the operator

@@ -2245,7 +2245,17 @@ fn claimed_text_before_operator_edit(
         .cloned()
 }
 
-/// `#selfsteer`: retire the claimer's own view of a claimed row.
+/// How many claimed-row items [`retire_claimed_bookkeeping`] dropped.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct RetiredClaimedBookkeeping {
+    /// Additions unchanged since their claim (`#selfsteer`).
+    pub additions: usize,
+    /// Edits that only repaint the claimed text (`#selfsteer2`).
+    pub repaints: usize,
+}
+
+/// `#selfsteer` / `#selfsteer2`: retire the claimer's own view of a claimed
+/// row.
 ///
 /// A claimed row the steering watermark never acknowledged surfaces as an
 /// ADDITION carrying its claim repaint (`🟡`/`🚧 [#owner#N]`), whether the
@@ -2254,16 +2264,25 @@ fn claimed_text_before_operator_edit(
 /// handed it to the worker, so the addition is binary bookkeeping, not operator
 /// steering: it is dropped. When the operator edited the row after the claim,
 /// the item becomes the edit it is (`previous` = the claimed text), so it
-/// forwards to the owner. Reported attempts keep their closeout routing.
-/// Returns how many additions were retired.
-pub fn retire_claimed_additions(
+/// forwards to the owner.
+///
+/// A claimed row the watermark DID acknowledge surfaces as an EDIT when the
+/// binary repaints it: `queue start`, a heartbeat `queue claim --refresh`, a
+/// brief, or preflight admitting its generated `[#q-…]` id (which the claim
+/// follows). Such an edit is dropped when it changes nothing authored: either
+/// `previous` and `verbatim` are the same row up to binary decorations, or
+/// the attempt has no operator edit since its claim and `verbatim` is the
+/// claimed text (the claimer handed the worker exactly that). Any other edit
+/// of the row is the operator's and still forwards to the owner. Reported
+/// attempts keep their closeout routing.
+pub fn retire_claimed_bookkeeping(
     items: &mut Vec<SteeringItem>,
     claim_of: impl Fn(&str) -> Option<agent_doc_queue::queue_claim::QueueClaim>,
-) -> usize {
-    let before = items.len();
+) -> RetiredClaimedBookkeeping {
+    let mut retired = RetiredClaimedBookkeeping::default();
     items.retain_mut(|item| {
         if item.source != SteeringSource::Queue
-            || item.change != SteeringChange::Added
+            || !matches!(item.change, SteeringChange::Added | SteeringChange::Edited)
             || item.dispatch != SteeringDispatch::ForwardToOwner
             || item.current_item
         {
@@ -2275,16 +2294,34 @@ pub fn retire_claimed_additions(
         if claim.state == agent_doc_queue::queue_claim::QueueClaimState::Reported {
             return true;
         }
-        match claimed_text_before_operator_edit(&claim) {
+        let edited_since_claim = claimed_text_before_operator_edit(&claim);
+        if item.change == SteeringChange::Edited {
+            let current = authored_row_key(&item.verbatim);
+            let repaint = item
+                .previous
+                .as_deref()
+                .is_some_and(|previous| authored_row_key(previous) == current);
+            let claimed_text =
+                edited_since_claim.is_none() && authored_row_key(&claim.item_text) == current;
+            if repaint || claimed_text {
+                retired.repaints += 1;
+                return false;
+            }
+            return true;
+        }
+        match edited_since_claim {
             Some(previous) => {
                 item.change = SteeringChange::Edited;
                 item.previous = Some(normalize_queue_text(&previous));
                 true
             }
-            None => false,
+            None => {
+                retired.additions += 1;
+                false
+            }
         }
     });
-    before - items.len()
+    retired
 }
 
 /// The receipt key of one degraded struck-row deletion report
@@ -2648,7 +2685,9 @@ fn cancel_claimed_instruction(document: &str, item: &SteeringItem) -> String {
 /// line of `seed.acknowledged_queue` that `prior_acknowledged` (what the agent
 /// channel last surfaced) knew under different text, the seed keeps the
 /// prior text, so the cycle's first hook (the preflight command's own
-/// PostToolUse) surfaces it as `previous` -> `verbatim` for the owner.
+/// PostToolUse) surfaces it as `previous` -> `verbatim` for the owner. A line
+/// whose authored text is unchanged (only binary decorations differ) is not
+/// carried.
 pub fn carry_unsurfaced_claimed_edits(
     seed: &mut SteeringWatermark,
     prior_acknowledged: &[String],
@@ -2671,8 +2710,11 @@ pub fn carry_unsurfaced_claimed_edits(
     );
     let mut carried = 0;
     for event in &alignment.events {
+        // `#selfsteer2`: a binary repaint (a generated `[#q-…]` admitted,
+        // a claim marker re-projected) is not an operator edit to carry.
         if let QueueEvent::Edit { old, new, .. } = event
             && claimed(new)
+            && authored_row_key(old) != authored_row_key(new)
             && let Some(slot) = seed.acknowledged_queue.iter_mut().find(|norm| *norm == new)
         {
             *slot = old.clone();
@@ -6435,6 +6477,98 @@ mod tests {
                 .ready
                 .is_empty()
         );
+    }
+
+    /// `#selfsteer2`: preflight admitting a claimed row's generated `[#q-…]`
+    /// id is a binary repaint, not an unsurfaced operator edit to carry.
+    #[test]
+    fn new_cycle_seed_absorbs_a_claimed_rows_admitted_prompt_id() {
+        let owned = BTreeSet::new();
+        let line = "agent: release + publish v0.35.590 #rel590";
+        let admitted = format!("{line} [#q-e9a6c8313871]");
+        let baseline = doc(&format!("- {admitted}\n- other work\n"), EX);
+        let mut seed = SteeringWatermark::seed("cycle-2", &baseline, None, Vec::new());
+        let prior = vec![line.to_string(), "other work".to_string()];
+        assert_eq!(
+            carry_unsurfaced_claimed_edits(&mut seed, &prior, |text| text.contains("#rel590")),
+            0
+        );
+        assert!(
+            observe(&seed, &baseline, &quiet_ctx(&owned))
+                .ready
+                .is_empty()
+        );
+    }
+
+    /// `#selfsteer2`: a claimed row's binary repaint is retired; an operator
+    /// edit of the same row is kept for its owner.
+    #[test]
+    fn retire_claimed_bookkeeping_drops_repaints_and_keeps_operator_edits() {
+        let claimed = "agent: release + publish v0.35.590 #rel590";
+        let mut ledger = agent_doc_queue::queue_claim::QueueClaimLedger::default();
+        ledger.claim(
+            &format!("{claimed} [#q-e9a6c8313871]"),
+            "subagent:rel590",
+            100,
+            3600,
+        );
+        let claim = ledger.claims[0].clone();
+        assert_eq!(claim.generation, 1);
+        let item = |previous: &str, verbatim: &str| SteeringItem {
+            source: SteeringSource::Queue,
+            change: SteeringChange::Edited,
+            dispatch: SteeringDispatch::ForwardToOwner,
+            current_item: false,
+            verbatim: verbatim.to_string(),
+            previous: Some(previous.to_string()),
+            presets: Vec::new(),
+            possibly_partial: false,
+            owner: Some("subagent:rel590".to_string()),
+            generation: Some(1),
+            worker_id: None,
+            explicit: false,
+            vector: None,
+            prompt_tree: None,
+            queue_mode: None,
+        };
+        let repaint = item(
+            claimed,
+            &format!("🚧 [#subagent:rel590#1] {claimed} [#q-e9a6c8313871]"),
+        );
+        let operator = item(
+            claimed,
+            &format!("🚧 [#subagent:rel590#1] {claimed}: also post on #435 [#q-e9a6c8313871]"),
+        );
+        let mut items = vec![repaint, operator.clone()];
+        let retired = retire_claimed_bookkeeping(&mut items, |_| Some(claim.clone()));
+        assert_eq!(retired.repaints, 1, "{items:?}");
+        assert_eq!(retired.additions, 0);
+        assert_eq!(items.len(), 1, "{items:?}");
+        assert_eq!(items[0].verbatim, operator.verbatim);
+        // A claimed row the claimer saw only after an earlier edit: the
+        // verbatim is the claimed text, so the claimer already handed it over.
+        let mut pre_claim = vec![item(
+            "agent: release v0.35.590 #rel590",
+            &format!("🚧 [#subagent:rel590#1] {claimed} [#q-e9a6c8313871]"),
+        )];
+        assert_eq!(
+            retire_claimed_bookkeeping(&mut pre_claim, |_| Some(claim.clone())).repaints,
+            1
+        );
+        // After an operator edit of this attempt, a later edit back to the
+        // claimed text is the operator's and still forwards.
+        let mut followed = claim.clone();
+        followed.followed_from = vec![format!("{claimed}: also post on #435")];
+        followed.followed_generation = 1;
+        let mut reverted = vec![item(
+            &format!("{claimed}: also post on #435"),
+            &format!("🚧 [#subagent:rel590#1] {claimed} [#q-e9a6c8313871]"),
+        )];
+        assert_eq!(
+            retire_claimed_bookkeeping(&mut reverted, |_| Some(followed.clone())).repaints,
+            0
+        );
+        assert_eq!(reverted.len(), 1);
     }
 
     /// `#barereplymarker`: generated packet rows carry only a bare trailing

@@ -403,6 +403,23 @@ class AuthenticatedSurfaceIngressStateTest {
             mismatches.single().contains("this backend withholds its frontend release from that Client"),
             mismatches.toString(),
         )
+        // GH #440 review (cycle 2): a receipt-proved shell is confirmed by the backend's own line
+        // (BackendSurfaceSnapshotRpcApi), which every Client causes; the Client's own line only
+        // exists from 0.2.1055 on.
+        assertTrue(
+            mismatches.single().contains(
+                "(backend idea.log: `[frontend-impl] client shell mismatch client=... " +
+                    "client_shell=dddddddddddd ... backend_shell=aaaaaaaaaaaa`",
+            ),
+            mismatches.toString(),
+        )
+        assertTrue(
+            mismatches.single().contains(
+                "a Client from 0.2.1055 on also logs `[frontend-impl] client plugin mismatch compatibility=... " +
+                    "backend_shell=aaaaaaaaaaaa client_shell=dddddddddddd` in its idea.log)",
+            ),
+            mismatches.toString(),
+        )
         assertFalse(mismatches.single().contains("refused:"), mismatches.toString())
     }
 
@@ -637,8 +654,13 @@ class AuthenticatedSurfaceIngressStateTest {
         assertTrue(
             mismatch.detail.contains(
                 "this backend withholds its frontend release from that Client and the Client cannot load it " +
-                    "(a Client from 0.2.1055 on logs `[frontend-impl] client plugin mismatch ... " +
-                    "backend_shell=1265693a728a client_shell=b5741f110bfb` in its idea.log)",
+                    "(backend idea.log: `[frontend-impl] client shell mismatch client=... " +
+                    "client_shell=b5741f110bfb ... backend_shell=1265693a728a` or " +
+                    "`[frontend-impl] client plugin mismatch client=... client_shell=b5741f110bfb ... " +
+                    "backend_shell=1265693a728a`; a Client from 0.2.1055 on also logs " +
+                    "`[frontend-impl] client plugin mismatch compatibility=... " +
+                    "backend_shell=1265693a728a client_shell=b5741f110bfb` in its idea.log). " +
+                    "Asking for the schema again or reconnecting cannot change the Client's shell",
             ),
             mismatch.detail,
         )

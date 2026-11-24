@@ -1805,18 +1805,28 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
   schema at once. Before, one unanswered negotiation pinned schema 1 for the lease; schema 1
   carries no activation receipt, so a backend with an activated generation refused every snapshot
   (`frontend_authority_absent_or_generation_mismatched`) until the Client reconnected. The backend
-  reports a schema-1 snapshot as `frontend/backend plugin mismatch frontend_schema=1 ...` with the
+  reports a schema-1 snapshot as `frontend/backend plugin mismatch client=<id> generation=<n>
+  frontend_schema=1 ...` with the
   reconnect remedy, not as an older build, unless the Client is proven unable to load the
   backend's release shell (GH #440): its schema-5 receipt or its own build report names another
   shell, or it polled the whole release package without ever asking for its identity, which only
   Clients before 0.2.1052 do (`FrontendReleasePollLedger`, recorded by the shell RPC and read by
   the ingress; a Client that names its plugin in its lease is 0.2.1053 or later, so its fallback
   package poll proves nothing). `FrontendReleaseDeliveryGate` withholds the release from such a
-  Client (`[frontend-impl] release withheld ... legacy_poll=true`), so it never receives the
-  release and logs no `[frontend-impl] refused:` line. That lease is reported at once as `frontend/backend plugin mismatch client_shell=<12>
-  backend_shell=<12> client_plugin=<v> backend_plugin=<v> ...` (no `frontend_schema=` token),
-  titled with the version comparison, and its remedy is the backend's ZIP (its release URL) in
-  the Client's `plugins/frontend/agent-doc-jetbrains-262`; asking again cannot change a shell.
+  Client (`[frontend-impl] release withheld client=<id> reason=<admission> client_shell=<12>
+  backend_shell=<12> legacy_poll=true`), so it never receives the release and logs no
+  `[frontend-impl] refused:` line. That lease is reported at once as `frontend/backend plugin
+  mismatch client=<id> generation=<n> client_shell=<12> backend_shell=<12> client_plugin=<v>
+  backend_plugin=<v> ...` (`client_shell=unreported ... client_plugin=before_0.2.1052` for the
+  poll proof; no `frontend_schema=` token), titled with the version comparison, and its remedy
+  is the backend's ZIP (its release URL) in the Client's `plugins/frontend/agent-doc-jetbrains-262`;
+  asking again cannot change a shell. For a Client that reported another shell the report names
+  the backend's own confirming line, which every such Client causes: `[frontend-impl] client
+  shell mismatch client=<id> client_shell=<12> ... backend_shell=<12>` (schema-5 receipt) or
+  `[frontend-impl] client plugin mismatch client=<id> ... client_shell=<12> ... backend_shell=<12>`
+  (0.2.1055+ build report). A Client from 0.2.1055 on also logs `[frontend-impl] client plugin
+  mismatch compatibility=... backend_shell=<12> client_shell=<12>` in its own idea.log; 0.2.1052
+  to 0.2.1054 Clients log no such line.
   Otherwise it holds that report for a provisional schema 1
   (GH #441): the frontend names its plugin version in its lease's `frontendInstanceId`
   (`<uuid>;plugin=<version>`, an opaque string every backend only compares), and a schema-1

@@ -123,16 +123,24 @@ creates one with the receipt's attach command.
   backend's frontend release, then publishes schema 1. A reconnect cannot fix
   that. Since 0.2.1055 the backend withholds the release from such a Client
   (backend `idea.log`: `[frontend-impl] release withheld client=...
-  reason=... legacy_poll=true` for a Client before 0.2.1052), so the Client
+  reason=... client_shell=... backend_shell=... legacy_poll=true` for a Client
+  before 0.2.1052), so the Client
   never receives it and logs no `[frontend-impl] refused:` line; older
   backends sent it, and the Client refused it on every poll with that line.
   The backend says so when it can prove it (the Client polled the whole
   release package without asking for its identity, which only Clients before
-  0.2.1052 do, or the Client reported another shell): `frontend/backend
-  plugin mismatch client_shell=... backend_shell=... client_plugin=...
-  backend_plugin=...`,
-  with no `frontend_schema=` token, and a warning titled `JetBrains Client
-  plugin ... is older than the backend's ...`. Repair: replace the Client's
+  0.2.1052 do, or the Client reported another shell): `[split-surface]
+  frontend/backend plugin mismatch client=... generation=... client_shell=...
+  backend_shell=... client_plugin=... backend_plugin=...` (`client_shell=unreported
+  ... client_plugin=before_0.2.1052` for the poll proof), with no
+  `frontend_schema=` token, and a warning titled `JetBrains Client plugin ...
+  is older than the backend's ...`. For a Client that reported another shell
+  the backend `idea.log` also has `[frontend-impl] client shell mismatch
+  client=... client_shell=... backend_shell=...` (its schema-5 snapshot) or
+  `[frontend-impl] client plugin mismatch client=... client_shell=...
+  backend_shell=...` (a 0.2.1055+ build report); a Client from 0.2.1055 on
+  also logs `[frontend-impl] client plugin mismatch compatibility=...` in its
+  own `idea.log`. Repair: replace the Client's
   `plugins/frontend/agent-doc-jetbrains-262` with the backend's ZIP (the
   remedy names its release URL), keep the trust key, restart the Client.
 - JetBrains Gateway with the frontend installed (GH #435): once the Client's

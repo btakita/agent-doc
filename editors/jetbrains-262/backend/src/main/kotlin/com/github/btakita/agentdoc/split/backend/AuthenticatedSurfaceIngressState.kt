@@ -839,10 +839,18 @@ internal fun frontendShellRefusalStory(refusal: FrontendShellRefusal): String {
             "so this backend withholds the release from that Client (backend idea.log: " +
             "`[frontend-impl] release withheld client=... legacy_poll=true`) and the Client cannot load it"
     } else {
+        // GH #440 review (cycle 2): the backend logs one of its own lines for every such Client
+        // (BackendSurfaceSnapshotRpcApi for a schema-5 receipt, BackendFrontendReleaseRpcApi for a
+        // 0.2.1055+ build report); only Clients from 0.2.1055 on log a line of their own.
+        val client = refusal.clientShell?.take(12) ?: "..."
+        val backend = refusal.backendShell.take(12)
         "the JetBrains Client runs a different Agent Doc shell than this backend, so this backend " +
-            "withholds its frontend release from that Client and the Client cannot load it (a Client " +
-            "from 0.2.1055 on logs `[frontend-impl] client plugin mismatch ... backend_shell=" +
-            "${refusal.backendShell.take(12)} client_shell=${refusal.clientShell?.take(12) ?: "..."}` in its idea.log)"
+            "withholds its frontend release from that Client and the Client cannot load it (backend " +
+            "idea.log: `[frontend-impl] client shell mismatch client=... client_shell=$client ... " +
+            "backend_shell=$backend` or `[frontend-impl] client plugin mismatch client=... " +
+            "client_shell=$client ... backend_shell=$backend`; a Client from 0.2.1055 on also logs " +
+            "`[frontend-impl] client plugin mismatch compatibility=... backend_shell=$backend " +
+            "client_shell=$client` in its idea.log)"
     }
     return "$why. Asking for the schema again or reconnecting cannot change the Client's shell; only this " +
         "backend's plugin in the Client can"

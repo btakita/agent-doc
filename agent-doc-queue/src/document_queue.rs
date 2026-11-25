@@ -12731,6 +12731,47 @@ mod tests {
         );
     }
 
+    /// An Obsidian auto-pair (`%% %%`, `%%%%`) is an empty list placeholder.
+    /// A titled note and a bare `%%` multiline comment stay (`#blankobsidiancomment`).
+    #[test]
+    fn empty_obsidian_list_comments_are_placeholders_real_notes_stay() {
+        let body = concat!(
+            "- ### https://github.com/haiven-dev/haiven-api/pull/942\n",
+            "  - %% feat(auth): keep this title %%\n",
+            "  - %% author: tmstorm %%\n",
+            "  - #review\n",
+            "  - %% %%\n",
+            "  - %%%%\n",
+            "  - %%   %%\n",
+            "  - %%\n",
+            "    still a multiline comment\n",
+            "    %%\n",
+            "  - #addres\n",
+        );
+        let rendered = render(&parse(body).unwrap());
+        assert!(
+            rendered.contains("%% feat(auth): keep this title %%"),
+            "{rendered}"
+        );
+        assert!(rendered.contains("%% author: tmstorm %%"), "{rendered}");
+        assert!(rendered.contains("#review"), "{rendered}");
+        assert!(rendered.contains("#addres"), "{rendered}");
+        assert!(rendered.contains("still a multiline comment"), "{rendered}");
+        assert!(!rendered.contains("%% %%"), "{rendered}");
+        assert!(!rendered.contains("%%%%"), "{rendered}");
+        assert!(!rendered.contains("%%   %%"), "{rendered}");
+        let stripped = strip_unspanned_empty_list_placeholders(body).unwrap();
+        assert!(
+            stripped.contains("%% feat(auth): keep this title %%"),
+            "{stripped}"
+        );
+        assert!(stripped.contains("still a multiline comment"), "{stripped}");
+        assert!(stripped.contains("#addres"), "{stripped}");
+        assert!(!stripped.contains("%% %%"), "{stripped}");
+        assert!(!stripped.contains("%%%%"), "{stripped}");
+        assert!(!stripped.contains("%%   %%"), "{stripped}");
+    }
+
     #[test]
     fn unclosed_prompt_fence_opener_preserved_as_freeform() {
         // Previously bailed; now an unclosed fence opener is preserved as a

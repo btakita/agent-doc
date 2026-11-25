@@ -2471,6 +2471,17 @@ fn reconcile_component_body(
     let mut theirs_children = split(theirs_body)?;
     let mut base_children = base_body.and_then(split).unwrap_or_default();
 
+    if name == "queue" {
+        // `#nestedfreetextkey`: `txt:#review` under two pull requests is two
+        // rows. One shared key makes keyed reconcile decline, and the flat
+        // merge then writes the agent's extra copy of a different row back.
+        // Scope before admission alignment so the keys those passes record are
+        // the keys the join looks up.
+        scope_free_text_keys_by_parent(&mut base_children);
+        scope_free_text_keys_by_parent(&mut ours_children);
+        scope_free_text_keys_by_parent(&mut theirs_children);
+    }
+
     // A generated q-id is identity promotion, not insertion of another row.
     // Align both cuts to the base key before choosing the operator order spine;
     // otherwise the stale pre-id key is unanchored and `order_union` prepends it.
@@ -2596,6 +2607,10 @@ fn reconcile_component_body(
         ours_children.retain(&keep);
         theirs_children.retain(&keep);
         base_children.retain(keep);
+        // `#agentexcesstwin`: after placeholders are gone, an agent replica
+        // must not keep a second free-text copy of a row the operator already
+        // has once (the claimed `#addres` line written beside itself).
+        drop_agent_excess_identical_free_text(&base_children, &mut ours_children, &theirs_children);
     }
 
     if !keys_unique(&ours_children)
@@ -3426,6 +3441,122 @@ fn collapse_queue_typing_fragments(
     }
     retain_indexed(ours, &ours_keep);
     retain_indexed(theirs, &theirs_keep);
+}
+
+/// Scope a nested `txt:` key by its parent so the same instruction under two
+/// parents is not one merge cell.
+///
+/// The suffix is the parent's key before this pass, so every side derives the
+/// same scope from the same parent identity. Top-level rows and same-parent
+/// repeats stay unscoped and still fail the uniqueness gate.
+fn scope_free_text_keys_by_parent(children: &mut [KeyedChild]) {
+    fn indent(text: &str) -> usize {
+        let first = text.lines().next().unwrap_or("");
+        first.len() - first.trim_start_matches([' ', '\t']).len()
+    }
+    let scoped: Vec<Option<String>> = children
+        .iter()
+        .enumerate()
+        .map(|(index, child)| {
+            if !child.key.starts_with("txt:") {
+                return None;
+            }
+            let row_indent = indent(&child.text);
+            let parent = children[..index].iter().rev().find(|earlier| {
+                indent(&earlier.text) < row_indent && earlier.key != PREAMBLE_KEY
+            })?;
+            Some(format!("{}@parent:{}", child.key, parent.key))
+        })
+        .collect();
+    for (child, key) in children.iter_mut().zip(scoped) {
+        if let Some(key) = key {
+            child.key = key;
+        }
+    }
+}
+
+/// Drop agent-only extra copies of one free-text row under the same parent.
+///
+/// The operator's copy count is the ceiling when the row exists in the base
+/// or on the operator side. A row neither side had settled still keeps one
+/// agent copy. Identical operator repeats are not agent copies and stay.
+fn drop_agent_excess_identical_free_text(
+    base: &[KeyedChild],
+    ours: &mut Vec<KeyedChild>,
+    theirs: &[KeyedChild],
+) {
+    fn indent(text: &str) -> usize {
+        let first = text.lines().next().unwrap_or("");
+        first.len() - first.trim_start_matches([' ', '\t']).len()
+    }
+    fn scopes(children: &[KeyedChild]) -> Vec<Option<(Option<String>, String)>> {
+        children
+            .iter()
+            .enumerate()
+            .map(|(index, child)| {
+                let work = free_text_instruction(&child.key, &child.text)?;
+                let row_indent = indent(&child.text);
+                let parent = children[..index].iter().rev().find_map(|earlier| {
+                    (indent(&earlier.text) < row_indent)
+                        .then(|| queue_instruction_text(&earlier.text))
+                });
+                Some((parent, work))
+            })
+            .collect()
+    }
+    fn counts(
+        scoped: &[Option<(Option<String>, String)>],
+    ) -> std::collections::HashMap<(Option<String>, String), usize> {
+        let mut counts = std::collections::HashMap::new();
+        for scope in scoped.iter().flatten() {
+            *counts.entry(scope.clone()).or_insert(0) += 1;
+        }
+        counts
+    }
+    let base_counts = counts(&scopes(base));
+    let theirs_counts = counts(&scopes(theirs));
+    let ours_scopes = scopes(ours);
+    let mut groups: std::collections::HashMap<(Option<String>, String), Vec<usize>> =
+        std::collections::HashMap::new();
+    for (index, scope) in ours_scopes.iter().enumerate() {
+        if let Some(scope) = scope {
+            groups.entry(scope.clone()).or_default().push(index);
+        }
+    }
+    let base_keys: std::collections::HashSet<&str> =
+        base.iter().map(|child| child.key.as_str()).collect();
+    let theirs_keys: std::collections::HashSet<&str> =
+        theirs.iter().map(|child| child.key.as_str()).collect();
+    let mut drop_indexes = std::collections::HashSet::new();
+    for (scope, indexes) in groups {
+        let base_n = base_counts.get(&scope).copied().unwrap_or(0);
+        let theirs_n = theirs_counts.get(&scope).copied().unwrap_or(0);
+        let allow = if base_n == 0 && theirs_n == 0 {
+            1
+        } else {
+            base_n.max(theirs_n)
+        };
+        if indexes.len() <= allow {
+            continue;
+        }
+        let mut ranked = indexes;
+        ranked.sort_by_key(|index| {
+            let key = ours[*index].key.as_str();
+            let anchored = base_keys.contains(key) || theirs_keys.contains(key);
+            (anchored, *index)
+        });
+        let excess = ranked.len() - allow;
+        drop_indexes.extend(ranked.into_iter().take(excess));
+    }
+    if drop_indexes.is_empty() {
+        return;
+    }
+    let mut index = 0usize;
+    ours.retain(|_| {
+        let keep = !drop_indexes.contains(&index);
+        index += 1;
+        keep
+    });
 }
 
 fn retain_indexed<T>(items: &mut Vec<T>, keep: &[bool]) {
@@ -9199,6 +9330,86 @@ Second answer line three.
         assert!(
             queue.contains("  - ~~#review~~\n"),
             "the other request's struck review was lost:\n{queue}"
+        );
+    }
+
+    /// sdk-dev haiven-api PR 942: an Obsidian auto-pair `%% %%` and a second
+    /// copy of the same short free-text row (`#addres`, painted with
+    /// `[#subagent:action-225fb125d283#1]`) must not survive the operator
+    /// deleting the empty comment (`#blankobsidiancomment`, `#agentexcesstwin`).
+    #[test]
+    fn operator_deleted_empty_obsidian_comment_does_not_resurrect_or_twin_addres() {
+        assert_eq!(
+            list_item_key("  - #addres\n"),
+            list_item_key("  - 🚧 [#subagent:action-225fb125d283#1] #addres\n"),
+            "a claim paint on #addres must share the bare row's free-text key"
+        );
+        let doc = |rows: &str| {
+            format!(
+                "# SDK\n\n## Haiven API <!-- agent:run id=\"haiven-api-prs\" keep -->\n{rows}<!-- /agent:run -->\n"
+            )
+        };
+        fn run_body(merged: &str) -> &str {
+            merged
+                .split("<!-- agent:run")
+                .nth(1)
+                .and_then(|rest| rest.split("<!-- /agent:run -->").next())
+                .unwrap_or(merged)
+        }
+        let addres_rows = |body: &str| body.lines().filter(|line| line.contains("#addres")).count();
+        let api = "- ### https://github.com/haiven-dev/haiven-api/pull/942\n";
+        let title = "  - %% feat(auth): keep this title %%\n";
+        let author = "  - %% author: tmstorm %%\n";
+        let review = "  - #review\n";
+        let empty = "  - %% %%\n";
+        let bare = "  - #addres\n";
+        let claimed = "  - 🚧 [#subagent:action-225fb125d283#1] #addres\n";
+        let other = concat!(
+            "- ### https://github.com/haiven-dev/haiven-contracts/pull/197\n",
+            "  - #review\n",
+        );
+        let assert_kept = |queue: &str| {
+            assert_eq!(queue.matches("%% %%").count(), 0, "{queue}");
+            assert_eq!(addres_rows(queue), 1, "{queue}");
+            assert!(queue.contains(title.trim()), "{queue}");
+            assert!(queue.contains(author.trim()), "{queue}");
+            assert_eq!(queue.matches("#review").count(), 2, "{queue}");
+            assert!(
+                queue.contains("haiven-contracts/pull/197"),
+                "a #review under another pull request was collapsed:\n{queue}"
+            );
+        };
+
+        // The empty comment and the bare row are already in the base. The
+        // agent writes a second copy of each; the operator deletes every
+        // `%% %%` and keeps one `#addres`.
+        let base = doc(&format!("{api}{title}{author}{review}{empty}{bare}{other}"));
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc(&format!(
+            "{api}{title}{author}{review}{empty}{empty}{claimed}{claimed}{other}"
+        ));
+        let theirs = doc(&format!("{api}{title}{author}{review}{bare}{other}"));
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_kept(run_body(&merged));
+
+        // Neither the comment nor the row had settled. The agent introduces
+        // the placeholder and two claimed copies while the operator has one
+        // bare row and deleted a different settled line, so this is not an
+        // insertions-only tree merge.
+        let base = doc(&format!(
+            "{api}{title}{author}{review}- scratch note\n{other}"
+        ));
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let ours = doc(&format!(
+            "{api}{title}{author}{review}{empty}{claimed}{claimed}- scratch note\n{other}"
+        ));
+        let theirs = doc(&format!("{api}{title}{author}{review}{bare}{other}"));
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        let queue = run_body(&merged);
+        assert_kept(queue);
+        assert!(
+            !queue.contains("scratch note"),
+            "operator deletion of an unrelated row was lost:\n{queue}"
         );
     }
 

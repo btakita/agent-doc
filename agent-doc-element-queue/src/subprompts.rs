@@ -76,10 +76,29 @@ pub fn list_item_content(line: &str) -> Option<&str> {
 }
 
 /// An editor placeholder list marker (`-`, `*`, `+`, `N.`, `N)`) with no item
-/// text. Indentation and a trailing space still count. These rows are not
-/// operator content: queue projection must not write them back as items.
+/// text, or an Obsidian list comment that has not been given a body yet
+/// (`%% %%`, `%%%%`). Indentation and a trailing space still count. These
+/// rows are not operator content: queue projection must not write them back
+/// as items (`#blanksubitem`, `#blankobsidiancomment`).
 pub fn is_empty_list_placeholder_line(line: &str) -> bool {
-    list_item_content(line).is_some_and(|content| content.trim().is_empty())
+    list_item_content(line).is_some_and(|content| {
+        let trimmed = content.trim();
+        trimmed.is_empty() || empty_obsidian_list_comment(trimmed)
+    })
+}
+
+/// True when `trimmed` is only an Obsidian comment delimiter pair.
+///
+/// A real note (`%% author: tmstorm %%`) has a body and stays. A bare `%%`
+/// opens a multiline comment and is not this placeholder.
+fn empty_obsidian_list_comment(trimmed: &str) -> bool {
+    let Some(inner) = trimmed
+        .strip_prefix("%%")
+        .and_then(|rest| rest.strip_suffix("%%"))
+    else {
+        return false;
+    };
+    inner.chars().all(char::is_whitespace)
 }
 
 /// True when `line` is an indented list item: the only line shape that can

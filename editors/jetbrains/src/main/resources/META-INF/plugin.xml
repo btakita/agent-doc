@@ -40,6 +40,10 @@
                                 implementation="com.github.btakita.agentdoc.shell.ShellTurnStateStatusBarWidgetFactory"/>
         <editorNotificationProvider
                 implementation="com.github.btakita.agentdoc.shell.ShellTurnStateBannerProvider"/>
+        <fileDocumentSynchronizationVetoer
+                implementation="com.github.btakita.agentdoc.shell.ShellOperatorPromptReloadVetoer"/>
+        <fileDocumentManagerListener
+                implementation="com.github.btakita.agentdoc.shell.ShellOperatorPromptSaveListener"/>
     </extensions>
 
     <projectListeners>

@@ -1,6 +1,9 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.openapi.Disposable
+import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.vfs.VirtualFile
 import io.github.lazily.ThreadSafeComputed
 import io.github.lazily.ThreadSafeContext
@@ -8,6 +11,8 @@ import io.github.lazily.ThreadSafeSource
 import java.lang.reflect.Field
 import java.lang.reflect.Method
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicReference
 
 internal data class FileCacheConflictProbe(
     val pending: Boolean,
@@ -145,6 +150,121 @@ internal class FileCacheConflictPlane(private val context: ThreadSafeContext) {
 
     fun clear() {
         context.set(observations, emptyMap())
+    }
+}
+
+/**
+ * True when replacing [documentText] with [diskText] would drop an unmarked
+ * operator list prompt, including the shape where disk has only the seen
+ * (`👀`) form of that same prompt. A null disk snapshot is treated as a drop
+ * when the editor holds such a prompt. Non-session files, generated `**field**:`
+ * rows, and `▫️` structure rows are left alone, as is an operator delete that
+ * exists only on disk.
+ */
+internal fun reloadWouldDropUnmarkedOperatorPrompt(documentText: String, diskText: String?): Boolean {
+    if (!isAgentDocDocumentTextUtil(documentText)) return false
+    val memory = unmarkedOperatorPromptBodies(documentText)
+    if (memory.isEmpty()) return false
+    if (diskText == null) return true
+    val disk = unmarkedOperatorPromptBodies(diskText)
+    return memory.any { prompt -> prompt !in disk }
+}
+
+private val operatorListItem = Regex("""^[ \t]*-[ \t]+(.*\S)[ \t]*$""")
+private val generatedListField = Regex("""^\*\*[^*]+\*\*\s*:""")
+
+/** Queue lifecycle glyphs painted onto a row. An unmarked prompt has none of these. */
+private val operatorPromptLifecycleGlyphs = listOf(
+    "👀",
+    "📥",
+    "🟡",
+    "🚧",
+    "⛔",
+    "☑️",
+    "📫",
+    "📤",
+    "⚠️",
+    "🔄",
+    "❔",
+    "⏳",
+    "📌",
+    "📍",
+    "🗑️",
+    "🔒",
+    "🙋",
+)
+
+private fun unmarkedOperatorPromptBodies(text: String): Set<String> {
+    val prompts = linkedSetOf<String>()
+    val normalized = text.replace("\r\n", "\n").replace('\r', '\n')
+    for (line in normalized.lineSequence()) {
+        val body = operatorListItem.matchEntire(line)?.groupValues?.get(1)?.trim().orEmpty()
+        if (body.isEmpty() || body.startsWith("▫️")) continue
+        if (generatedListField.containsMatchIn(body)) continue
+        if (operatorPromptLifecycleGlyphs.any(body::startsWith)) continue
+        prompts += body
+    }
+    return prompts
+}
+
+/**
+ * Idle save refreshes the virtual file inside `doSaveDocument` before a
+ * [com.intellij.openapi.fileEditor.FileDocumentSynchronizationVetoer] can run,
+ * and that refresh queues the conflict dialog. Keep editor memory for the
+ * rest of this EDT save when an unsaved document is an agent-doc session.
+ * The override is disposed on the next EDT turn, so it does not cover a
+ * later watcher refresh and is not a process-lifetime hold.
+ *
+ * Platforms without `overrideConflictResolution` no-op; the reload veto
+ * still refuses a drop.
+ */
+internal object AgentDocSaveBatchConflictHold {
+    private val LOG = Logger.getInstance(AgentDocSaveBatchConflictHold::class.java)
+    private val depth = AtomicInteger(0)
+    private val override = AtomicReference<Disposable?>(null)
+    private val reflectionWarned = AtomicBoolean(false)
+
+    fun holdIfUnsavedAgentDoc(texts: List<CharSequence>) {
+        if (texts.none(::isAgentDocDocumentTextUtil)) return
+        if (depth.getAndIncrement() == 0) {
+            val created = installKeepMemory()
+            if (created == null) {
+                depth.decrementAndGet()
+                return
+            }
+            override.set(created)
+        }
+        GenerationWork.invokeLater {
+            if (depth.decrementAndGet() == 0) {
+                override.getAndSet(null)?.let(Disposer::dispose)
+            }
+        }
+    }
+
+    private fun installKeepMemory(): Disposable? {
+        val parent = Disposer.newDisposable("agent-doc-save-batch-keep-memory")
+        return try {
+            val manager = FileDocumentManager.getInstance()
+            val method = manager.javaClass.methods.firstOrNull { candidate ->
+                candidate.name == "overrideConflictResolution" && candidate.parameterCount == 2
+            } ?: return disposeUnused(parent)
+            val keep = method.parameterTypes[0].enumConstants?.firstOrNull { constant ->
+                (constant as Enum<*>).name == "KEEP_MEMORY_CHANGES"
+            } ?: return disposeUnused(parent)
+            method.invoke(manager, keep, parent)
+            parent
+        } catch (error: Exception) {
+            Disposer.dispose(parent)
+            if (reflectionWarned.compareAndSet(false, true)) {
+                LOG.warn("unable to keep editor memory across an agent-doc save batch", error)
+            }
+            null
+        }
+    }
+
+    private fun disposeUnused(parent: Disposable): Disposable? {
+        Disposer.dispose(parent)
+        return null
     }
 }
 

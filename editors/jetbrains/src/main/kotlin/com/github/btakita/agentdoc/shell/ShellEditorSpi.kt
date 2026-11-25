@@ -48,6 +48,20 @@ interface ImplEditorExtensions {
 
     /** The turn-state banner [file] shows now, or null for none. */
     fun turnStateBanner(project: Project, file: VirtualFile): TurnStateBanner?
+
+    /**
+     * True when reloading [diskText] over [documentText] would drop an unmarked
+     * operator prompt or leave only its seen (`👀`) form. A null [diskText]
+     * refuses when the editor holds such a prompt.
+     */
+    fun reloadDropsUnmarkedOperatorPrompt(documentText: String, diskText: String?): Boolean
+
+    /**
+     * Hold editor memory across the current save batch when an unsaved document
+     * is an agent-doc session, so the idle-save refresh does not queue a
+     * File Cache Conflict.
+     */
+    fun holdAgentDocMemoryAcrossSaveBatch()
 }
 
 /** Lookup data for one slash-completion pass; the shell builds the lookup elements. */

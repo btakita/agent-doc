@@ -164,11 +164,15 @@ class ShellRegistrationOwnershipTest {
                 "editorNotificationProvider" to "implementation",
             ).flatMap { (tag, attribute) -> descriptorAttributes(tag, attribute) } +
                 listOf(
+                    "fileDocumentSynchronizationVetoer" to "implementation",
+                    "fileDocumentManagerListener" to "implementation",
+                ).flatMap { (tag, attribute) -> descriptorAttributes(tag, attribute) } +
+                listOf(
                     "lang.foldingBuilder" to "implementationClass",
                     "codeInsight.lineMarkerProvider" to "implementationClass",
                     "lang.structureViewExtension" to "implementation",
                 ).flatMap { (tag, attribute) -> descriptorAttributes(tag, attribute, markdownXml) }
-        assertEquals("editor and language extensions", 6, extensionClasses.size)
+        assertEquals("editor and language extensions", 8, extensionClasses.size)
         val notShell = extensionClasses.filterNot { className ->
             load(className)
             className.startsWith("com.github.btakita.agentdoc.shell.") && manifest.isShell(sourceOf(className))
@@ -179,7 +183,8 @@ class ShellRegistrationOwnershipTest {
 
         val platformTypes = Regex(
             """:\s*(?:CompletionContributor|FoldingBuilder\w*|LineMarkerProvider|StructureViewExtension|""" +
-                """StatusBarWidgetFactory|StatusBarWidget|EditorNotificationProvider)\b""",
+                """StatusBarWidgetFactory|StatusBarWidget|EditorNotificationProvider|""" +
+                """FileDocumentSynchronizationVetoer)\b""",
         )
         val implementers = manifest.implSources().flatMap { file ->
             file.readLines().withIndex()
@@ -311,7 +316,7 @@ class ShellRegistrationOwnershipTest {
         /** Every EDT, pooled, executor, thread and alarm call the implementation stages. */
         val STAGED_WORK: Map<String, Int> = sortedMapOf(
             "executeOnPooledThread" to 25,
-            "invokeLater" to 49,
+            "invokeLater" to 50,
             "newPooledAlarm" to 1,
             "newSingleThreadExecutor" to 1,
             "newSingleThreadScheduledExecutor" to 8,

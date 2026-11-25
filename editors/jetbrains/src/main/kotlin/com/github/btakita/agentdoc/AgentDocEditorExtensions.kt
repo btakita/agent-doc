@@ -10,6 +10,7 @@ import com.intellij.codeInsight.completion.CompletionParameters
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.editor.Editor
+import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.psi.PsiElement
@@ -48,4 +49,14 @@ internal object AgentDocEditorExtensions : ImplEditorExtensions {
 
     override fun turnStateBanner(project: Project, file: VirtualFile): TurnStateBanner? =
         TurnStateBannerProvider.banner(project, file)
+
+    override fun reloadDropsUnmarkedOperatorPrompt(documentText: String, diskText: String?): Boolean =
+        reloadWouldDropUnmarkedOperatorPrompt(documentText, diskText)
+
+    override fun holdAgentDocMemoryAcrossSaveBatch() {
+        val texts = FileDocumentManager.getInstance().unsavedDocuments.map { document ->
+            document.charsSequence
+        }
+        AgentDocSaveBatchConflictHold.holdIfUnsavedAgentDoc(texts)
+    }
 }

@@ -2471,6 +2471,7 @@ pub fn prune_duplicates(
     apply: bool,
     truncated_prefix_line: Option<usize>,
     keep_rows: &[String],
+    keep_copies: &[String],
 ) -> Result<()> {
     // Same single-writer lease as `prune-noise`: idle-watch and preflight
     // defer across the authoritative read, plan, and converged write. A failed
@@ -2479,10 +2480,11 @@ pub fn prune_duplicates(
         .then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file))
         .transpose()?;
     let content = effects.current_document_content(file, "queue_prune_duplicates")?;
-    let plan = agent_doc_queue::prune_duplicates::plan_selection(
+    let plan = agent_doc_queue::prune_duplicates::plan_selection_with_copies(
         &content,
         truncated_prefix_line,
         keep_rows,
+        keep_copies,
     )
     .with_context(|| format!("{}: queue duplicate prune refused to plan", file.display()))?;
     if plan.drops.is_empty() || !apply {
@@ -2496,7 +2498,7 @@ pub fn prune_duplicates(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof={} truncated_prefix_line={} keep_rows={} removed_rows={:?}",
+            "queue_prune_duplicates file={} removed={} base_hash={} source_component=queue operation=prune_duplicates proof={} truncated_prefix_line={} keep_rows={} keep_copies={} removed_rows={:?}",
             file.display(),
             plan.drops.len(),
             base_hash,
@@ -2515,6 +2517,11 @@ pub fn prune_duplicates(
             } else {
                 keep_rows.join(",")
             },
+            if keep_copies.is_empty() {
+                "none".to_string()
+            } else {
+                keep_copies.join(",")
+            },
             plan.drops
                 .iter()
                 .map(|drop| drop.work_text.as_str())
@@ -2522,6 +2529,67 @@ pub fn prune_duplicates(
         ),
     );
     print!("{}", plan.report(&file.display().to_string(), true));
+    Ok(())
+}
+
+/// `agent-doc queue delete-tree <FILE> --line <N> [--apply]`
+/// (`#inerttreestrike`): delete the subtrees `queue tree-status --line N`
+/// lists as Deletable.
+///
+/// The plan is recomputed from the current authority text under the same
+/// single-writer queue-edit lease `prune-duplicates` holds, so only rows the
+/// binary proves deletable at write time are removed; a dry run is the
+/// default. The write converges through the editor authority like every other
+/// queue command.
+pub fn delete_tree(
+    effects: &impl QueueCommandEffects,
+    file: &Path,
+    line: usize,
+    apply: bool,
+    json: bool,
+) -> Result<()> {
+    let _queue_edit_guard = apply
+        .then(|| crate::queue_edit_owner::QueueEditGuard::acquire(file))
+        .transpose()?;
+    let content = effects.current_document_content(file, "queue_delete_tree")?;
+    let plan = agent_doc_queue::tree_status::plan_delete_deletable(&content, line)
+        .with_context(|| format!("{}: queue delete-tree refused to plan", file.display()))?;
+    let applied = apply && !plan.removed.is_empty();
+    if applied {
+        effects
+            .converge_document_or_disk(file, &plan.document, &content, "queue_delete_tree")
+            .context("queue delete-tree: failed to write document")?;
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_delete_tree file={} line={} queue={} removed={} removed_lines={} base_hash={} proof=tree_status_deletable ranges={:?}",
+                file.display(),
+                line,
+                plan.queue,
+                plan.removed.len(),
+                plan.removed_lines,
+                agent_doc_hash::content_hash(&content),
+                plan.removed
+                    .iter()
+                    .map(|row| format!("L{}-L{} {}", row.line, row.end_line, row.text))
+                    .collect::<Vec<_>>(),
+            ),
+        );
+    }
+    if json {
+        let mut value = serde_json::to_value(&plan)?;
+        value["applied"] = serde_json::Value::Bool(applied);
+        println!("{}", serde_json::to_string_pretty(&value)?);
+    } else {
+        print!(
+            "{}",
+            agent_doc_queue::tree_status::render_delete_report(
+                &file.display().to_string(),
+                &plan,
+                applied
+            )
+        );
+    }
     Ok(())
 }
 
@@ -8104,6 +8172,58 @@ mod prune_duplicates_cmd_tests {
         }
     }
 
+    /// `#inerttreestrike`: `queue delete-tree` is a dry run by default; with
+    /// `--apply` it holds the queue-edit lease through the authority read and
+    /// the converged write, removes only the Deletable tree, and a second
+    /// apply finds nothing left to delete.
+    #[test]
+    fn delete_tree_dry_run_writes_nothing_and_apply_removes_only_the_deletable_tree() {
+        let source = "\
+<!-- agent:run id=\"main\" -->
+- ### https://github.com/acme/widget-sdk/pull/403
+  - %% ci(shadow) %%
+- ### ~~do [#shadowbuilds]~~
+  - **Response [#r-7430d279e64b]**
+    - **Timestamp:** 2026-11-25T03:46:03.000Z
+    - **Summary:** gated, not redispatched.
+    - **State:** Complete.
+    - **Guidance:** 🗑️ Safe to delete this tree.
+- do [#keepme]
+<!-- /agent:run -->
+";
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let file = dir.path().join("session.md");
+        std::fs::write(&file, source).unwrap();
+        let effects = Mem {
+            content: std::cell::RefCell::new(source.to_string()),
+            writes: Cell::new(0),
+            expect_lease: Cell::new(false),
+        };
+        delete_tree(&effects, &file, 4, false, false).unwrap();
+        assert_eq!(effects.writes.get(), 0);
+        assert_eq!(effects.content.borrow().as_str(), source);
+        effects.expect_lease.set(true);
+        delete_tree(&effects, &file, 1, true, false).unwrap();
+        assert!(
+            crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
+            "apply must release the queue-edit lease after convergence"
+        );
+        assert_eq!(effects.writes.get(), 1);
+        assert_eq!(
+            effects.content.borrow().as_str(),
+            "\
+<!-- agent:run id=\"main\" -->
+- ### https://github.com/acme/widget-sdk/pull/403
+  - %% ci(shadow) %%
+- do [#keepme]
+<!-- /agent:run -->
+"
+        );
+        delete_tree(&effects, &file, 1, true, true).unwrap();
+        assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
+    }
+
     #[test]
     fn prune_duplicates_dry_run_writes_nothing_and_apply_keeps_the_claim() {
         let source = "\
@@ -8122,11 +8242,11 @@ mod prune_duplicates_cmd_tests {
             writes: Cell::new(0),
             expect_lease: Cell::new(false),
         };
-        prune_duplicates(&effects, &file, false, Some(3), &[]).unwrap();
+        prune_duplicates(&effects, &file, false, Some(3), &[], &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, Some(3), &[]).unwrap();
+        prune_duplicates(&effects, &file, true, Some(3), &[], &[]).unwrap();
         assert!(
             crate::queue_edit_owner::read_queue_edit_owner_lease(&file.to_string_lossy()).is_none(),
             "apply must release the queue-edit lease after convergence"
@@ -8136,7 +8256,7 @@ mod prune_duplicates_cmd_tests {
         assert!(written.contains("[#subagent:shell#1]"));
         assert!(!written.contains("- If the claiming\n"));
         assert_eq!(written.matches("[#subagent:shell#1]").count(), 1);
-        prune_duplicates(&effects, &file, true, Some(3), &[]).unwrap();
+        prune_duplicates(&effects, &file, true, Some(3), &[], &[]).unwrap();
         assert_eq!(effects.writes.get(), 1, "a second apply is a no-op");
         assert_eq!(effects.content.borrow().as_str(), written);
     }
@@ -8164,8 +8284,8 @@ mod prune_duplicates_cmd_tests {
                 .expect("the other owner publishes its lease");
 
         // The dry run takes no lock, so it still reports under contention.
-        prune_duplicates(&effects, &file, false, None, &[]).unwrap();
-        let error = prune_duplicates(&effects, &file, true, None, &[]).unwrap_err();
+        prune_duplicates(&effects, &file, false, None, &[], &[]).unwrap();
+        let error = prune_duplicates(&effects, &file, true, None, &[], &[]).unwrap_err();
         assert!(
             error.to_string().contains("queue mutation deferred"),
             "{error:#}"
@@ -8181,7 +8301,7 @@ mod prune_duplicates_cmd_tests {
 
         drop(holder);
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, None, &[]).unwrap();
+        prune_duplicates(&effects, &file, true, None, &[], &[]).unwrap();
         assert_eq!(effects.writes.get(), 1, "apply writes once the lock frees");
     }
 
@@ -8203,12 +8323,12 @@ mod prune_duplicates_cmd_tests {
             expect_lease: Cell::new(false),
         };
 
-        prune_duplicates(&effects, &file, false, None, &[]).unwrap();
+        prune_duplicates(&effects, &file, false, None, &[], &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
 
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, None, &[]).unwrap();
+        prune_duplicates(&effects, &file, true, None, &[], &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
         assert!(
@@ -8235,13 +8355,13 @@ mod prune_duplicates_cmd_tests {
             expect_lease: Cell::new(false),
         };
 
-        prune_duplicates(&effects, &file, false, None, &[]).unwrap();
-        prune_duplicates(&effects, &file, true, None, &[]).unwrap();
+        prune_duplicates(&effects, &file, false, None, &[], &[]).unwrap();
+        prune_duplicates(&effects, &file, true, None, &[], &[]).unwrap();
         assert_eq!(effects.writes.get(), 0);
         assert_eq!(effects.content.borrow().as_str(), source);
 
         effects.expect_lease.set(true);
-        prune_duplicates(&effects, &file, true, Some(2), &[]).unwrap();
+        prune_duplicates(&effects, &file, true, Some(2), &[], &[]).unwrap();
         assert_eq!(effects.writes.get(), 1);
         let written = effects.content.borrow();
         assert!(!written.contains("- 📥 Run queue tests\n"));
@@ -8273,10 +8393,26 @@ mod prune_duplicates_cmd_tests {
             expect_lease: Cell::new(true),
         };
         assert!(
-            prune_duplicates(&effects, &file, true, None, &["q-0000000000ff".to_string()]).is_err()
+            prune_duplicates(
+                &effects,
+                &file,
+                true,
+                None,
+                &["q-0000000000ff".to_string()],
+                &[]
+            )
+            .is_err()
         );
         assert_eq!(effects.writes.get(), 0);
-        prune_duplicates(&effects, &file, true, None, &["q-0000000000c4".to_string()]).unwrap();
+        prune_duplicates(
+            &effects,
+            &file,
+            true,
+            None,
+            &["q-0000000000c4".to_string()],
+            &[],
+        )
+        .unwrap();
         assert_eq!(effects.writes.get(), 1);
         assert_eq!(
             effects.content.borrow().as_str(),

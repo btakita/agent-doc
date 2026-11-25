@@ -6366,6 +6366,27 @@ enum QueueAction {
         #[arg(long)]
         json: bool,
     },
+    /// Delete the subtrees `queue tree-status --line N` lists as Deletable
+    /// (`#inerttreestrike`): struck trees whose every row is closed and whose
+    /// responses record no remaining work. The plan is recomputed from the
+    /// current document under the queue-edit lease, so only rows the binary
+    /// proves deletable at write time are removed; open, waiting, owed, and
+    /// needs-review rows always stay. A line inside a queue component but on
+    /// no row selects the whole queue. Dry run unless `--apply`.
+    #[command(name = "delete-tree")]
+    DeleteTree {
+        /// Path to the session document
+        file: PathBuf,
+        /// 1-based document line inside the subtree to clean up
+        #[arg(long, value_name = "N")]
+        line: usize,
+        /// Delete the subtrees (default: report only)
+        #[arg(long)]
+        apply: bool,
+        /// Print the plan as JSON
+        #[arg(long)]
+        json: bool,
+    },
     /// Print the queue marker legend (`#queuemarkerlegend`): what each
     /// binary-owned prefix on a queue row means, using the configured
     /// `[queue_icons]` palette. `--line` prints the one-line legend the binary
@@ -6645,7 +6666,10 @@ enum QueueAction {
     ///
     /// Collapses live rows in one queue whose work text is identical after
     /// binary-owned markers (`[#subagent:…]`, lifecycle prefixes) are stripped,
-    /// keeping the row that carries the live claim. A semantic prefix is kept
+    /// keeping the row that carries the live claim. A top-level id-backed head
+    /// (`do [#id]`) copied into more than one queue keeps only its canonical
+    /// copy (`#inerttreestrike`; see `--keep-copy`); its backlog item stays
+    /// open, and a copy with child rows stays. A semantic prefix is kept
     /// unless `--truncated-prefix-line` explicitly selects its exact document
     /// row; text-prefix shape alone is never deletion authority. Struck history
     /// stays. Identical directive heads that `prune-noise` keeps are in scope
@@ -6671,6 +6695,14 @@ enum QueueAction {
         /// Repeat for each row (`#dupwrite2`).
         #[arg(long = "keep-row", value_name = "ID")]
         keep_rows: Vec<String>,
+        /// Name the canonical queue for a cross-queue copy of an id-backed
+        /// head (`#inerttreestrike`), as `<id>@<queue-id>` (for example
+        /// `devflowcutover@main`). Without it the canonical copy is the one
+        /// holding the worker claim, else the one in the queue the backlog
+        /// item's `queue=` attribute routes the id to. The other copies are
+        /// removed; the backlog item stays open. Repeat for each id.
+        #[arg(long = "keep-copy", value_name = "ID@QUEUE")]
+        keep_copies: Vec<String>,
     },
 }
 
@@ -11675,6 +11707,15 @@ fn try_main() -> anyhow::Result<()> {
                 }
                 Ok(())
             }
+            QueueAction::DeleteTree {
+                file,
+                line,
+                apply,
+                json,
+            } => {
+                let queue_effects = CliQueueCommandEffects;
+                agent_doc_queue_io::queue_cmd::delete_tree(&queue_effects, &file, line, apply, json)
+            }
             QueueAction::Brief {
                 file,
                 item,
@@ -11937,6 +11978,7 @@ fn try_main() -> anyhow::Result<()> {
                 apply,
                 truncated_prefix_line,
                 keep_rows,
+                keep_copies,
             } => {
                 let queue_effects = CliQueueCommandEffects;
                 agent_doc_queue_io::queue_cmd::prune_duplicates(
@@ -11945,6 +11987,7 @@ fn try_main() -> anyhow::Result<()> {
                     apply,
                     truncated_prefix_line.map(std::num::NonZeroUsize::get),
                     &keep_rows,
+                    &keep_copies,
                 )
             }
         },
@@ -12576,8 +12619,10 @@ mod recycle_force_tests {
                         apply,
                         truncated_prefix_line,
                         keep_rows,
+                        keep_copies,
                     },
             } => {
+                assert!(keep_copies.is_empty());
                 assert_eq!(file, PathBuf::from("tasks/session.md"));
                 assert!(apply);
                 assert_eq!(
@@ -12612,6 +12657,60 @@ mod recycle_force_tests {
                 assert_eq!(keep_rows, vec!["q-68b3244de244", "#q-9e92831a7369"]);
             }
             _ => panic!("expected queue prune-duplicates"),
+        }
+    }
+
+    #[test]
+    fn queue_prune_duplicates_parses_repeated_keep_copies() {
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "prune-duplicates",
+            "tasks/session.md",
+            "--keep-copy",
+            "devflowcutover@main",
+            "--keep-copy",
+            "clidocsreleasecleanup@haiven-sdk-prs",
+        ]) {
+            Commands::Queue {
+                action: QueueAction::PruneDuplicates { keep_copies, .. },
+            } => assert_eq!(
+                keep_copies,
+                vec![
+                    "devflowcutover@main",
+                    "clidocsreleasecleanup@haiven-sdk-prs"
+                ]
+            ),
+            _ => panic!("expected queue prune-duplicates"),
+        }
+    }
+
+    #[test]
+    fn queue_delete_tree_parses_line_apply_and_json() {
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "delete-tree",
+            "tasks/session.md",
+            "--line",
+            "811",
+            "--apply",
+        ]) {
+            Commands::Queue {
+                action:
+                    QueueAction::DeleteTree {
+                        file,
+                        line,
+                        apply,
+                        json,
+                    },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert_eq!(line, 811);
+                assert!(apply);
+                assert!(!json);
+            }
+            _ => panic!("expected queue delete-tree"),
         }
     }
 

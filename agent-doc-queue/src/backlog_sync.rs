@@ -212,6 +212,37 @@ fn active_backlog_route_items(
         .collect()
 }
 
+/// The queue each open backlog/pending id is routed to by an explicit
+/// `queue="<queue-id>"` attribute naming a queue block of this document
+/// (`#inerttreestrike`): the item's canonical queue. Ids under a sync-mode
+/// attribute, or under an attribute naming no queue, are absent.
+pub fn explicit_backlog_queue_targets(
+    components: &[element::Component],
+    content: &str,
+) -> anyhow::Result<HashMap<String, String>> {
+    let queues = crate::queue_set::QueueSet::parse(content, components)?;
+    let mut targets = HashMap::new();
+    for component in components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "backlog" | "pending"))
+    {
+        let Some(value) = component.attrs.get("queue") else {
+            continue;
+        };
+        let target_id = value.trim();
+        if target_id.is_empty()
+            || BacklogQueueSyncMode::parse(target_id).is_some()
+            || queues.block(target_id).is_none()
+        {
+            continue;
+        }
+        for (id, _) in active_backlog_route_items(component, content) {
+            targets.entry(id).or_insert_with(|| target_id.to_string());
+        }
+    }
+    Ok(targets)
+}
+
 /// Collect bare multi-queue placements and missing explicit targets for the
 /// main agent to reconcile rather than silently choosing a queue.
 pub fn collect_backlog_queue_placement_debt(

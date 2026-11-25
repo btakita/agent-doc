@@ -535,3 +535,129 @@ fn a_deletable_query_is_answered_and_names_other_open_work() {
         "{answered}"
     );
 }
+
+// ---- `#inerttreestrike` ------------------------------------------------------
+
+/// The live sdk-dev shape, anonymized: PR navigation headings with only a
+/// `%% title %%` note, a PR heading with a real prompt child, and a struck
+/// `do [#id]` tree whose response says it is safe to delete.
+const PR_QUEUE: &str = concat!(
+    "- ### https://github.com/acme/widget-sdk/pull/403\n",
+    "  - %% ci(shadow): one-command setup and batch builds %%\n",
+    "- ### https://github.com/acme/widget-sdk/pull/404\n",
+    "  - #rebase\n",
+    "- ### ~~do [#shadowbuilds]~~\n",
+    "  - **Response [#r-7430d279e64b]**\n",
+    "    - **Timestamp:** 2026-11-25T03:46:03.000Z\n",
+    "    - **Summary:** gated, not redispatched.\n",
+    "    - **State:** Complete.\n",
+    "    - **Guidance:** 🗑️ Safe to delete this tree.\n",
+    "- ### https://github.com/acme/widget-sdk/pull/405\n",
+);
+
+/// A pull-request URL whose only children are list comments is a navigation
+/// heading (`#prurlcommentnote`): the queue never claims it, so tree status
+/// must not report it as `Next: agent — pick up this queued item`. A PR URL
+/// with a real prompt child, or with no children, is unchanged.
+#[test]
+fn inerttreestrike_pr_note_heading_is_not_agent_work() {
+    let document = queue_doc(PR_QUEUE);
+    let heading = tree_status(&document, line_of(&document, "pull/403")).unwrap();
+    assert!(heading.agent.is_empty(), "{heading:#?}");
+    assert!(heading.needs_review.is_empty(), "{heading:#?}");
+    assert!(heading.deletable.is_empty(), "{heading:#?}");
+
+    let whole = tree_status(&document, 1).unwrap();
+    let agent = whole
+        .agent
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        agent.iter().all(|text| !text.contains("pull/403")),
+        "{whole:#?}"
+    );
+    assert!(
+        agent.iter().any(|text| text.contains("#rebase")),
+        "{whole:#?}"
+    );
+    assert!(
+        agent.iter().any(|text| text.contains("pull/405")),
+        "a bare PR URL with no children stays executable: {whole:#?}"
+    );
+}
+
+/// `queue delete-tree` removes exactly the subtrees tree status lists as
+/// Deletable, and nothing else.
+#[test]
+fn inerttreestrike_delete_plan_removes_only_the_deletable_subtrees() {
+    let document = queue_doc(PR_QUEUE);
+    let line = line_of(&document, "do [#shadowbuilds]");
+    let plan = plan_delete_deletable(&document, line).unwrap();
+    assert_eq!(plan.removed.len(), 1, "{plan:#?}");
+    assert_eq!(plan.removed[0].line, line);
+    assert_eq!(
+        plan.removed[0].end_line,
+        line_of(&document, "Safe to delete this tree")
+    );
+    assert_eq!(plan.removed_lines, 6);
+    let expected = queue_doc(concat!(
+        "- ### https://github.com/acme/widget-sdk/pull/403\n",
+        "  - %% ci(shadow): one-command setup and batch builds %%\n",
+        "- ### https://github.com/acme/widget-sdk/pull/404\n",
+        "  - #rebase\n",
+        "- ### https://github.com/acme/widget-sdk/pull/405\n",
+    ));
+    assert_eq!(plan.document, expected);
+    let report = render_delete_report("session.md", &plan, false);
+    assert!(
+        report.contains("dry run, 1 deletable subtree(s) (6 line(s))"),
+        "{report}"
+    );
+    assert!(report.contains("do [#shadowbuilds]"), "{report}");
+
+    // The whole queue deletes the same subtree; an open row selects nothing.
+    let whole = plan_delete_deletable(&document, 1).unwrap();
+    assert_eq!(whole.document, expected);
+    let open = plan_delete_deletable(&document, line_of(&document, "pull/404")).unwrap();
+    assert!(open.removed.is_empty(), "{open:#?}");
+    assert_eq!(open.document, document);
+    assert!(
+        render_delete_report("session.md", &open, false).contains("nothing deletable"),
+        "no change is reported"
+    );
+}
+
+/// A struck row whose response still waits on the operator, or that holds a
+/// live child, is never deleted (the `MIXED` fixture's `#delta` and `#zeta`).
+#[test]
+fn inerttreestrike_delete_plan_keeps_rows_with_remaining_work() {
+    let document = queue_doc(MIXED);
+    let plan = plan_delete_deletable(&document, 1).unwrap();
+    let removed = plan
+        .removed
+        .iter()
+        .map(|row| row.id.as_deref().unwrap_or_default())
+        .collect::<Vec<_>>();
+    assert_eq!(removed, vec!["gamma"], "{plan:#?}");
+    assert!(!plan.document.contains("[#gamma]"), "{}", plan.document);
+    assert!(
+        !plan.document.contains("[#gamma-child]"),
+        "{}",
+        plan.document
+    );
+    for kept in [
+        "[#alpha]",
+        "[#beta]",
+        "[#delta]",
+        "[#epsilon]",
+        "[#zeta]",
+        "[#zeta-child]",
+    ] {
+        assert!(
+            plan.document.contains(kept),
+            "{kept} kept: {}",
+            plan.document
+        );
+    }
+}

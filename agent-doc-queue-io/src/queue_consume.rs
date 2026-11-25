@@ -780,7 +780,7 @@ pub enum AckTextSelector {
 /// need the exact node key so a repeated leaf such as `#rebase` can be struck
 /// under only the parent named by its nest vector.
 fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutableRow>> {
-    addressable_rows(content, false)
+    addressable_rows(content, false, false)
 }
 
 /// [`addressable_executable_rows`] plus the reported context parents an
@@ -789,12 +789,32 @@ fn addressable_executable_rows(content: &str) -> Result<Vec<AddressableExecutabl
 /// work: striking it never makes anything dispatchable, and the response tree
 /// leaves it without any other agent-side close path.
 fn acknowledgeable_rows(content: &str) -> Result<Vec<AddressableExecutableRow>> {
-    addressable_rows(content, true)
+    addressable_rows(content, true, false)
+}
+
+/// [`acknowledgeable_rows`] for one `--ack-text` strike. With an explicit
+/// `--summary`, a live note row is addressable too (`#inerttreestrike`): a
+/// row whose only children are list comments (`%% … %%`, `[//]: # (…)`),
+/// such as a pull-request or issue URL heading (`#prurlcommentnote`). The
+/// queue never claims or dispatches such a row, so without this the operator
+/// had no binary path to close it once its pull request merged or closed.
+/// The summary is the evidence the struck row carries; automatic closeout
+/// paths (no summary) still never strike a note row.
+fn acknowledgeable_rows_for(
+    content: &str,
+    response: AckTextResponse<'_>,
+) -> Result<Vec<AddressableExecutableRow>> {
+    addressable_rows(
+        content,
+        true,
+        matches!(response, AckTextResponse::Summary(_)),
+    )
 }
 
 fn addressable_rows(
     content: &str,
     include_reported_origins: bool,
+    include_note_rows: bool,
 ) -> Result<Vec<AddressableExecutableRow>> {
     let components = element::parse(content)?;
     let queue_set = agent_doc_queue::queue_set::QueueSet::parse(content, &components)?;
@@ -830,7 +850,14 @@ fn addressable_rows(
                 continue;
             };
             used_nodes[node_index] = true;
-            let reported_origin = if executable.contains(&index) {
+            // `#inerttreestrike`: with an explicit summary, a note row (only
+            // list-comment children) is addressed like an executable leaf.
+            let note_row = include_note_rows
+                && agent_doc_queue::document_queue::entry_has_only_comment_children(
+                    entries.as_ref(),
+                    index,
+                );
+            let reported_origin = if executable.contains(&index) || note_row {
                 None
             } else if include_reported_origins {
                 match agent_doc_queue::document_queue::reported_response_origin(
@@ -1394,7 +1421,7 @@ fn acknowledge_free_text_once(
         }
     }
 
-    let mut addressable = acknowledgeable_rows(&content)?;
+    let mut addressable = acknowledgeable_rows_for(&content, response)?;
     let attempts = crate::queue_claim::claim_states_for_content(file, &content)
         .context("queue consume --ack-text: failed to inspect queue attempt state")?;
     // `#parentstrike`: the exact text names a live row that has rows nested
@@ -1419,7 +1446,7 @@ fn acknowledge_free_text_once(
             }
             content = plan.document;
             lifted_rows = plan.lifted;
-            addressable = acknowledgeable_rows(&content)?;
+            addressable = acknowledgeable_rows_for(&content, response)?;
             if exact_acknowledgement_rows(&addressable, expected_head, None, &attempts)?.is_none() {
                 anyhow::bail!(
                     "{}: --ack-text names the parent row {:?}, which is still not closable after \
@@ -1628,7 +1655,7 @@ fn acknowledge_free_text_once(
             let live_now = effects
                 .current_document_content(file, "queue_consume_ack_text_landed")
                 .ok()
-                .and_then(|current| acknowledgeable_rows(&current).ok())
+                .and_then(|current| acknowledgeable_rows_for(&current, response).ok())
                 .map(|current| {
                     current
                         .iter()
@@ -7182,6 +7209,120 @@ mod core_tests {
     /// worker's response. Striking the second by exact text without a summary
     /// is refused with no change; with `--summary` it carries its own short
     /// response tree (Summary, State, Guidance), and the first keeps its own.
+    /// `#inerttreestrike`: a pull-request or issue URL heading whose only
+    /// children are `%% … %%` notes is never claimed or dispatched
+    /// (`#commentonlyoutbox`, `#prurlcommentnote`), so `--ack-text` used to
+    /// refuse it as "not a unique executable queue leaf". With `--summary` it
+    /// is struck and carries the summary as its response, with or without a
+    /// generated `[#q-…]` id; the notes stay, the sibling heading stays live,
+    /// and tree status then lists the struck tree as Deletable. Without a
+    /// summary the strike is still refused, and automatic closeout (no
+    /// summary) never strikes a note row.
+    #[test]
+    fn inerttreestrike_ack_text_with_summary_strikes_a_note_only_url_heading() {
+        let tmp = TempDir::new().unwrap();
+        fs::create_dir_all(tmp.path().join(".agent-doc")).unwrap();
+        let doc = tmp.path().join("session.md");
+        let content = concat!(
+            "---\n",
+            "queue_active: true\n",
+            "---\n\n",
+            "<!-- agent:exchange -->\n",
+            "<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=\"prs\" subagents preset=\"#pr-preset\" keep -->\n",
+            "- ### https://github.com/acme/widget-sdk/pull/403\n",
+            "  - %% ci(shadow): one-command setup %%\n",
+            "- ### https://github.com/acme/widget-sdk/pull/404\n",
+            "  - %% docs %%\n",
+            "- ### https://github.com/acme/widget-sdk/issues/435 [#q-7174ad2918b2]\n",
+            "  - %% first note %%\n",
+            "  - %% second note %%\n",
+            "<!-- /agent:run -->\n",
+        );
+        fs::write(&doc, content).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            content,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let ack = |head: &str, response| {
+            let guard = crate::queue_edit_owner::QueueEditGuard::acquire(&doc).unwrap();
+            super::acknowledge_paused_free_text_queue_head_with_response_under_apply_guard(
+                &doc,
+                head,
+                None,
+                response,
+                &TEST_EFFECTS,
+                &guard,
+            )
+        };
+        let pr = "https://github.com/acme/widget-sdk/pull/403";
+        let issue = "https://github.com/acme/widget-sdk/issues/435 [#q-7174ad2918b2]";
+        for (head, response) in [
+            (pr, super::AckTextResponse::Required),
+            (pr, super::AckTextResponse::AsAttached),
+        ] {
+            assert!(
+                ack(head, response).is_err(),
+                "{response:?} must not strike a note row"
+            );
+            assert_eq!(fs::read_to_string(&doc).unwrap(), content, "no change");
+        }
+
+        ack(pr, super::AckTextResponse::Summary("MERGED 11-24 (#403)."))
+            .unwrap()
+            .expect("the PR note heading is acknowledged");
+        ack(
+            issue,
+            super::AckTextResponse::Summary("CLOSED 11-24: fixed on main."),
+        )
+        .unwrap()
+        .expect("the issue heading with a generated id is acknowledged");
+        let updated = fs::read_to_string(&doc).unwrap();
+        let queue = &updated[updated.find("<!-- agent:run").unwrap()..];
+        assert!(
+            queue.contains(concat!(
+                "- ### ~~https://github.com/acme/widget-sdk/pull/403~~\n",
+                "  - %% ci(shadow): one-command setup %%\n",
+                "  - **Response [#r-",
+            )),
+            "{queue}"
+        );
+        assert!(
+            queue.contains("    - **Summary:** MERGED 11-24 (#403).\n"),
+            "{queue}"
+        );
+        assert!(
+            queue.contains(concat!(
+                "- ### https://github.com/acme/widget-sdk/pull/404\n",
+                "  - %% docs %%\n",
+            )),
+            "the sibling heading stays live: {queue}"
+        );
+        assert!(
+            queue.contains(concat!(
+                "- ### ~~https://github.com/acme/widget-sdk/issues/435 [#q-7174ad2918b2]~~\n",
+                "  - %% first note %%\n",
+                "  - %% second note %%\n",
+                "  - **Response [#r-",
+            )),
+            "{queue}"
+        );
+        assert!(
+            queue.contains("    - **Summary:** CLOSED 11-24: fixed on main.\n"),
+            "{queue}"
+        );
+        let line = updated
+            .lines()
+            .position(|line| line.contains("~~https://github.com/acme/widget-sdk/pull/403~~"))
+            .unwrap()
+            + 1;
+        let status = agent_doc_queue::tree_status::tree_status(&updated, line).unwrap();
+        assert_eq!(status.deletable.len(), 1, "{status:#?}");
+        assert!(status.agent.is_empty(), "{status:#?}");
+    }
+
     #[test]
     fn exact_text_ack_strike_carries_a_summary_response_or_is_refused() {
         let tmp = TempDir::new().unwrap();

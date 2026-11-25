@@ -589,7 +589,17 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      (`#treetopglyph`): `🗑️` on the top-most row of each subtree you can
      delete whole (inside its strike, `~~🗑️ …~~`), and `🔒` on the top-level
      row of a kept tree that has such a subtree, so cut at the `🗑️` rows.
-     They are binary-owned projection; do not type or remove them. When no row in a tree holds work
+     They are binary-owned projection; do not type or remove them.
+     Do the cut yourself instead of handing it to the operator
+     (`#inerttreestrike`): `agent-doc queue delete-tree <FILE> --line <N>
+     --apply` deletes exactly the subtrees `queue tree-status --line <N>`
+     lists as Deletable. A row the queue never runs because its only children
+     are `%% … %%` notes (a PR or issue URL heading) closes with
+     `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<MERGED|CLOSED|MOOT: evidence>'`,
+     and an extra copy of a `do [#id]` head in another queue goes with
+     `agent-doc queue prune-duplicates <FILE> --apply` (add
+     `--keep-copy <id>@<queue>` when it reports one unresolved); neither
+     closes the backlog item. When no row in a tree holds work
      (rows struck, delegated to a top-level follow-up row, or cleanup asks
      self-repair already did), agent-doc strikes the whole tree from the root
      down on the next sync; it never strikes an open operator row or a row a

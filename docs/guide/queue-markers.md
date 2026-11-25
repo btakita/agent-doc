@@ -470,6 +470,33 @@ itself is not a reason to keep the tree open, and it never becomes a prompt.
 the row on line N; editors read it through the `agent_doc_queue_tree_status_json`
 FFI export.
 
+A pull-request or issue URL heading whose only children are `%% … %%` notes is
+a navigation heading. The queue never claims or runs it, so tree status does
+not list it as agent work.
+
+### Cleaning up a finished tree
+
+Three commands close or remove rows that an audit found done or moot. Each one
+is a dry run unless it says otherwise, and each writes through the editor, like
+every other queue command:
+
+- `agent-doc queue delete-tree FILE --line N [--apply]` deletes the subtrees
+  that `tree-status --line N` lists as **Deletable**. A line on no row selects
+  the whole queue. The binary works out the deletable subtrees again when it
+  writes, so a row that is open, waiting on you, owed by the agent, or needing
+  review is never deleted.
+- `agent-doc queue consume FILE --ack-text '<row text>' --summary '<evidence>'`
+  strikes one row and attaches the summary as its response. This includes a
+  note-only URL heading, with or without a generated `[#q-…]` id, for example
+  `--ack-text 'https://github.com/acme/sdk/pull/403' --summary 'MERGED
+  2026-11-24.'`. Without `--summary` the binary refuses to strike a note row.
+- `agent-doc queue prune-duplicates FILE [--apply] [--keep-copy ID@QUEUE]`
+  also removes extra copies of one `do [#id]` head that sit in different
+  queues. It keeps the copy that holds the worker claim. Otherwise it keeps
+  the copy in the queue the backlog's `queue=` attribute names, or the queue
+  `--keep-copy` names. The backlog item stays open, and a copy with child rows
+  stays.
+
 ## Custom palettes
 
 Each prefix can be overridden in `[queue_icons]` in

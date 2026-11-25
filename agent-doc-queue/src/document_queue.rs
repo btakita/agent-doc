@@ -5195,8 +5195,8 @@ pub fn closed_subtree_parent(entries: &[QueueEntry], idx: usize) -> bool {
 /// no children, keeps the ordinary leaf and group rules. Production admission
 /// and strike use [`comment_only_pull_request_at`]; claimability of every
 /// comment-only row, including this one, is [`entry_has_only_comment_children`].
-#[cfg(test)]
-fn entry_is_comment_only_pull_request(entries: &[QueueEntry], idx: usize) -> bool {
+/// Tree status reads it as a navigation heading, not queued work.
+pub fn entry_is_comment_only_pull_request(entries: &[QueueEntry], idx: usize) -> bool {
     let Some(text) = entries.get(idx).and_then(queue_entry_prompt_text) else {
         return false;
     };

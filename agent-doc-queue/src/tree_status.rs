@@ -572,6 +572,18 @@ pub fn tree_status(document: &str, line: usize) -> Result<TreeStatus> {
             covered.push((node.line, node.end_line));
             continue;
         }
+        // `#inerttreestrike`: a pull-request URL whose only children are list
+        // comments is a navigation heading (`#prurlcommentnote`). The queue
+        // never claims or runs it, so it is not agent work. When the pull
+        // request is merged or closed, `queue consume --ack-text <url>
+        // --summary <evidence>` strikes it.
+        if matches!(
+            node.state,
+            QueueNodeState::Open | QueueNodeState::Pending | QueueNodeState::Seen
+        ) && document_queue::entry_is_comment_only_pull_request(&view.entries, index)
+        {
+            continue;
+        }
         let closable = if node.state == QueueNodeState::Done {
             closability(&document_lines, node, &scope)
         } else {
@@ -707,6 +719,140 @@ pub fn render_text(status: &TreeStatus) -> String {
         out.push_str(
             "Add a `status? deep` child line under the row to queue one agent turn for the rows that need review.\n",
         );
+    }
+    out
+}
+
+/// The write half of a tree-status query (`#inerttreestrike`): deleting the
+/// subtrees [`tree_status`] lists as Deletable.
+///
+/// The ranges are exactly the answer's `deletable` rows for the subtree at
+/// `line`, recomputed from `document`, so a row the binary does not prove
+/// deletable (open, waiting on the operator, owed by the agent, or needing
+/// review) is never removed. [`Self::document`] is the successor; the caller
+/// writes it only when asked to apply.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct DeletableTreePlan {
+    /// The queue component's `id` attribute, or its marker name.
+    pub queue: String,
+    /// 1-based first line of the queried subtree.
+    pub line: usize,
+    /// 1-based last line of the queried subtree (inclusive).
+    pub end_line: usize,
+    /// The root row's text, or `queue <name>` for the whole queue.
+    pub text: String,
+    /// The subtrees the plan deletes, in document order.
+    pub removed: Vec<TreeStatusRow>,
+    /// How many document lines the plan deletes.
+    pub removed_lines: usize,
+    /// The document with every listed subtree removed.
+    #[serde(skip)]
+    pub document: String,
+}
+
+/// Plan deleting every subtree the tree-status answer for `line` lists as
+/// Deletable (`agent-doc queue delete-tree`).
+pub fn plan_delete_deletable(document: &str, line: usize) -> Result<DeletableTreePlan> {
+    let status = tree_status(document, line)?;
+    let views = component_views(document)?;
+    let view = views
+        .iter()
+        .find(|view| view.contains_line(status.line))
+        .ok_or_else(|| anyhow!("line {line} is not inside a queue component"))?;
+    let mut ranges = status
+        .deletable
+        .iter()
+        .map(|row| (row.line, row.end_line.max(row.line)))
+        .collect::<Vec<_>>();
+    for (start, end) in &ranges {
+        // A Deletable row is a queue row: its subtree never reaches the
+        // component markers. Anything else is a classification bug, and the
+        // write must not guess.
+        if *start <= view.open_line || *end >= view.close_line {
+            return Err(anyhow!(
+                "deletable range L{start}–L{end} is not inside queue {} (L{}–L{}); nothing was deleted",
+                view.queue,
+                view.open_line,
+                view.close_line
+            ));
+        }
+    }
+    ranges.sort_unstable();
+    let mut merged: Vec<(usize, usize)> = Vec::new();
+    for (start, end) in ranges {
+        match merged.last_mut() {
+            Some((_, last_end)) if start <= *last_end + 1 => *last_end = (*last_end).max(end),
+            _ => merged.push((start, end)),
+        }
+    }
+    let mut successor = String::with_capacity(document.len());
+    let mut removed_lines = 0usize;
+    for (index, segment) in document.split_inclusive('\n').enumerate() {
+        let number = index + 1;
+        if merged
+            .iter()
+            .any(|(start, end)| *start <= number && number <= *end)
+        {
+            removed_lines += 1;
+            continue;
+        }
+        successor.push_str(segment);
+    }
+    // The successor must keep every component well formed.
+    element::parse(&successor)
+        .map_err(|err| anyhow!("deleting the deletable subtrees breaks the document: {err}"))?;
+    Ok(DeletableTreePlan {
+        queue: status.queue,
+        line: status.line,
+        end_line: status.end_line,
+        text: status.text,
+        removed: status.deletable,
+        removed_lines,
+        document: successor,
+    })
+}
+
+/// The text report `agent-doc queue delete-tree` prints.
+pub fn render_delete_report(file: &str, plan: &DeletableTreePlan, applied: bool) -> String {
+    let scope = format!(
+        "{} {}",
+        line_range(&TreeStatusRow {
+            line: plan.line,
+            end_line: plan.end_line,
+            state: QueueNodeState::Open,
+            glyph: String::new(),
+            text: String::new(),
+            id: None,
+            action: String::new(),
+        }),
+        plan.text
+    );
+    if plan.removed.is_empty() {
+        return format!(
+            "{file}: nothing deletable under {scope}; no change. `agent-doc queue tree-status {file} --line {}` shows what is still open.\n",
+            plan.line
+        );
+    }
+    let mut out = if applied {
+        format!(
+            "{file}: deleted {} deletable subtree(s) ({} line(s)) under {scope}.\n",
+            plan.removed.len(),
+            plan.removed_lines
+        )
+    } else {
+        format!(
+            "{file}: dry run, {} deletable subtree(s) ({} line(s)) under {scope} would be deleted. Pass --apply to write. Nothing was changed.\n",
+            plan.removed.len(),
+            plan.removed_lines
+        )
+    };
+    for row in &plan.removed {
+        out.push_str(&format!(
+            "  {:>9} {} {}\n",
+            line_range(row),
+            row.glyph,
+            row.text
+        ));
     }
     out
 }

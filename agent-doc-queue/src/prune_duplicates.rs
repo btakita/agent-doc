@@ -29,6 +29,12 @@ pub enum DuplicateDropReason {
     /// A copy of a row the operator named with `--keep-row` (`#dupwrite2`):
     /// the same work text, or a strict prefix of it, at the same place.
     KeptRowCopy,
+    /// `#inerttreestrike`: a top-level id-backed head (`do [#id]`) whose id
+    /// also heads a row in another queue, outside the canonical queue: the
+    /// one holding the claim, the one `--keep-copy` names, or the one the
+    /// backlog item's `queue=` attribute routes it to. The backlog item stays
+    /// open.
+    CrossQueueCopy,
 }
 
 /// One live row the repair removes. The keeper stays byte for byte.
@@ -42,6 +48,31 @@ pub struct DuplicateDrop {
     pub kept_work_text: String,
     /// The keeper carries a `[#owner#generation]` (or legacy `⟦…⟧`) marker.
     pub kept_has_worker_marker: bool,
+    /// [`DuplicateDropReason::CrossQueueCopy`]: the queue that keeps the
+    /// canonical copy, and why it is canonical.
+    pub kept_queue: Option<(String, CanonicalQueueReason)>,
+}
+
+/// Why a queue holds the canonical copy of a cross-queue id-backed head
+/// (`#inerttreestrike`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CanonicalQueueReason {
+    /// Its copy carries the live worker claim.
+    Claim,
+    /// The operator named it with `--keep-copy <id>@<queue>`.
+    KeepCopy,
+    /// The backlog item's `queue=` attribute routes the id to it.
+    BacklogRoute,
+}
+
+impl CanonicalQueueReason {
+    fn describe(self) -> &'static str {
+        match self {
+            Self::Claim => "it holds the worker claim",
+            Self::KeepCopy => "named by --keep-copy",
+            Self::BacklogRoute => "the backlog item's queue= attribute routes the id there",
+        }
+    }
 }
 
 /// Dry-run plan. [`Self::document`] is the successor; the caller writes it
@@ -50,6 +81,10 @@ pub struct DuplicateDrop {
 pub struct DuplicatePrunePlan {
     pub drops: Vec<DuplicateDrop>,
     pub document: String,
+    /// `#inerttreestrike`: cross-queue id-backed copies the binary could not
+    /// resolve to one canonical queue, each with the selector that would.
+    /// Nothing is removed for them.
+    pub unresolved: Vec<String>,
 }
 
 struct LiveRow {
@@ -91,6 +126,18 @@ impl DuplicateDrop {
                 preview(&self.work_text),
                 preview(&self.kept_work_text)
             ),
+            DuplicateDropReason::CrossQueueCopy => {
+                let (kept_queue, why) = self
+                    .kept_queue
+                    .as_ref()
+                    .map(|(queue, why)| (queue.as_str(), why.describe()))
+                    .unwrap_or(("?", "canonical"));
+                format!(
+                    "  queue {}: drop cross-queue copy {}; keep the copy in queue {kept_queue} ({why}); the backlog item stays open",
+                    self.queue_id,
+                    preview(&self.work_text),
+                )
+            }
             DuplicateDropReason::KeptRowCopy => format!(
                 "  queue {}: drop copy {}; keep the named row {}",
                 self.queue_id,
@@ -104,11 +151,16 @@ impl DuplicateDrop {
 impl DuplicatePrunePlan {
     /// Operator report. `applied` is false for the default dry run.
     pub fn report(&self, file: &str, applied: bool) -> String {
-        if self.drops.is_empty() {
+        if self.drops.is_empty() && self.unresolved.is_empty() {
             return format!("{file}: no duplicate live queue rows.\n");
         }
         let mut out = String::new();
-        if applied {
+        if self.drops.is_empty() {
+            out.push_str(&format!(
+                "{file}: no duplicate live queue rows removed; {} cross-queue copy set(s) need a selector. Nothing was changed.\n",
+                self.unresolved.len()
+            ));
+        } else if applied {
             out.push_str(&format!(
                 "{file}: removed {} duplicate live queue row(s). Claims were not released.\n",
                 self.drops.len()
@@ -123,6 +175,9 @@ impl DuplicatePrunePlan {
             out.push_str(&drop.detail());
             out.push('\n');
         }
+        for note in &self.unresolved {
+            out.push_str(&format!("  unresolved: {note}\n"));
+        }
         out
     }
 }
@@ -131,7 +186,7 @@ impl DuplicatePrunePlan {
 /// work text in two queues is not a duplicate. An unparsable document is an
 /// error and [`DuplicatePrunePlan::document`] is not a partial edit.
 pub fn plan(document: &str) -> Result<DuplicatePrunePlan> {
-    plan_selected(document, None, &[])
+    plan_selected(document, None, &[], &[])
 }
 
 /// Plan exact duplicate collapse plus one explicitly selected semantic prefix.
@@ -140,7 +195,7 @@ pub fn plan(document: &str) -> Result<DuplicatePrunePlan> {
 /// has identified as truncated. Prefix relationships on every other line fail
 /// closed and remain byte-for-byte intact.
 pub fn plan_with_truncated_prefix_line(document: &str, line: usize) -> Result<DuplicatePrunePlan> {
-    plan_selected(document, Some(line), &[])
+    plan_selected(document, Some(line), &[], &[])
 }
 
 /// `#dupwrite2`: [`plan`] plus every live copy of each row the operator names
@@ -153,7 +208,7 @@ pub fn plan_with_truncated_prefix_line(document: &str, line: usize) -> Result<Du
 /// struck: a row a worker answered and struck is still the canonical copy
 /// (`#dupwrite3`).
 pub fn plan_keeping(document: &str, keep_rows: &[String]) -> Result<DuplicatePrunePlan> {
-    plan_selected(document, None, keep_rows)
+    plan_selected(document, None, keep_rows, &[])
 }
 
 /// Both explicit selectors at once: `--truncated-prefix-line` and
@@ -164,7 +219,18 @@ pub fn plan_selection(
     truncated_prefix_line: Option<usize>,
     keep_rows: &[String],
 ) -> Result<DuplicatePrunePlan> {
-    plan_selected(document, truncated_prefix_line, keep_rows)
+    plan_selected(document, truncated_prefix_line, keep_rows, &[])
+}
+
+/// [`plan_selection`] plus `--keep-copy <id>@<queue>` selectors for
+/// cross-queue id-backed copies (`#inerttreestrike`).
+pub fn plan_selection_with_copies(
+    document: &str,
+    truncated_prefix_line: Option<usize>,
+    keep_rows: &[String],
+    keep_copies: &[String],
+) -> Result<DuplicatePrunePlan> {
+    plan_selected(document, truncated_prefix_line, keep_rows, keep_copies)
 }
 
 fn normalize_keep_id(id: &str) -> String {
@@ -179,7 +245,12 @@ fn plan_selected(
     document: &str,
     truncated_prefix_line: Option<usize>,
     keep_rows: &[String],
+    keep_copies: &[String],
 ) -> Result<DuplicatePrunePlan> {
+    let keep_copies = keep_copies
+        .iter()
+        .map(|selector| parse_keep_copy(selector))
+        .collect::<Result<Vec<_>>>()?;
     let keep: Vec<String> = keep_rows.iter().map(|id| normalize_keep_id(id)).collect();
     let mut kept_found: Vec<usize> = vec![0; keep.len()];
     let components = agent_doc_element::element::parse(document)?;
@@ -227,10 +298,326 @@ fn plan_selected(
     for (start, end, new_body) in replacements.into_iter().rev() {
         rewritten.replace_range(start..end, &new_body);
     }
+    // Copies within one queue are collapsed above; copies of one id-backed
+    // head across queues run on that result (`#inerttreestrike`).
+    let cross = plan_cross_queue(&rewritten, &keep_copies)?;
+    drops.extend(cross.drops);
     Ok(DuplicatePrunePlan {
         drops,
-        document: rewritten,
+        document: cross.document,
+        unresolved: cross.unresolved,
     })
+}
+
+/// `--keep-copy <id>@<queue>`, normalized to `(id, queue)`.
+fn parse_keep_copy(selector: &str) -> Result<(String, String)> {
+    let (id, queue) = selector.trim().rsplit_once('@').ok_or_else(|| {
+        anyhow::anyhow!(
+            "--keep-copy {selector:?}: expected <id>@<queue-id>, for example devflowcutover@main"
+        )
+    })?;
+    let id = normalize_keep_id(id);
+    let queue = queue.trim().to_string();
+    anyhow::ensure!(
+        !id.is_empty() && !queue.is_empty(),
+        "--keep-copy {selector:?}: expected <id>@<queue-id>, for example devflowcutover@main"
+    );
+    Ok((id, queue))
+}
+
+struct CrossQueuePlan {
+    drops: Vec<DuplicateDrop>,
+    unresolved: Vec<String>,
+    document: String,
+}
+
+/// One top-level id-backed head in one queue.
+struct IdCopy {
+    queue_id: String,
+    /// Byte range in the document: the row plus its binary-owned duplicate
+    /// diagnostic line, never another row.
+    range: Range<usize>,
+    work: String,
+    claimed: bool,
+    /// The row has child rows (follow-ups, responses, steering): its copy is
+    /// not a bare duplicate, so it is never removed.
+    has_children: bool,
+    line: usize,
+}
+
+/// The tracked id a top-level row heads (`do [#id]`, `[#id]`), when it is an
+/// authored id rather than a generated `[#q-…]`.
+fn head_id(text: &str) -> Option<String> {
+    match agent_doc_element_queue::queue_head_identity(text) {
+        agent_doc_element_queue::QueueItemIdentity::Id(id) if !id.starts_with("q-") => {
+            Some(id.to_ascii_lowercase())
+        }
+        _ => None,
+    }
+}
+
+/// `#inerttreestrike`: drop copies of one id-backed head that live in more
+/// than one queue, keeping the canonical queue's copy. Claim fencing already
+/// admits only one occurrence (`Duplicate #id · N of M`), so the extra copies
+/// are never runnable; removing them leaves the backlog item open.
+fn plan_cross_queue(document: &str, keep_copies: &[(String, String)]) -> Result<CrossQueuePlan> {
+    let components = agent_doc_element::element::parse(document)?;
+    let queue_ids = components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .enumerate()
+        .map(|(ordinal, component)| {
+            component
+                .attrs
+                .get("id")
+                .map(|id| id.trim())
+                .filter(|id| !id.is_empty())
+                .map(str::to_string)
+                .unwrap_or_else(|| format!("queue-{}", ordinal + 1))
+        })
+        .collect::<Vec<_>>();
+    for (id, queue) in keep_copies {
+        anyhow::ensure!(
+            queue_ids.iter().any(|known| known == queue),
+            "--keep-copy {id}@{queue}: this document has no queue {queue:?} (queues: {})",
+            queue_ids.join(", ")
+        );
+    }
+    let mut families: Vec<(String, Vec<IdCopy>)> = Vec::new();
+    for (component, queue_id) in components
+        .iter()
+        .filter(|component| component.name == "queue")
+        .zip(&queue_ids)
+    {
+        let body = component.content(document);
+        let spans = parse_spans(body)?;
+        for row in live_rows(document, component.open_end, &spans) {
+            if row.parent_span.is_some() {
+                continue;
+            }
+            let QueueEntry::Prompt(prompt) = &spans[row.span].0 else {
+                continue;
+            };
+            let Some(id) = head_id(&prompt.text) else {
+                continue;
+            };
+            let start = component.open_end + row.range.start;
+            let mut end = component.open_end + row.range.end;
+            // The `> **Duplicate #id · N of M:** … ▫️` line is a binary
+            // projection of this very duplication; it goes with the copy.
+            // A nested sub-prompt may parse into the head's own text
+            // (`#nestedsubprompts`), so a second non-diagnostic line counts
+            // as a child too.
+            let has_children = has_nested_children(&spans, row.span)
+                || prompt.text.lines().skip(1).any(|line| {
+                    !line.trim().is_empty()
+                        && !crate::prompt_identity::is_duplicate_directive_diagnostic_line(line)
+                });
+            while let Some(line) = document[end..].split_inclusive('\n').next() {
+                if line.is_empty()
+                    || !crate::prompt_identity::is_duplicate_directive_diagnostic_line(line)
+                {
+                    break;
+                }
+                end += line.len();
+            }
+            let copy = IdCopy {
+                queue_id: queue_id.clone(),
+                range: start..end,
+                work: row.work.clone(),
+                claimed: row.claim_score >= 2,
+                has_children,
+                line: row.line,
+            };
+            match families.iter_mut().find(|(known, _)| *known == id) {
+                Some((_, copies)) => copies.push(copy),
+                None => families.push((id, vec![copy])),
+            }
+        }
+    }
+    let backlog_targets =
+        crate::backlog_sync::explicit_backlog_queue_targets(&components, document)?;
+    let mut drops = Vec::new();
+    let mut unresolved = Vec::new();
+    let mut ranges: Vec<Range<usize>> = Vec::new();
+    let mut resolved_ids: Vec<String> = Vec::new();
+    for (id, copies) in &families {
+        let mut queues = copies
+            .iter()
+            .map(|copy| copy.queue_id.as_str())
+            .collect::<Vec<_>>();
+        queues.dedup();
+        let distinct = queues
+            .iter()
+            .collect::<std::collections::BTreeSet<_>>()
+            .len();
+        if distinct < 2 {
+            continue;
+        }
+        let locations = || {
+            copies
+                .iter()
+                .map(|copy| format!("{} L{}", copy.queue_id, copy.line))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        let claimed = copies
+            .iter()
+            .filter(|copy| copy.claimed)
+            .map(|copy| copy.queue_id.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let named = keep_copies
+            .iter()
+            .filter(|(keep_id, _)| keep_id == id)
+            .map(|(_, queue)| queue.as_str())
+            .collect::<std::collections::BTreeSet<_>>();
+        let canonical = if claimed.len() > 1 {
+            unresolved.push(format!(
+                "#{id} is claimed in more than one queue ({}); recover the claims first",
+                locations()
+            ));
+            continue;
+        } else if let Some(queue) = claimed.iter().next() {
+            if named.iter().any(|named| named != queue) {
+                unresolved.push(format!(
+                    "#{id}: --keep-copy names another queue than the one holding the claim ({queue}); the claimed copy stays canonical ({})",
+                    locations()
+                ));
+                continue;
+            }
+            (queue.to_string(), CanonicalQueueReason::Claim)
+        } else if named.len() > 1 {
+            unresolved.push(format!(
+                "#{id}: --keep-copy names more than one queue ({})",
+                named.iter().copied().collect::<Vec<_>>().join(", ")
+            ));
+            continue;
+        } else if let Some(queue) = named.iter().next() {
+            (queue.to_string(), CanonicalQueueReason::KeepCopy)
+        } else {
+            match backlog_targets.get(id) {
+                Some(queue) if queues.contains(&queue.as_str()) => {
+                    (queue.clone(), CanonicalQueueReason::BacklogRoute)
+                }
+                Some(queue) => {
+                    unresolved.push(format!(
+                        "#{id} heads rows in {} but none in queue {queue}, where its backlog item routes it; keep one with --keep-copy {id}@<queue>",
+                        locations()
+                    ));
+                    continue;
+                }
+                None => {
+                    unresolved.push(format!(
+                        "#{id} heads rows in {} and no claim or backlog queue= route names the canonical one; keep one with --keep-copy {id}@<queue>",
+                        locations()
+                    ));
+                    continue;
+                }
+            }
+        };
+        let (canonical_queue, why) = canonical;
+        if !queues.contains(&canonical_queue.as_str()) {
+            unresolved.push(format!(
+                "#{id}: --keep-copy {id}@{canonical_queue} names a queue with no copy ({})",
+                locations()
+            ));
+            continue;
+        }
+        let Some(kept) = copies
+            .iter()
+            .find(|copy| copy.queue_id == canonical_queue && copy.claimed)
+            .or_else(|| copies.iter().find(|copy| copy.queue_id == canonical_queue))
+        else {
+            continue;
+        };
+        let mut dropped_any = false;
+        for copy in copies
+            .iter()
+            .filter(|copy| copy.queue_id != canonical_queue)
+        {
+            if copy.has_children {
+                unresolved.push(format!(
+                    "#{id}: the copy in {} L{} has child rows, so it is not a bare duplicate; it stays",
+                    copy.queue_id, copy.line
+                ));
+                continue;
+            }
+            ranges.push(copy.range.clone());
+            dropped_any = true;
+            drops.push(DuplicateDrop {
+                queue_id: copy.queue_id.clone(),
+                reason: DuplicateDropReason::CrossQueueCopy,
+                work_text: copy.work.clone(),
+                kept_work_text: kept.work.clone(),
+                kept_has_worker_marker: kept.claimed,
+                kept_queue: Some((canonical_queue.clone(), why)),
+            });
+        }
+        if dropped_any {
+            resolved_ids.push(id.clone());
+        }
+    }
+    ranges.sort_by_key(|range| range.start);
+    let mut successor = excise(document, &ranges);
+    if !resolved_ids.is_empty() {
+        successor = drop_resolved_duplicate_diagnostics(&successor, &resolved_ids)?;
+    }
+    Ok(CrossQueuePlan {
+        drops,
+        unresolved,
+        document: successor,
+    })
+}
+
+/// After a cross-queue prune, the `> **Duplicate #id · N of M:** … ▫️` line on
+/// a kept copy is stale when it is now the id's only head. It is a binary
+/// projection, so the plan removes it in the same write instead of leaving it
+/// for the next maintenance pass.
+fn drop_resolved_duplicate_diagnostics(document: &str, ids: &[String]) -> Result<String> {
+    let remaining = |id: &str| -> Result<usize> {
+        let components = agent_doc_element::element::parse(document)?;
+        let mut count = 0usize;
+        for component in components
+            .iter()
+            .filter(|component| component.name == "queue")
+        {
+            let body = component.content(document);
+            let spans = parse_spans(body)?;
+            count += live_rows(document, component.open_end, &spans)
+                .iter()
+                .filter(|row| row.parent_span.is_none())
+                .filter(|row| match &spans[row.span].0 {
+                    QueueEntry::Prompt(prompt) => head_id(&prompt.text).as_deref() == Some(id),
+                    _ => false,
+                })
+                .count();
+        }
+        Ok(count)
+    };
+    let mut single = Vec::new();
+    for id in ids {
+        if remaining(id)? == 1 {
+            single.push(format!("> **Duplicate #{id} · "));
+        }
+    }
+    if single.is_empty() {
+        return Ok(document.to_string());
+    }
+    let mut out = String::with_capacity(document.len());
+    for line in document.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if crate::prompt_identity::is_duplicate_directive_diagnostic_line(trimmed)
+            && single.iter().any(|prefix| {
+                trimmed
+                    .to_ascii_lowercase()
+                    .starts_with(&prefix.to_ascii_lowercase())
+            })
+        {
+            continue;
+        }
+        out.push_str(line);
+    }
+    Ok(out)
 }
 
 /// The operator's explicit selectors.
@@ -471,6 +858,7 @@ fn drop_of(
         work_text: row.work.clone(),
         kept_work_text: kept.work.clone(),
         kept_has_worker_marker: kept.claim_score >= 2,
+        kept_queue: None,
     }
 }
 
@@ -1396,5 +1784,174 @@ mod tests {
         );
         let error = plan_keeping(&twice, &["q-0000000000c1".to_string()]).unwrap_err();
         assert!(error.to_string().contains("2 queue rows"), "{error}");
+    }
+
+    // ---- `#inerttreestrike` -------------------------------------------------
+
+    /// The live sdk-dev shape, anonymized: `do [#devflow]` heads a row in the
+    /// PR queue and in Main, the backlog routes it to Main, and claim fencing
+    /// already annotates both copies. `do [#clidocs]` heads rows in scratch and
+    /// the PR queue but none in Main, where its backlog item routes it.
+    fn cross_queue_session() -> String {
+        concat!(
+            "## scratch <!-- agent:run id=\"scratch\" subagents -->\n",
+            "- ### ⛔ ⟦blocked by cliprereqs⟧ do [#clidocs]\n",
+            "  > **Duplicate #clidocs · 1 of 2:** no claim is held; claim fencing admits only one occurrence. ▫️\n",
+            "<!-- /agent:run -->\n\n",
+            "## prs <!-- agent:run id=\"prs\" subagents -->\n",
+            "- ### https://github.com/acme/widget-sdk/pull/403\n",
+            "  - %% ci(shadow) %%\n",
+            "- ### ⛔ ⟦blocked by sdkrelease⟧ do [#devflow]\n",
+            "  > **Duplicate #devflow · 1 of 2:** no claim is held; claim fencing admits only one occurrence. ▫️\n",
+            "- ### ⛔ ⟦blocked by cliprereqs⟧ do [#clidocs]\n",
+            "  > **Duplicate #clidocs · 2 of 2:** no claim is held; claim fencing admits only one occurrence. ▫️\n",
+            "<!-- /agent:run -->\n\n",
+            "## Main <!-- agent:run id=\"main\" subagents -->\n",
+            "- 🙋 [#devflow] follow-up: Dillon: one-time admin setup. [operator-verify] [#q-bd238c96963c]\n",
+            "- ### ⛔ ⟦blocked by sdkrelease⟧ do [#devflow]\n",
+            "  > **Duplicate #devflow · 2 of 2:** no claim is held; claim fencing admits only one occurrence. ▫️\n",
+            "<!-- /agent:run -->\n\n",
+            "## Backlog <!-- agent:backlog queue=\"main\" -->\n",
+            "- [ ] [#devflow] Move releases to the dev-centric flow.\n",
+            "- [ ] [#clidocs] Update the CLI docs page.\n",
+            "<!-- /agent:backlog -->\n",
+        )
+        .to_string()
+    }
+
+    /// The backlog's `queue="main"` names Main as canonical: the PR-queue copy
+    /// and its duplicate diagnostic go, Main's copy stays and loses its now
+    /// stale diagnostic, and the backlog item is untouched. `#clidocs` has no
+    /// Main copy, so nothing is removed for it and the report names the
+    /// `--keep-copy` selector.
+    #[test]
+    fn inerttreestrike_cross_queue_copy_follows_the_backlog_route() {
+        let source = cross_queue_session();
+        let plan = plan(&source).unwrap();
+        assert_eq!(plan.drops.len(), 1, "{plan:#?}");
+        let drop = &plan.drops[0];
+        assert_eq!(drop.reason, DuplicateDropReason::CrossQueueCopy);
+        assert_eq!(drop.queue_id, "prs");
+        assert_eq!(
+            drop.kept_queue,
+            Some(("main".to_string(), CanonicalQueueReason::BacklogRoute))
+        );
+        assert!(
+            plan.document.contains(concat!(
+                "  - %% ci(shadow) %%\n",
+                "- ### ⛔ ⟦blocked by cliprereqs⟧ do [#clidocs]\n",
+            )),
+            "{}",
+            plan.document
+        );
+        assert!(
+            plan.document.contains(concat!(
+                "- ### ⛔ ⟦blocked by sdkrelease⟧ do [#devflow]\n",
+                "<!-- /agent:run -->\n\n## Backlog",
+            )),
+            "{}",
+            plan.document
+        );
+        assert!(
+            !plan.document.contains("Duplicate #devflow"),
+            "{}",
+            plan.document
+        );
+        assert!(plan.document.contains("Duplicate #clidocs · 1 of 2"));
+        assert!(plan.document.contains("- [ ] [#devflow] Move releases"));
+        assert_eq!(plan.unresolved.len(), 1, "{plan:#?}");
+        assert!(
+            plan.unresolved[0].contains("--keep-copy clidocs@<queue>"),
+            "{:?}",
+            plan.unresolved
+        );
+        let report = plan.report("session.md", false);
+        assert!(report.contains("drop cross-queue copy"), "{report}");
+        assert!(report.contains("the backlog item stays open"), "{report}");
+        assert!(report.contains("unresolved: #clidocs"), "{report}");
+    }
+
+    /// `--keep-copy <id>@<queue>` names the canonical copy when the backlog
+    /// route holds none; an unknown queue is refused before any plan.
+    #[test]
+    fn inerttreestrike_keep_copy_selects_the_canonical_queue() {
+        let source = cross_queue_session();
+        let plan =
+            plan_selection_with_copies(&source, None, &[], &["#clidocs@prs".to_string()]).unwrap();
+        assert_eq!(plan.drops.len(), 2, "{plan:#?}");
+        assert!(plan.unresolved.is_empty(), "{plan:#?}");
+        let clidocs = plan
+            .drops
+            .iter()
+            .find(|drop| drop.work_text.contains("#clidocs"))
+            .expect("clidocs copy dropped");
+        assert_eq!(clidocs.queue_id, "scratch");
+        assert_eq!(
+            clidocs.kept_queue,
+            Some(("prs".to_string(), CanonicalQueueReason::KeepCopy))
+        );
+        assert!(
+            plan.document.starts_with(
+                "## scratch <!-- agent:run id=\"scratch\" subagents -->\n<!-- /agent:run -->\n"
+            ),
+            "{}",
+            plan.document
+        );
+        assert!(
+            !plan.document.contains("> **Duplicate #"),
+            "{}",
+            plan.document
+        );
+        assert_eq!(plan.document.matches("do [#clidocs]").count(), 1);
+        assert_eq!(plan.document.matches("do [#devflow]").count(), 1);
+
+        let error =
+            plan_selection_with_copies(&source, None, &[], &["clidocs@nowhere".to_string()])
+                .unwrap_err();
+        assert!(
+            error.to_string().contains("no queue \"nowhere\""),
+            "{error}"
+        );
+        assert!(
+            plan_selection_with_copies(&source, None, &[], &["clidocs".to_string()]).is_err(),
+            "a selector without @queue is refused"
+        );
+    }
+
+    /// A copy holding the worker claim is canonical whatever the backlog
+    /// route says, and a copy with child rows is never removed.
+    #[test]
+    fn inerttreestrike_claimed_copy_wins_and_copies_with_children_stay() {
+        let source = concat!(
+            "<!-- agent:run id=\"prs\" subagents -->\n",
+            "- 🚧 [#subagent:devflow#2] do [#devflow]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:run id=\"main\" subagents -->\n",
+            "- do [#devflow]\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:run id=\"other\" subagents -->\n",
+            "- do [#devflow]\n",
+            "  - also check the installer\n",
+            "<!-- /agent:run -->\n",
+            "<!-- agent:backlog queue=\"main\" -->\n",
+            "- [ ] [#devflow] Move releases.\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        let plan = plan(source).unwrap();
+        assert_eq!(plan.drops.len(), 1, "{plan:#?}");
+        assert_eq!(plan.drops[0].queue_id, "main");
+        assert_eq!(
+            plan.drops[0].kept_queue,
+            Some(("prs".to_string(), CanonicalQueueReason::Claim))
+        );
+        assert!(plan.drops[0].kept_has_worker_marker);
+        assert!(plan.document.contains("  - also check the installer\n"));
+        assert!(
+            plan.unresolved
+                .iter()
+                .any(|note| note.contains("other") && note.contains("child rows")),
+            "{:?}",
+            plan.unresolved
+        );
     }
 }

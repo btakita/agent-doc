@@ -12,6 +12,7 @@ pub mod derivation_store;
 pub mod gc;
 pub mod layout;
 pub mod moot_decision;
+pub mod operator_verify_pr;
 pub mod premise_rederive;
 pub mod queue_maintenance_effect_cas;
 pub mod queue_maintenance_effect_phase;

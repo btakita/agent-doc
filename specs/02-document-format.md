@@ -1043,6 +1043,17 @@ action is finished or moot:
   the row keeps it unflagged. The action names the head's line for
   `queue tree-status --line`, and either the `--ack-text … --summary …`
   strike or, for an id-backed head, the item's closeout flag.
+  A live `🙋` `[operator-verify]` row that asks a person to approve,
+  re-approve, or merge one named pull request is not left on that signal.
+  Admission reconcile strikes it from the same cache (`#prverify`) without
+  rebuilding the decision graph: the watch set is only those named pull
+  requests, a terminal cache entry is not refreshed, and one pass makes at
+  most one batched `gh` call for the due subset. A bare `PR N` or
+  approve-shaped `#N` resolves inside the queue block (the row's URL, else
+  its parent pull-request heading, else the block's single repository).
+  Merged strikes the row done; closed without merging strikes it moot. An
+  open or unobserved pull request, a held or in-flight row, and a row that
+  only asks the operator to decide stay.
 - `stale_done_item` with `stale_kind` `upstream_unmerged`
   (`#operatorshouldnneed`, flag-only) names a dated `agent:done` entry
   (inline or in its archive file, archived in the last 14 days) every pull

@@ -41,12 +41,16 @@ use crate::extract::{Observations, QuestionSource, bracket_ids};
 use crate::{EdgeKind, Ledger, RevisionRelation, id_key, text};
 
 mod blockers;
+mod operator_verify_pr;
 mod registry;
 mod upstream;
 mod upstream_settled;
 mod upstream_watch;
 pub use blockers::{
     BLOCKS_CLAUSE, SETTLEMENT_MARKER_PREFIX, SETTLES_CLAUSE, merge_settlement_marker,
+};
+pub use operator_verify_pr::{
+    OperatorVerifyPrStrike, operator_verify_pr_watches, reevaluate_operator_verify_prs,
 };
 pub use registry::{
     REGISTRY_LOCATION, RegistryCitation, RegistryDecision, registry_revision_id,

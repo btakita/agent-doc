@@ -421,13 +421,13 @@ fn run_gh(program: &std::ffi::OsStr, args: &[&str]) -> Option<String> {
     reader.join().ok().flatten()
 }
 
-fn now_secs() -> u64 {
+pub(crate) fn now_secs() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs())
 }
 
-fn disabled() -> bool {
+pub(crate) fn disabled() -> bool {
     std::env::var(DISABLE_ENV).is_ok_and(|value| {
         matches!(
             value.trim().to_ascii_lowercase().as_str(),

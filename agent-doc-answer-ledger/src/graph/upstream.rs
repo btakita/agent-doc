@@ -392,7 +392,7 @@ fn citations(
     out
 }
 
-pub(super) fn explicit_upstreams(text: &str) -> Vec<GithubUpstream> {
+pub(crate) fn explicit_upstreams(text: &str) -> Vec<GithubUpstream> {
     let lower = text.to_ascii_lowercase();
     let mut out = Vec::new();
     let mut rest = lower.as_str();
@@ -442,7 +442,7 @@ fn parse_github_path(text: &str) -> Option<Parsed<'_>> {
     })
 }
 
-fn shorthand_refs(text: &str) -> Vec<(String, String, u64)> {
+pub(crate) fn shorthand_refs(text: &str) -> Vec<(String, String, u64)> {
     let lower = text.to_ascii_lowercase();
     let chars: Vec<char> = lower.chars().collect();
     let mut out = Vec::new();
@@ -499,7 +499,7 @@ fn owner_repo_before(chars: &[char], hash: usize) -> Option<(String, String)> {
     (owner != "github.com" && !owner.is_empty() && !repo.is_empty()).then_some((owner, repo))
 }
 
-fn bare_mentions(text: &str) -> Vec<(GithubUpstreamKind, u64)> {
+pub(crate) fn bare_mentions(text: &str) -> Vec<(GithubUpstreamKind, u64)> {
     let words = text::tokens(text);
     let mut out = Vec::new();
     for (index, word) in words.iter().enumerate() {

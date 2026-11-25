@@ -158,9 +158,24 @@
     signals (`stale_kind` `upstream_unmerged`,
     `done_trees_unmerged_by_upstream`) for a watched done entry every pull
     request of which closed without merging, naming `agent-doc backlog
-    <FILE> reopen <id>`. Nothing is struck or reopened automatically.
-    External blocker settlement (`#blockergraph`) reads the same terminal
-    states before its own lookup.
+    <FILE> reopen <id>`. Those three signals do not strike or reopen by
+    themselves. External blocker settlement (`#blockergraph`) reads the same
+    terminal states before its own lookup.
+  - **Automatic (`#prverify`):** a live `🙋` `[operator-verify]` row that asks
+    a person to approve, re-approve, or merge a named pull request is struck
+    from that cache without an agent turn and without a decision-graph build.
+    The watch set is only the pull requests those rows name. A bare `PR N` or
+    approve-shaped `#N` resolves inside the row's queue block (its own URL,
+    else its parent pull-request heading, else the block's single
+    repository); no other repository in the document is consulted, and a
+    sibling pull-request heading is not polled for this check. A cache entry
+    that is already merged or closed is not refreshed. One admission pass
+    makes at most one batched `gh` call, for the due subset only. Merged is
+    `auto-struck: done, <url> merged (#prverify)`. Closed without merging is
+    `auto-struck: moot, <url> closed (#prverify)`. An open, mixed, or
+    unobserved pull request leaves the row. A row a worker attempt holds, an
+    in-flight row, and a row that only asks the operator to decide are not
+    watched.
   - **Read (queue tree-status, `#operatorshouldnneed`):** `queue tree-status`, and the
     `status?` Status rows preflight writes, list each live queue URL heading
     (`### https://github.com/<o>/<r>/pull|issues/<n>`, optionally with a

@@ -123,14 +123,37 @@ fn a_fully_resolved_tree_says_complete_with_nothing_remaining() {
     assert_eq!(tail(&guidance), NOTHING_REMAINS_RESPONSE_GUIDANCE);
     assert!(remaining.is_empty());
     assert!(!synced.contains(REMAINING_LABEL));
-    // Only the two State and two Guidance values changed.
+    // The two State values, the two Guidance values, and each complete
+    // action item (`#actionitemidentity` strikes it in place).
     assert_eq!(synced.lines().count(), document.lines().count());
-    let differing = synced
+    let diffs: Vec<(String, String)> = synced
         .lines()
         .zip(document.lines())
-        .filter(|(a, b)| a != b)
-        .count();
-    assert_eq!(differing, 4);
+        .filter(|(after, before)| after != before)
+        .map(|(after, before)| (before.to_string(), after.to_string()))
+        .collect();
+    assert!(
+        diffs.iter().any(|(before, after)| {
+            before.contains("agent: check the agent-doc CI run")
+                && after.contains("~~agent: check the agent-doc CI run")
+        }),
+        "the covered agent item is struck: {diffs:?}"
+    );
+    assert!(
+        diffs.iter().any(|(before, after)| {
+            before.contains("operator: unlock the `login` keyring")
+                && after.contains("~~operator: unlock the `login` keyring")
+        }),
+        "the answered unlock item is struck: {diffs:?}"
+    );
+    assert!(
+        diffs.iter().any(|(before, after)| {
+            before.contains("operator: decide whether to keep")
+                && after.contains("~~operator: decide whether to keep")
+        }),
+        "the answered keep item is struck: {diffs:?}"
+    );
+    assert_eq!(diffs.len(), 7, "{diffs:?}");
 
     assert!(
         reconcile_response_remaining(&synced).is_none(),
@@ -424,7 +447,8 @@ fn struck_answers_under_remaining_entries_finish_the_tally() {
     // The answers and the first answer's response are kept verbatim.
     assert_eq!(synced.matches("        - ~~#justdoit~~\n").count(), 2);
     assert!(synced.contains("          - **Response [#r-4fa4a87420e5]**\n"));
-    // Nothing else changes: only the two glyphs, the State and the Guidance.
+    // The two glyphs, the State, the Guidance, and each complete agent
+    // action item (`#actionitemidentity`).
     let expected = ANSWERED
         .replace(
             &format!("- {OPERATOR_OPEN_GLYPH} {VSCODE_ENTRY} "),
@@ -438,6 +462,18 @@ fn struck_answers_under_remaining_entries_finish_the_tally() {
             "    - **State:** Waiting on operator input.\n    - **Guidance:** 🙋 3/5 done, 2 yours. Only you can finish this: 2 items for you, listed under Remaining. Strike or answer each row when done.\n",
             &format!("    - **State:** Complete.\n    - **Guidance:** ✅ 5/5 done. {NOTHING_REMAINS_ROW_GUIDANCE}\n"),
         );
+    let expected = [
+        "agent: find how a row's own claim label got written into its text (`running [#subagent:effectvoid#1] amend core-v1`).",
+        "agent: stop mid-turn steering from reading the agent's own echoes in `agent:exchange` as operator prompts.",
+        "agent: find and fix the exact step that doubled the struck `~~Should we integrate these?~~` line, with a regression test.",
+    ]
+    .into_iter()
+    .fold(expected, |document, item| {
+        document.replace(
+            &format!("      - {item} {RESPONSE_DETAIL_MARKER}\n"),
+            &format!("      - ~~{item}~~ {RESPONSE_DETAIL_MARKER}\n"),
+        )
+    });
     assert_eq!(synced, expected);
 
     assert_eq!(

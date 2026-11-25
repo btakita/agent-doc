@@ -253,9 +253,15 @@ fn a_finished_follow_up_quoted_with_its_lineage_and_answer_resolves_its_item() {
         updated.contains("      - **State:** Follow-up work remains.\n"),
         "{updated}"
     );
-    // The struck question row and the hold item are done; the answered
-    // choice is still being worked.
-    assert!(updated.contains("⏳ 2/3 done"), "{updated}");
+    // `#actionitemidentity`: the question's strike is stale. The nested
+    // question keeps the unstruck row a parent, so the row is no longer
+    // counted done. The hold item is done; the answered choice is still
+    // being worked.
+    assert!(updated.contains("⏳ 1/2 done"), "{updated}");
+    assert!(
+        !updated.contains(&format!("~~{QUESTION}~~")),
+        "the question identity stays in sync with its open action item:\n{updated}"
+    );
 }
 
 #[test]

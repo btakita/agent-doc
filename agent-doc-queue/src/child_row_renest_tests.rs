@@ -217,8 +217,13 @@ fn full_sync_renests_the_answer_and_its_guidance_follows_its_tree() {
         crate::queue_tree::render_text(&tree)
     );
     let synced = full(STRUCK_ANSWER);
-    let answer = line_starting(&synced, ANSWER_LEAD);
-    assert_eq!(indent(answer), 2);
+    // `#actionitemidentity` also strikes the finished tree's action item,
+    // and that line starts with the same lead. The operator's answer is the
+    // copy renested to one level under its row.
+    let answer = synced
+        .lines()
+        .find(|line| indent(line) == 2 && line.trim_start().starts_with(ANSWER_LEAD))
+        .expect("renested answer");
     let at = synced.find(answer).unwrap();
     assert!(
         synced[at..]

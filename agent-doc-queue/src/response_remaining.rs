@@ -81,6 +81,17 @@
 //! Nothing else resolves an item: prose that says "done" does not, and an
 //! operator-owned item is never covered by agent work.
 //!
+//! `#actionitemidentity`: the queue row's identity stays synced with that
+//! list. The identity is the list row without its strike wrapper — its
+//! indentation plus the work text, which includes the `[#q-…]` — the same
+//! split `strike_row_identity` uses for a row (`#dupstrike`). A resolved
+//! action item is struck in **Action items**. A struck row with an open
+//! action item that no follow-up row carries is a stale strike when a nested
+//! queue row keeps the unstruck row from becoming a leaf: the wrapper comes
+//! off and the identity text stays. A follow-up row keeps its own strike
+//! (`#followupmovedstate`). A row with no action items is left alone, and so
+//! is a leaf whose unstrike would dispatch it again.
+//!
 //! # Answers under an entry
 //!
 //! `#answeredentry`: the operator may answer a Remaining entry by writing a
@@ -108,7 +119,7 @@
 //! case. Entries are reserved response structure, never queue rows, so a
 //! second pass changes nothing.
 
-use agent_doc_markdown_ast::overlay::RESPONSE_DETAIL_MARKER;
+use agent_doc_markdown_ast::overlay::{RESPONSE_DETAIL_MARKER, STRUCK_ANNOTATION_SEPARATOR};
 
 use crate::followup_moved_state::FOLLOW_UP_ACTION_ITEMS_GUIDANCE;
 use crate::followup_owner::{
@@ -1623,11 +1634,204 @@ fn reconcile_response_remaining_once(document: &str) -> Option<(String, usize, b
             edits.extend(response_edits);
         }
     }
+    // `#actionitemidentity`: strike complete action items, and drop a stale
+    // strike on the row identity when that does not turn it back into a leaf.
+    let identity = identity_edits(document, &lines, &responses, &resolved, &tree, node_at);
+    if identity.parent_unstuck {
+        state_changed = true;
+    }
+    if !identity.edits.is_empty() {
+        // A response whose State already changed is counted above. Count the
+        // identity edit on its own only when it is the pass's only change.
+        if changed == 0 {
+            changed = 1;
+        }
+        edits.extend(identity.edits);
+    }
     if edits.is_empty() {
         return None;
     }
     let (out, deferred) = apply_disjoint_edits(document, edits);
     Some((out, changed, deferred || state_changed))
+}
+
+/// Edits that keep a queue row's identity and its **Action items** together.
+struct IdentityEdits {
+    edits: Vec<(std::ops::Range<usize>, String)>,
+    /// A struck row lost its wrapper, so the next pass must recompute its tally.
+    parent_unstuck: bool,
+}
+
+/// `#actionitemidentity`: strike each resolved action item, and drop a stale
+/// strike on its queue row.
+///
+/// The row identity is the list line without its outer strike wrapper —
+/// indentation plus the work text, including the `[#q-…]` — the same split as
+/// `strike_row_identity` (`#dupstrike`). The wrapper comes off only when an
+/// action item is still open and no follow-up row carries it, and a nested
+/// queue row keeps the unstruck row from becoming a leaf that would be
+/// dispatched again. A follow-up row keeps its strike: that strike is the
+/// moved item's own completion (`#followupmovedstate`), not a stale wrapper
+/// on a different identity. A row with no action items is left as it is. This
+/// pass does not strike a row whose items are all resolved; finishing that
+/// tree belongs to `strike_finished_trees`.
+fn identity_edits(
+    document: &str,
+    lines: &[Line<'_>],
+    responses: &[ResponseBlock],
+    resolved: &[Vec<bool>],
+    tree: &QueueTree,
+    node_at: impl Fn(usize) -> Option<usize>,
+) -> IdentityEdits {
+    let mut edits = Vec::new();
+    let mut struck_lines = std::collections::HashSet::new();
+    for (response, flags) in responses.iter().zip(resolved) {
+        for (item, done) in response.items.iter().zip(flags) {
+            if !done || item.struck || !struck_lines.insert(item.line) {
+                continue;
+            }
+            let Some(line) = lines.get(item.line) else {
+                continue;
+            };
+            let raw = &document[line.start..line.end];
+            let Some(next) = strike_detail_line(raw) else {
+                continue;
+            };
+            if next != raw {
+                edits.push((line.start..line.end, next));
+            }
+        }
+    }
+
+    let followups = followup_rows(document, tree);
+    let mut parent_unstuck = false;
+    let mut seen_parents = std::collections::HashSet::new();
+    for response in responses {
+        let Some(parent) = response.parent else {
+            continue;
+        };
+        if !seen_parents.insert(parent) {
+            continue;
+        }
+        let Some(node_index) = node_at(parent) else {
+            continue;
+        };
+        let node = &tree.nodes[node_index];
+        if !node.closed
+            || node.waiting_item
+            || followup_row_action_item(&plain_text(&node.full_text)).is_some()
+            || matches!(
+                node.state,
+                QueueNodeState::Running
+                    | QueueNodeState::NeedsIntegration
+                    | QueueNodeState::Lost
+                    | QueueNodeState::Reconciling
+            )
+        {
+            continue;
+        }
+        let mut bare_unresolved = false;
+        let mut saw_item = false;
+        for (other, flags) in responses.iter().zip(resolved) {
+            if other.parent != Some(parent) {
+                continue;
+            }
+            for (item, done) in other.items.iter().zip(flags) {
+                saw_item = true;
+                if !done
+                    && !followups
+                        .iter()
+                        .any(|(key, _, _)| item.held_by_row_key(key))
+                {
+                    bare_unresolved = true;
+                }
+            }
+        }
+        if !saw_item || !bare_unresolved {
+            continue;
+        }
+        let nested = tree.nodes.iter().any(|other| {
+            other.line > node.line && other.line <= node.end_line && other.depth > node.depth
+        });
+        if !nested {
+            continue;
+        }
+        let Some(line) = lines.get(parent) else {
+            continue;
+        };
+        let raw = &document[line.start..line.end];
+        let Some(next) = unstrike_list_line(raw) else {
+            continue;
+        };
+        if next != raw {
+            edits.push((line.start..line.end, next));
+            parent_unstuck = true;
+        }
+    }
+    IdentityEdits {
+        edits,
+        parent_unstuck,
+    }
+}
+
+/// `indent`, the text after `- `, and the line ending of one document line.
+fn list_line_parts(raw: &str) -> Option<(&str, &str, &str)> {
+    let (body, ending) = if let Some(body) = raw.strip_suffix("\r\n") {
+        (body, "\r\n")
+    } else if let Some(body) = raw.strip_suffix('\n') {
+        (body, "\n")
+    } else {
+        (raw, "")
+    };
+    let body = body.trim_end_matches([' ', '\t']);
+    let indent_len = body.len() - body.trim_start_matches([' ', '\t']).len();
+    let (indent, rest) = body.split_at(indent_len);
+    let after = rest.strip_prefix("- ")?;
+    Some((indent, after, ending))
+}
+
+/// Strike one action-item line, leaving the response-detail marker outside
+/// the wrapper: `- ~~work~~ <!-- agent-doc:response-detail -->`.
+fn strike_detail_line(raw: &str) -> Option<String> {
+    let (indent, after, ending) = list_line_parts(raw)?;
+    if after.trim_start().starts_with("~~") {
+        return None;
+    }
+    let work = after.strip_suffix(RESPONSE_DETAIL_MARKER)?.trim_end();
+    if work.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{indent}- ~~{work}~~ {RESPONSE_DETAIL_MARKER}{ending}"
+    ))
+}
+
+/// The inner text of a struck list body (`~~text~~` or
+/// `~~text~~ — auto-struck: …`). `None` when `body` is not struck.
+fn split_struck_work(body: &str) -> Option<&str> {
+    let rest = body.strip_prefix("~~")?;
+    if let Some(inner) = rest.strip_suffix("~~") {
+        let inner = inner.trim();
+        if !inner.is_empty() {
+            return Some(inner);
+        }
+    }
+    let needle = format!("~~{STRUCK_ANNOTATION_SEPARATOR}");
+    let close = rest.find(&needle)?;
+    let inner = rest[..close].trim();
+    (!inner.is_empty()).then_some(inner)
+}
+
+/// Drop one outer strike wrapper from a list row. The indentation, an
+/// optional `### ` heading outside the wrapper, and the inner identity text
+/// stay. An auto-struck note outside the wrapper is dropped with it.
+fn unstrike_list_line(raw: &str) -> Option<String> {
+    let (indent, after, ending) = list_line_parts(raw)?;
+    let (lead, work) = after
+        .strip_prefix("### ")
+        .map_or(("", after), |rest| ("### ", rest));
+    let inner = split_struck_work(work.trim())?;
+    Some(format!("{indent}- {lead}{inner}{ending}"))
 }
 
 /// `#remainingstrike`: a struck row whose response would be the only place

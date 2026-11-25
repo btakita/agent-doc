@@ -80,6 +80,15 @@ Use one native background worker per dispatch item and an external worktree for
 repository writes. `agent-doc orchestrate` is only the fallback when the native
 tool is genuinely unavailable.
 
+Grok's prompt queue holds a message submitted during a turn until that turn
+ends (`#grokpromptnow`). Process each prompt immediately and do not hold it
+there. Do not wait on `get_command_or_subagent_output` for the current
+subagent batch: that wait leaves steerings that should add workers unread
+until the batch finishes. Spawn and start the heads the prompt names, then
+end the turn so the next queued prompt runs at once and can spawn more
+subagents. A worker completion is its own turn: integrate that one result and
+spawn the printed refill before any further wait.
+
 The connected plan is Grok's queue-lifecycle contract. A non-empty
 `queue_dispatch_acknowledgement_required` means an earlier claim never reached
 the worker-bound state: use its exact `start_command` if the spawn succeeded,

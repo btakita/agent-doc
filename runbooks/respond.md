@@ -406,8 +406,15 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      native background worker per dispatch item. Start each claim immediately
      with the returned `subagent_id`; do not wait for another operator prompt
      and do not substitute `agent-doc orchestrate` while that tool is available.
-     Collect completions with `get_command_or_subagent_output` and preserve the
-     same generation fence through report-complete and closeout.
+     Process prompts immediately and do not hold them in Grok's prompt queue
+     (`#grokpromptnow`). A message submitted during this turn stays queued until
+     the turn ends, and a blocking `get_command_or_subagent_output` on the
+     current batch is that hold, so steerings that should add subagents sit
+     unread until the batch finishes. Spawn and start this prompt's heads, then
+     end the turn so the next queued prompt runs at once. Do not wait out the
+     batch. A worker completion is its own turn: integrate that result, preserve
+     the generation fence through report-complete and closeout, and spawn the
+     printed refill before any further wait.
   4. First classify a `[#subagent-operator-request-<unique-id>] subagent operator
      request` by who owns the missing input (`#agentownedproceduralchoice`). A
      packet whose choices only control how agents continue or classify

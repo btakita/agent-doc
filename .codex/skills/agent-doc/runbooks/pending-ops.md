@@ -101,6 +101,17 @@ the pull request already exists. Add the URL to the item with `--todo-edit` or
 not check the item off only because the pull request exists. The signal stops
 once the item text cites the URL.
 
+**Settled by GitHub state (`#operatorshouldnneed`).** A `stale_tracked_item` signal
+with `stale_kind` `upstream_merged` or `upstream_closed` (no `decision`) means
+every pull request or issue an open todo, backlog, review, or icebox item
+waits on is observed merged or closed. The background maintenance keeps those
+observations fresh, so this is the `#audit-stale` check without the operator
+asking for it. Verify against the item text: when the artifact was the item's
+work, close it in this closeout with the flag the action names, citing the
+URL (`upstream_merged` is likely DONE, `upstream_closed` likely MOOT); when it
+only unblocked the item, do the remaining work or rewrite the item. Icebox
+items are only flagged.
+
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 
 **Complete over gate — keep `agent:review` small (target < 10).** The default

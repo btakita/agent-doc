@@ -95,11 +95,18 @@ fn closed_upstreams(root: Option<&Path>, upstreams: &[GithubUpstream]) -> Vec<Gi
         .as_ref()
         .map(|path| read_cache(path))
         .unwrap_or_default();
+    // `#operatorshouldnneed`: the tracked-work observer's terminal states settle a
+    // blocker too, without a second lookup.
+    let observed = root.map(crate::upstream_state::load).unwrap_or_default();
     let mut closed = Vec::new();
     let mut newly_closed = Vec::new();
     for upstream in upstreams {
         let key = upstream.node_id();
-        if cached.contains(&key) {
+        if cached.contains(&key)
+            || observed
+                .state_of(upstream)
+                .is_some_and(agent_doc_answer_ledger::graph::UpstreamState::is_terminal)
+        {
             closed.push(upstream.clone());
             continue;
         }

@@ -1109,6 +1109,48 @@ pub fn closing_pull_signals(file: &Path, content: &str) -> Vec<crate::TodoSignal
         .collect()
 }
 
+/// `#operatorshouldnneed`: every GitHub artifact an open tracked item waits on (its
+/// own cited URLs, plus the graph's `closes` edges for todo and backlog rows).
+/// What the background observation pass keeps fresh. Read-only.
+pub fn work_upstream_set(
+    file: &Path,
+    content: &str,
+) -> std::collections::BTreeSet<agent_doc_answer_ledger::graph::GithubUpstream> {
+    let (observations, ledger) = build_ledger(file, content);
+    graph_of(file, &ledger, &observations, content).work_upstream_set(&observations)
+}
+
+/// `#operatorshouldnneed`: open tracked items every artifact of which the project's
+/// observation cache records merged or closed, as `stale_tracked_item`
+/// signals (`stale_kind` `upstream_merged` / `upstream_closed`, no decision).
+/// Reads the cache only, never `gh`, and skips the graph build when the cache
+/// holds no terminal observation. Read-only.
+pub fn upstream_settled_signals(file: &Path, content: &str) -> Vec<crate::TodoSignal> {
+    let cache = crate::upstream_state::load_for(file);
+    if !cache.has_terminal() {
+        return Vec::new();
+    }
+    let (observations, ledger) = build_ledger(file, content);
+    let graph = graph_of(file, &ledger, &observations, content);
+    graph
+        .work_settled_by_upstream(&observations, &|upstream| cache.state_of(upstream))
+        .into_iter()
+        .map(|found| {
+            let mut ids = vec![found.item_id.clone()];
+            ids.extend(found.upstreams.iter().map(|(upstream, _)| upstream.url()));
+            crate::TodoSignal {
+                kind: "stale_tracked_item".to_string(),
+                todo: found.item_id,
+                ids,
+                action: found.action,
+                component: Some(found.component.as_str().to_string()),
+                stale_kind: Some(found.kind.as_str().to_string()),
+                decision: None,
+            }
+        })
+        .collect()
+}
+
 /// `#decisionstaleaudit`: every open tracked item a delivered decision makes
 /// stale, read-only (no index write, no document write).
 pub fn stale_tracked_items(

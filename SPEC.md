@@ -81,6 +81,45 @@
   See [Document Format](specs/02-document-format.md#components) and
   [Closeout Commands](specs/07-closeout-commands.md#write-path-invariants).
 
+- The stale audit runs passively, not on an operator `#audit-stale` request
+  (`#operatorshouldnneed`). The deterministic half of that audit (is each GitHub
+  pull request or issue an open item waits on still open?) is binary-owned
+  and graph-driven, in the `#lazily-reactive-first` shape:
+  - **Graph (what to watch):** the decision graph already joins an artifact
+    to the todo or backlog item it closes (`upstream_of`, clause `closes`,
+    `#prannotate`), from either side and across the cached graph.
+    `DecisionGraph::work_upstreams` adds the URLs a review or icebox row's own
+    text cites. The union over open items is the watch set; it shrinks as
+    items close, so nothing outside live tracked work is ever looked up.
+  - **Source (observation):** `.agent-doc/state/github-upstream-state.json`,
+    one `open` / `merged` / `closed` / failed observation per artifact, keyed
+    by its graph node id. Terminal states are never refreshed; `open` is due
+    after 30 min; a failed lookup is retried after 30 min and never erases a
+    known state. Writes re-read the file and replace it atomically.
+    `AGENT_DOC_GH` names the `gh` program.
+  - **Effect (refresh):** `upstream_observation`, the last pass of the
+    deferred admission reconcile the controller's per-document maintenance
+    worker runs after every admission (`#q-e9483473162d`). It never writes
+    the document, so it runs after every pass that does. At most 8 lookups
+    per pass (`gh pr|issue view --json state`, 10 s each, never-observed
+    first, then oldest), no lookup started after 30 s; the rest wait for the
+    next pass. Logged `upstream_observation wanted= observed= terminal=
+    failed= deferred=`. `AGENT_DOC_UPSTREAM_OBSERVATION=off` disables it.
+  - **Computed (drift signal):** every preflight derives `stale_tracked_item`
+    signals with `stale_kind` `upstream_merged` / `upstream_closed` from the
+    cache alone (no `gh` on admission;
+    `DecisionGraph::work_settled_by_upstream`): an open item every artifact
+    of which is terminal and that no live queue row or busy waiting tree
+    names. Flag-only: the agent verifies against the item, then closes it
+    with the named flag or rewrites it. External blocker settlement
+    (`#blockergraph`) reads the same terminal states before its own lookup.
+  - **Next increments** (not yet built): a controller-scheduled refresh for
+    documents with no admissions; queue (`agent:run`) heads and `agent:done`
+    trees citing artifacts; feeding settled ids to `queue tree-status`
+    (`#treestatusquery`) so the `#inerttreestrike` write paths can strike
+    them; and batched GraphQL lookups.
+  See [Document Format](specs/02-document-format.md#components).
+
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming
   ownership (`#tmuxscopesteward`): Rust-test targets prevent new scope creation,
   scheduled and on-demand sweeps reset failed units, and a running orphan is

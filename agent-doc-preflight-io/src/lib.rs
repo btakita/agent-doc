@@ -17,6 +17,7 @@ pub mod queue_maintenance_effect_cas;
 pub mod queue_maintenance_effect_phase;
 pub mod sweep;
 pub mod tree_status_query;
+pub mod upstream_state;
 pub mod warnings;
 
 use agent_doc_document::queue_projection::{
@@ -374,7 +375,9 @@ pub struct TodoSignal {
     pub component: Option<String>,
     /// `#decisionstaleaudit`: why it is stale (`answered_but_open`,
     /// `done_by_evidence`; flag-only `#decisionstalegraph` kinds
-    /// `moot_by_decision`, `built_on_superseded`, `contradicts_decision`).
+    /// `moot_by_decision`, `built_on_superseded`, `contradicts_decision`;
+    /// flag-only `#operatorshouldnneed` kinds `upstream_merged`, `upstream_closed`,
+    /// which carry no `decision`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_kind: Option<String>,
     /// `#decisionstaleaudit`: the cited answer-ledger decision id.
@@ -420,6 +423,15 @@ fn append_stale_tracked_signals(file: &Path, content: &str, signals: &mut Vec<To
             ));
         }
         signals.push(stale_tracked_signal(found));
+    }
+    // `#operatorshouldnneed`: items the observed GitHub state settles, unless a
+    // decision already flagged the same item.
+    for found in answer_ledger::upstream_settled_signals(file, content) {
+        if !signals.iter().any(|signal| {
+            signal.kind == "stale_tracked_item" && signal.todo.eq_ignore_ascii_case(&found.todo)
+        }) {
+            signals.push(found);
+        }
     }
 }
 
@@ -12806,6 +12818,102 @@ mod tests {
             "{stale:?}"
         );
         assert!(stale.action.contains("--done portdocs"), "{stale:?}");
+    }
+
+    /// `#operatorshouldnneed`: the background observation pass records the GitHub
+    /// state of every artifact the open tracked items wait on, and the next
+    /// preflight flags the items whose artifacts are all merged or closed,
+    /// with no `gh` call of its own and no `#audit-stale` request.
+    #[test]
+    fn observed_upstream_state_flags_settled_tracked_items_without_a_lookup() {
+        use agent_doc_answer_ledger::graph::UpstreamState;
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#shipapi] Ship the API https://github.com/o/r/pull/11\n",
+            "- [ ] [#stillopen] Land https://github.com/o/r/pull/12\n",
+            "<!-- /agent:todo -->\n\n",
+            "<!-- agent:backlog -->\n",
+            "- [ ] [#oldidea] Try https://github.com/o/r/pull/13\n",
+            "- [ ] [#annotated] Publish telemetry\n",
+            "<!-- /agent:backlog -->\n\n",
+            "<!-- agent:review -->\n",
+            "- [ ] [#reviewit] Review https://github.com/o/r/pull/14\n",
+            "<!-- /agent:review -->\n\n",
+            "Opened https://github.com/o/r/pull/15 closes [#annotated].\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+
+        // Before any observation nothing is flagged.
+        let before = todo_signals_for_document(&doc, content);
+        assert!(
+            !before.iter().any(|signal| signal
+                .stale_kind
+                .as_deref()
+                .is_some_and(|kind| kind.starts_with("upstream_"))),
+            "{before:?}"
+        );
+
+        let wanted: Vec<u64> = answer_ledger::work_upstream_set(&doc, content)
+            .into_iter()
+            .map(|upstream| upstream.number)
+            .collect();
+        assert_eq!(wanted, vec![11, 12, 13, 14, 15]);
+
+        let lookups = std::cell::Cell::new(0);
+        let lookup = |upstream: &agent_doc_answer_ledger::graph::GithubUpstream| {
+            lookups.set(lookups.get() + 1);
+            Some(match upstream.number {
+                12 => UpstreamState::Open,
+                13 => UpstreamState::Closed,
+                _ => UpstreamState::Merged,
+            })
+        };
+        let report = upstream_state::observe_document(&doc, content, 1_000, &lookup)
+            .unwrap()
+            .expect("wanted artifacts");
+        assert_eq!(report.observed.len(), 5);
+        assert_eq!(lookups.get(), 5);
+        // A second pass right after finds nothing due.
+        let again = upstream_state::observe_document(&doc, content, 1_001, &lookup)
+            .unwrap()
+            .unwrap();
+        assert!(again.observed.is_empty() && again.failed.is_empty());
+        assert_eq!(lookups.get(), 5);
+
+        let signals = todo_signals_for_document(&doc, content);
+        let flagged: std::collections::BTreeMap<&str, (&str, &str)> = signals
+            .iter()
+            .filter(|signal| signal.kind == "stale_tracked_item")
+            .filter_map(|signal| {
+                Some((
+                    signal.todo.as_str(),
+                    (signal.stale_kind.as_deref()?, signal.component.as_deref()?),
+                ))
+            })
+            .collect();
+        assert_eq!(
+            flagged,
+            std::collections::BTreeMap::from([
+                ("annotated", ("upstream_merged", "backlog")),
+                ("oldidea", ("upstream_closed", "backlog")),
+                ("reviewit", ("upstream_merged", "review")),
+                ("shipapi", ("upstream_merged", "todo")),
+            ]),
+            "{signals:?}"
+        );
+        let ship = signals
+            .iter()
+            .find(|signal| signal.todo == "shipapi" && signal.kind == "stale_tracked_item")
+            .unwrap();
+        assert!(ship.decision.is_none());
+        assert!(ship.action.contains("`--todo-done`"), "{ship:?}");
+        assert!(
+            ship.ids
+                .contains(&"https://github.com/o/r/pull/11".to_string()),
+            "{ship:?}"
+        );
     }
 
     /// GH #381 repro: `.agent-doc/project.md` declares `'#review'`; the session

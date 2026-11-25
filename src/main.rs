@@ -4733,6 +4733,21 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
     },
+    /// GitHub artifacts the open tracked items wait on (`#operatorshouldnneed`):
+    /// each watched pull request or issue with its cached state, and the
+    /// items every artifact of which is merged or closed (the
+    /// `stale_tracked_item` signals preflight raises). `--refresh` first runs
+    /// one bounded observation pass with `gh`, as the background maintenance
+    /// does after each admission. Never writes the document.
+    Upstreams {
+        /// Session document
+        file: PathBuf,
+        /// Look up the due artifacts with `gh` first
+        #[arg(long)]
+        refresh: bool,
+        #[arg(long)]
+        json: bool,
+    },
     /// What a decision change disturbs (`#decisiongraph`): a supersede flags
     /// or reopens every dependent and lists actions taken on the old answer;
     /// an amend flags only rows touching the amended clause
@@ -5042,6 +5057,56 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                     agent_doc_answer_ledger::contract_guidance(&facts, &ledger.possible)
                 {
                     println!("\n{guidance}");
+                }
+            }
+            Ok(())
+        }
+        DecisionAction::Upstreams {
+            file,
+            refresh,
+            json,
+        } => {
+            use agent_doc_preflight_io::upstream_state;
+            let content = std::fs::read_to_string(&file)
+                .with_context(|| format!("failed to read {}", file.display()))?;
+            if refresh
+                && let Some(observed) = upstream_state::observe_document(
+                    &file,
+                    &content,
+                    upstream_state::now(),
+                    &upstream_state::github_state,
+                )?
+                && !json
+            {
+                eprintln!(
+                    "refreshed: observed={} failed={} deferred={}",
+                    observed.observed.len(),
+                    observed.failed.len(),
+                    observed.deferred
+                );
+            }
+            let report = upstream_state::report(&file, &content, upstream_state::now());
+            if json {
+                println!("{}", serde_json::to_string_pretty(&report)?);
+            } else {
+                for watched in &report.watched {
+                    println!(
+                        "{} {}{}",
+                        watched.url,
+                        watched.state.map_or("unobserved", |state| state.as_str()),
+                        if watched.due { " (due)" } else { "" }
+                    );
+                }
+                if !report.settled.is_empty() {
+                    println!();
+                }
+                for settled in &report.settled {
+                    println!(
+                        "settled: agent:{} [#{}] {}",
+                        settled.component.as_deref().unwrap_or("?"),
+                        settled.todo,
+                        settled.stale_kind.as_deref().unwrap_or("?")
+                    );
                 }
             }
             Ok(())

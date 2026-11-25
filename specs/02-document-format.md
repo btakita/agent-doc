@@ -1020,6 +1020,19 @@ action is finished or moot:
   and raises no signal. Review and icebox rows are not associated. Closing the
   upstream still moots only a citing decision (clause `open`); a `closes` edge
   is not a decision.
+  `stale_tracked_item` with `stale_kind` `upstream_merged` or
+  `upstream_closed` (`#operatorshouldnneed`, flag-only, no `decision`) names an open
+  todo, backlog, review, or icebox item every GitHub artifact of which is
+  observed terminal: the item's own `github.com/<owner>/<repo>/pull|issues/<n>`
+  URLs plus, for todo and backlog rows, the graph's `closes` edges
+  (`DecisionGraph::work_upstreams`). `upstream_merged` when at least one is a
+  merged pull request, else `upstream_closed`. One open or never-observed
+  artifact, a live queue row naming the item, or a busy waiting tree keeps
+  the item unflagged, and an item a decision already flags keeps only that
+  signal. `ids` lists the item then the artifact URLs. Preflight reads the
+  states from the project cache `.agent-doc/state/github-upstream-state.json`
+  and never runs `gh`; the cache is the background observer's output
+  (see SPEC.md, `#operatorshouldnneed`).
 - **Agent closeout audit** consumes every `todo_sync_required` signal. It
   includes `--todo-done <selector>` for every action current evidence proves
   finished or moot, even when the row has no tracked-work link and the operator

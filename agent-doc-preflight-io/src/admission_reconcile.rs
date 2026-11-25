@@ -274,8 +274,10 @@ fn queue_reconcile_chain(
 /// The passes in the order admission ran them: todo ids are coined before the
 /// answer ledger reads todo rows, and moot decisions are pruned before the
 /// queue maintenance after this step rebuilds the waiting tree. The queue
-/// reconcile chain runs last, on the cut those passes produced.
-const PASSES: [(&str, Pass); 5] = [
+/// reconcile chain runs on the cut those passes produced. The GitHub-state
+/// observation (`#operatorshouldnneed`) never writes the document, so it runs last:
+/// its bounded `gh` lookups never delay a pass that writes.
+const PASSES: [(&str, Pass); 6] = [
     ("todo_id_backfill", todo_ids),
     (
         "answer_ledger",
@@ -290,6 +292,10 @@ const PASSES: [(&str, Pass); 5] = [
         crate::blocker_settlement::run_blocker_settlement_maintenance_on_admitted_cut,
     ),
     ("queue_reconcile_chain", queue_reconcile_chain),
+    (
+        "upstream_observation",
+        crate::upstream_state::run_upstream_observation_on_admitted_cut,
+    ),
 ];
 
 fn is_superseded(error: &anyhow::Error) -> bool {

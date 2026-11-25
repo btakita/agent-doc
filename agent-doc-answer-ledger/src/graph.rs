@@ -43,6 +43,7 @@ use crate::{EdgeKind, Ledger, RevisionRelation, id_key, text};
 mod blockers;
 mod registry;
 mod upstream;
+mod upstream_settled;
 pub use blockers::{
     BLOCKS_CLAUSE, SETTLEMENT_MARKER_PREFIX, SETTLES_CLAUSE, merge_settlement_marker,
 };
@@ -53,6 +54,9 @@ pub use registry::{
 pub use upstream::{
     CLOSES_CLAUSE, GithubUpstream, GithubUpstreamKind, KnownUpstream, MootDecision,
     WorkUpstreamAnnotation, known_upstreams_in_document,
+};
+pub use upstream_settled::{
+    UpstreamSettledItem, UpstreamSettledKind, UpstreamState, WorkUpstreams,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

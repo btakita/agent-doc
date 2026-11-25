@@ -5080,15 +5080,16 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                     &file,
                     &content,
                     upstream_state::now(),
-                    &upstream_state::github_state,
+                    &upstream_state::github_states,
                 )?
                 && !json
             {
                 eprintln!(
-                    "refreshed: observed={} failed={} deferred={}",
+                    "refreshed: observed={} failed={} deferred={} calls={}",
                     observed.observed.len(),
                     observed.failed.len(),
-                    observed.deferred
+                    observed.deferred,
+                    observed.calls
                 );
             }
             let report = upstream_state::report(&file, &content, upstream_state::now());

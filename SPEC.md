@@ -101,11 +101,18 @@
   - **Effect (refresh):** `upstream_observation`, the last pass of the
     deferred admission reconcile the controller's per-document maintenance
     worker runs after every admission (`#q-e9483473162d`). It never writes
-    the document, so it runs after every pass that does. At most 8 lookups
-    per pass (`gh pr|issue view --json state`, 10 s each, never-observed
-    first, then oldest), no lookup started after 30 s; the rest wait for the
-    next pass. Logged `upstream_observation wanted= observed= terminal=
-    failed= deferred=`. `AGENT_DOC_UPSTREAM_OBSERVATION=off` disables it.
+    the document, so it runs after every pass that does. Lookups are
+    batched: one `gh api graphql` call reads up to 50 due artifacts across
+    repositories (an aliased `repository(owner:,name:)` per repository, an
+    aliased `pullRequest(number:)` or, for an issue URL,
+    `issueOrPullRequest(number:)` per artifact), never-observed first, then
+    oldest. At most 8 calls per pass, 10 s each, no call started after
+    30 s; the rest wait for the next pass. A partial answer (`gh` exits 1
+    with `data` and `errors`) fails only the artifacts that are `null`: a
+    missing or forbidden repository or artifact never poisons its batch,
+    and a call that fails outright fails its batch as a failed lookup.
+    Logged `upstream_observation wanted= observed= terminal= failed=
+    deferred= calls=`. `AGENT_DOC_UPSTREAM_OBSERVATION=off` disables it.
   - **Computed (drift signal):** every preflight derives `stale_tracked_item`
     signals with `stale_kind` `upstream_merged` / `upstream_closed` from the
     cache alone (no `gh` on admission;
@@ -118,7 +125,7 @@
     documents with no admissions; queue (`agent:run`) heads and `agent:done`
     trees citing artifacts; feeding settled ids to `queue tree-status`
     (`#treestatusquery`) so the `#inerttreestrike` write paths can strike
-    them; and batched GraphQL lookups.
+    them.
   See [Document Format](specs/02-document-format.md#components).
 
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming

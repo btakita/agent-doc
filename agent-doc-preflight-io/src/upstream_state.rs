@@ -12,8 +12,9 @@
 //!   the deferred admission reconcile (`#q-e9483473162d`) that the controller's
 //!   per-document maintenance worker runs after every admission. It refreshes
 //!   the artifacts the open tracked items wait on
-//!   ([`DecisionGraph::work_upstream_set`]) that are due, a bounded number per
-//!   pass, and never writes the document. Terminal states are never refreshed;
+//!   ([`DecisionGraph::work_upstream_set`]) that are due, with at most
+//!   [`CALLS_PER_PASS`] batched `gh api graphql` calls per pass of up to
+//!   [`ARTIFACTS_PER_CALL`] artifacts each, and never writes the document. Terminal states are never refreshed;
 //!   an open state is refreshed after [`OPEN_TTL_SECS`]; a failed lookup is
 //!   retried after [`FAILED_LOOKUP_TTL_SECS`].
 //! - **Computed**: preflight derives `stale_tracked_item` signals with
@@ -39,11 +40,14 @@ pub const CACHE_RELATIVE: &str = ".agent-doc/state/github-upstream-state.json";
 pub const OPEN_TTL_SECS: u64 = 30 * 60;
 /// A failed lookup is retried after this long.
 pub const FAILED_LOOKUP_TTL_SECS: u64 = 30 * 60;
-/// Lookups one pass may run.
-pub const LOOKUPS_PER_PASS: usize = 8;
-/// Wall budget of one pass; a lookup is not started after it.
+/// `gh` calls one pass may run. Each call is one GraphQL query that looks up
+/// up to [`ARTIFACTS_PER_CALL`] artifacts, across repositories.
+pub const CALLS_PER_PASS: usize = 8;
+/// Artifacts one batched GraphQL call looks up.
+pub const ARTIFACTS_PER_CALL: usize = 50;
+/// Wall budget of one pass; a call is not started after it.
 pub const PASS_BUDGET: Duration = Duration::from_secs(30);
-/// One `gh` lookup's timeout.
+/// One `gh` call's timeout.
 pub const LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 /// `off` disables the observation pass (the cache is still read).
 pub const DISABLE_ENV: &str = "AGENT_DOC_UPSTREAM_OBSERVATION";
@@ -170,20 +174,28 @@ pub struct ObservationReport {
     pub wanted: usize,
     pub observed: Vec<(GithubUpstream, UpstreamState)>,
     pub failed: Vec<GithubUpstream>,
-    /// Due but left for a later pass (limit or wall budget).
+    /// Due but left for a later pass (call cap or wall budget).
     pub deferred: usize,
+    /// Batched lookup calls the pass ran.
+    pub calls: usize,
 }
 
-/// Refresh the due artifacts of `wanted` with `lookup`, at most `limit`, not
-/// starting a lookup after `budget`. The cache is re-read before the write so
-/// a concurrent pass for another document keeps its observations.
+/// A batched lookup: one state per artifact of the batch, in order. `None` is
+/// a failed lookup of that artifact only; a short result fails the rest.
+pub type BatchLookup<'a> = dyn Fn(&[GithubUpstream]) -> Vec<Option<UpstreamState>> + 'a;
+
+/// Refresh the due artifacts of `wanted` with `lookup`: at most `max_calls`
+/// calls of at most `batch_size` artifacts each, not starting a call after
+/// `budget`. The cache is re-read before the write so a concurrent pass for
+/// another document keeps its observations.
 pub fn observe(
     root: &Path,
     wanted: &BTreeSet<GithubUpstream>,
     now: u64,
-    limit: usize,
+    max_calls: usize,
+    batch_size: usize,
     budget: Duration,
-    lookup: &dyn Fn(&GithubUpstream) -> Option<UpstreamState>,
+    lookup: &BatchLookup<'_>,
 ) -> Result<ObservationReport> {
     let planned = load(root).plan_refresh(wanted, now, usize::MAX);
     let mut report = ObservationReport {
@@ -192,17 +204,21 @@ pub fn observe(
     };
     let started = Instant::now();
     let mut results = Vec::new();
-    for upstream in &planned {
-        if results.len() >= limit || started.elapsed() >= budget {
-            report.deferred += 1;
+    for batch in planned.chunks(batch_size.max(1)) {
+        if report.calls >= max_calls || started.elapsed() >= budget {
+            report.deferred += batch.len();
             continue;
         }
-        let state = lookup(upstream);
-        match state {
-            Some(state) => report.observed.push((upstream.clone(), state)),
-            None => report.failed.push(upstream.clone()),
+        report.calls += 1;
+        let states = lookup(batch);
+        for (index, upstream) in batch.iter().enumerate() {
+            let state = states.get(index).copied().flatten();
+            match state {
+                Some(state) => report.observed.push((upstream.clone(), state)),
+                None => report.failed.push(upstream.clone()),
+            }
+            results.push((upstream.clone(), state));
         }
-        results.push((upstream.clone(), state));
     }
     if !results.is_empty() {
         let mut cache = load(root);
@@ -214,37 +230,119 @@ pub fn observe(
     Ok(report)
 }
 
-/// `gh pr view` / `gh issue view` for one artifact. `None` when `gh` is
-/// missing, unauthenticated, times out, or prints no state.
-pub fn github_state(upstream: &GithubUpstream) -> Option<UpstreamState> {
-    let program = std::env::var_os(GH_ENV).unwrap_or_else(|| "gh".into());
-    github_state_with(&program, upstream)
+/// The GraphQL query that looks up every artifact of `batch` in one call:
+/// one aliased `repository` per repository (`r<i>`) and one aliased field
+/// per artifact (`a<j>`, `j` its index in `batch`). A pull request is read
+/// with `pullRequest(number:)`; an issue with `issueOrPullRequest(number:)`,
+/// because an `/issues/<n>` URL also resolves to a pull request.
+pub fn graphql_query(batch: &[GithubUpstream]) -> String {
+    let mut repos: Vec<((&str, &str), Vec<usize>)> = Vec::new();
+    for (index, upstream) in batch.iter().enumerate() {
+        let key = (upstream.owner.as_str(), upstream.repo.as_str());
+        match repos.iter_mut().find(|(repo, _)| *repo == key) {
+            Some((_, indexes)) => indexes.push(index),
+            None => repos.push((key, vec![index])),
+        }
+    }
+    let mut query = String::from("query{");
+    for (repo_index, ((owner, repo), indexes)) in repos.iter().enumerate() {
+        query.push_str(&format!(
+            "r{repo_index}:repository(owner:{},name:{}){{",
+            graphql_string(owner),
+            graphql_string(repo)
+        ));
+        for &index in indexes {
+            let upstream = &batch[index];
+            match upstream.kind {
+                GithubUpstreamKind::PullRequest => query.push_str(&format!(
+                    "a{index}:pullRequest(number:{}){{state}}",
+                    upstream.number
+                )),
+                GithubUpstreamKind::Issue => query.push_str(&format!(
+                    "a{index}:issueOrPullRequest(number:{}){{...on Issue{{state}}...on PullRequest{{state}}}}",
+                    upstream.number
+                )),
+            }
+        }
+        query.push('}');
+    }
+    query.push('}');
+    query
 }
 
-/// [`github_state`] with an explicit `gh` program.
-pub fn github_state_with(
-    program: &std::ffi::OsStr,
-    upstream: &GithubUpstream,
-) -> Option<UpstreamState> {
-    let kind = match upstream.kind {
-        GithubUpstreamKind::Issue => "issue",
-        GithubUpstreamKind::PullRequest => "pr",
+fn graphql_string(text: &str) -> String {
+    // A JSON string literal is a valid GraphQL string literal.
+    serde_json::Value::String(text.to_string()).to_string()
+}
+
+/// The states [`graphql_query`] returned for `batch`, in order. GitHub
+/// answers a partial query with `data` plus `errors`: a missing or forbidden
+/// repository or artifact is `null` under its alias and fails only that
+/// artifact.
+pub fn parse_graphql_response(batch: &[GithubUpstream], text: &str) -> Vec<Option<UpstreamState>> {
+    let Ok(body) = serde_json::from_str::<serde_json::Value>(text) else {
+        return vec![None; batch.len()];
     };
-    let repo = format!("{}/{}", upstream.owner, upstream.repo);
+    let Some(data) = body.get("data").and_then(serde_json::Value::as_object) else {
+        return vec![None; batch.len()];
+    };
+    // Each artifact alias is unique across the query, so the repository it
+    // sits under does not matter.
+    let mut states: BTreeMap<String, UpstreamState> = BTreeMap::new();
+    for repo in data.values().filter_map(serde_json::Value::as_object) {
+        for (alias, artifact) in repo {
+            if let Some(state) = artifact
+                .get("state")
+                .and_then(serde_json::Value::as_str)
+                .and_then(UpstreamState::parse_gh_state)
+            {
+                states.insert(alias.clone(), state);
+            }
+        }
+    }
+    (0..batch.len())
+        .map(|index| states.get(&format!("a{index}")).copied())
+        .collect()
+}
+
+/// One batched `gh api graphql` call for `batch`. Every artifact fails when
+/// `gh` is missing, unauthenticated, times out, or prints no `data`.
+pub fn github_states(batch: &[GithubUpstream]) -> Vec<Option<UpstreamState>> {
+    let program = std::env::var_os(GH_ENV).unwrap_or_else(|| "gh".into());
+    github_states_with(&program, batch)
+}
+
+/// [`github_states`] for one artifact.
+pub fn github_state(upstream: &GithubUpstream) -> Option<UpstreamState> {
+    github_states(std::slice::from_ref(upstream))
+        .into_iter()
+        .next()
+        .flatten()
+}
+
+/// [`github_states`] with an explicit `gh` program.
+pub fn github_states_with(
+    program: &std::ffi::OsStr,
+    batch: &[GithubUpstream],
+) -> Vec<Option<UpstreamState>> {
+    if batch.is_empty() {
+        return Vec::new();
+    }
+    let query = format!("query={}", graphql_query(batch));
+    match run_gh(program, &["api", "graphql", "-f", &query]) {
+        Some(stdout) => parse_graphql_response(batch, &stdout),
+        None => vec![None; batch.len()],
+    }
+}
+
+/// Run `gh` with `args` and return its stdout, also on a nonzero exit:
+/// `gh api graphql` exits 1 on a partial response yet prints its `data`.
+/// `None` when it cannot start or times out.
+fn run_gh(program: &std::ffi::OsStr, args: &[&str]) -> Option<String> {
     let mut attempt = 0;
     let mut child = loop {
         let spawned = Command::new(program)
-            .args([
-                kind,
-                "view",
-                &upstream.number.to_string(),
-                "--repo",
-                &repo,
-                "--json",
-                "state",
-                "--jq",
-                ".state",
-            ])
+            .args(args)
             .env("GH_PROMPT_DISABLED", "1")
             .env("GIT_TERMINAL_PROMPT", "0")
             .stdin(Stdio::null())
@@ -252,29 +350,33 @@ pub fn github_state_with(
             .stderr(Stdio::null())
             .spawn();
         // ETXTBSY: the executable is being replaced (an upgrade) or was just
-        // written; it clears within milliseconds.
+        // written while another thread forked; it clears within milliseconds.
         match spawned {
-            Err(err) if err.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 5 => {
+            Err(err) if err.kind() == std::io::ErrorKind::ExecutableFileBusy && attempt < 50 => {
                 attempt += 1;
                 std::thread::sleep(Duration::from_millis(20));
             }
             other => break other.ok()?,
         }
     };
-    let status = match child.wait_timeout(LOOKUP_TIMEOUT) {
-        Ok(Some(status)) => status,
+    // Drain stdout on a thread: a large response must not fill the pipe and
+    // stall the child past its timeout.
+    let mut stdout = child.stdout.take()?;
+    let reader = std::thread::spawn(move || {
+        let mut text = String::new();
+        std::io::Read::read_to_string(&mut stdout, &mut text).ok()?;
+        Some(text)
+    });
+    match child.wait_timeout(LOOKUP_TIMEOUT) {
+        Ok(Some(_)) => {}
         _ => {
             let _ = child.kill();
             let _ = child.wait();
+            let _ = reader.join();
             return None;
         }
-    };
-    if !status.success() {
-        return None;
     }
-    let mut stdout = String::new();
-    std::io::Read::read_to_string(&mut child.stdout.take()?, &mut stdout).ok()?;
-    UpstreamState::parse_gh_state(&stdout)
+    reader.join().ok().flatten()
 }
 
 fn now_secs() -> u64 {
@@ -299,7 +401,7 @@ pub fn observe_document(
     file: &Path,
     content: &str,
     now: u64,
-    lookup: &dyn Fn(&GithubUpstream) -> Option<UpstreamState>,
+    lookup: &BatchLookup<'_>,
 ) -> Result<Option<ObservationReport>> {
     let Some(root) = agent_doc_project_root_io::project_root_containing(file) else {
         return Ok(None);
@@ -308,7 +410,16 @@ pub fn observe_document(
     if wanted.is_empty() {
         return Ok(None);
     }
-    observe(&root, &wanted, now, LOOKUPS_PER_PASS, PASS_BUDGET, lookup).map(Some)
+    observe(
+        &root,
+        &wanted,
+        now,
+        CALLS_PER_PASS,
+        ARTIFACTS_PER_CALL,
+        PASS_BUDGET,
+        lookup,
+    )
+    .map(Some)
 }
 
 /// The deferred admission reconcile's observation pass (`#operatorshouldnneed`).
@@ -323,7 +434,7 @@ pub fn run_upstream_observation_on_admitted_cut(
     if disabled() {
         return Ok(None);
     }
-    let Some(report) = observe_document(file, content, now_secs(), &github_state)? else {
+    let Some(report) = observe_document(file, content, now_secs(), &github_states)? else {
         return Ok(None);
     };
     if report.observed.is_empty() && report.failed.is_empty() {
@@ -337,12 +448,13 @@ pub fn run_upstream_observation_on_admitted_cut(
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
-            "upstream_observation file={} wanted={} observed={} terminal={terminal} failed={} deferred={} (#operatorshouldnneed)",
+            "upstream_observation file={} wanted={} observed={} terminal={terminal} failed={} deferred={} calls={} (#operatorshouldnneed)",
             file.display(),
             report.wanted,
             report.observed.len(),
             report.failed.len(),
             report.deferred,
+            report.calls,
         ),
     );
     Ok(None)
@@ -447,28 +559,45 @@ mod tests {
         );
     }
 
+    /// A batch lookup from a per-artifact answer, recording each call's
+    /// artifact numbers.
+    fn batch_lookup<'a>(
+        calls: &'a RefCell<Vec<Vec<u64>>>,
+        answer: impl Fn(u64) -> Option<UpstreamState> + 'a,
+    ) -> impl Fn(&[GithubUpstream]) -> Vec<Option<UpstreamState>> + 'a {
+        move |batch: &[GithubUpstream]| {
+            calls
+                .borrow_mut()
+                .push(batch.iter().map(|upstream| upstream.number).collect());
+            batch
+                .iter()
+                .map(|upstream| answer(upstream.number))
+                .collect()
+        }
+    }
+
     #[test]
     fn observe_is_bounded_records_results_and_skips_fresh_entries() {
         let dir = tempfile::tempdir().unwrap();
         let calls = RefCell::new(Vec::new());
-        let lookup = |upstream: &GithubUpstream| {
-            calls.borrow_mut().push(upstream.number);
-            match upstream.number {
-                1 => Some(UpstreamState::Merged),
-                2 => Some(UpstreamState::Open),
-                _ => None,
-            }
-        };
+        let lookup = batch_lookup(&calls, |number| match number {
+            1 => Some(UpstreamState::Merged),
+            2 => Some(UpstreamState::Open),
+            _ => None,
+        });
+        // One call of two artifacts; the third waits for the next pass.
         let report = observe(
             dir.path(),
             &wanted(&[1, 2, 3]),
             100,
+            1,
             2,
             PASS_BUDGET,
             &lookup,
         )
         .unwrap();
         assert_eq!(report.wanted, 3);
+        assert_eq!(report.calls, 1);
         assert_eq!(report.observed.len(), 2);
         assert_eq!(report.deferred, 1);
         let cache = load(dir.path());
@@ -479,7 +608,8 @@ mod tests {
             dir.path(),
             &wanted(&[1, 2, 3]),
             101,
-            8,
+            CALLS_PER_PASS,
+            ARTIFACTS_PER_CALL,
             PASS_BUDGET,
             &lookup,
         )
@@ -489,30 +619,169 @@ mod tests {
             vec![pull(3)],
             "only the unobserved one is due"
         );
-        assert_eq!(*calls.borrow(), vec![1, 2, 3]);
+        assert_eq!(*calls.borrow(), vec![vec![1, 2], vec![3]]);
         assert!(load(dir.path()).upstreams.contains_key(&pull(3).node_id()));
 
-        // Nothing due: no lookup and no write.
+        // Nothing due: no call and no write.
         let report = observe(
             dir.path(),
             &wanted(&[1, 2, 3]),
             102,
-            8,
+            CALLS_PER_PASS,
+            ARTIFACTS_PER_CALL,
             PASS_BUDGET,
             &lookup,
         )
         .unwrap();
         assert!(report.observed.is_empty() && report.failed.is_empty());
-        assert_eq!(calls.borrow().len(), 3);
+        assert_eq!(report.calls, 0);
+        assert_eq!(calls.borrow().len(), 2);
+    }
+
+    #[test]
+    fn a_large_watch_set_takes_one_call_per_batch_not_per_artifact() {
+        // sdk-dev.md's 20 watched pull requests took 3 passes of per-artifact
+        // lookups (8/8/4); batched, they take one call.
+        let dir = tempfile::tempdir().unwrap();
+        let numbers: Vec<u64> = (1..=20).collect();
+        let calls = RefCell::new(Vec::new());
+        let lookup = batch_lookup(&calls, |_| Some(UpstreamState::Merged));
+        let report = observe(
+            dir.path(),
+            &wanted(&numbers),
+            100,
+            CALLS_PER_PASS,
+            ARTIFACTS_PER_CALL,
+            PASS_BUDGET,
+            &lookup,
+        )
+        .unwrap();
+        assert_eq!(report.calls, 1);
+        assert_eq!(report.observed.len(), 20);
+        assert_eq!(report.deferred, 0);
+
+        // The cap counts calls: 2 calls of 8 cover 16, the last 4 wait.
+        let dir = tempfile::tempdir().unwrap();
+        calls.borrow_mut().clear();
+        let report = observe(
+            dir.path(),
+            &wanted(&numbers),
+            100,
+            2,
+            8,
+            PASS_BUDGET,
+            &lookup,
+        )
+        .unwrap();
+        assert_eq!(report.calls, 2);
+        assert_eq!(report.observed.len(), 16);
+        assert_eq!(report.deferred, 4);
+        assert_eq!(
+            calls.borrow().iter().map(Vec::len).collect::<Vec<_>>(),
+            vec![8, 8]
+        );
+    }
+
+    #[test]
+    fn one_failed_artifact_does_not_poison_its_batch() {
+        let dir = tempfile::tempdir().unwrap();
+        let mut cache = UpstreamStateCache::default();
+        cache.record(&pull(2), Some(UpstreamState::Open), 1);
+        store(dir.path(), &cache).unwrap();
+        let calls = RefCell::new(Vec::new());
+        // A short result fails only the artifacts it does not cover.
+        let lookup = |batch: &[GithubUpstream]| {
+            calls.borrow_mut().push(batch.len());
+            vec![Some(UpstreamState::Merged), None]
+        };
+        let report = observe(
+            dir.path(),
+            &wanted(&[1, 2, 3]),
+            1 + OPEN_TTL_SECS,
+            CALLS_PER_PASS,
+            ARTIFACTS_PER_CALL,
+            PASS_BUDGET,
+            &lookup,
+        )
+        .unwrap();
+        assert_eq!(*calls.borrow(), vec![3]);
+        // Planned never-observed first: 1, 3, then the stale open 2.
+        assert_eq!(report.observed, vec![(pull(1), UpstreamState::Merged)]);
+        assert_eq!(report.failed, vec![pull(3), pull(2)]);
+        let cache = load(dir.path());
+        assert_eq!(cache.state_of(&pull(1)), Some(UpstreamState::Merged));
+        assert_eq!(cache.state_of(&pull(2)), Some(UpstreamState::Open));
+        assert_eq!(cache.state_of(&pull(3)), None);
     }
 
     #[test]
     fn a_zero_budget_defers_every_lookup() {
         let dir = tempfile::tempdir().unwrap();
-        let lookup = |_: &GithubUpstream| -> Option<UpstreamState> { panic!("no lookup") };
-        let report = observe(dir.path(), &wanted(&[1, 2]), 0, 8, Duration::ZERO, &lookup).unwrap();
+        let lookup = |_: &[GithubUpstream]| -> Vec<Option<UpstreamState>> { panic!("no lookup") };
+        let report = observe(
+            dir.path(),
+            &wanted(&[1, 2]),
+            0,
+            CALLS_PER_PASS,
+            ARTIFACTS_PER_CALL,
+            Duration::ZERO,
+            &lookup,
+        )
+        .unwrap();
         assert_eq!(report.deferred, 2);
+        assert_eq!(report.calls, 0);
         assert!(!cache_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn the_query_groups_artifacts_by_repository_with_unique_aliases() {
+        let batch = vec![
+            pull(7),
+            GithubUpstream::issue("x", "y", 8),
+            GithubUpstream::issue("o", "r", 9),
+        ];
+        assert_eq!(
+            graphql_query(&batch),
+            concat!(
+                "query{",
+                "r0:repository(owner:\"o\",name:\"r\"){",
+                "a0:pullRequest(number:7){state}",
+                "a2:issueOrPullRequest(number:9){...on Issue{state}...on PullRequest{state}}",
+                "}",
+                "r1:repository(owner:\"x\",name:\"y\"){",
+                "a1:issueOrPullRequest(number:8){...on Issue{state}...on PullRequest{state}}",
+                "}}",
+            )
+        );
+        // Names are string literals, never raw query text.
+        let hostile = GithubUpstream::pull_request("o\"){x}", "r", 1);
+        assert!(graphql_query(&[hostile]).contains(r#"owner:"o\"){x}""#));
+    }
+
+    #[test]
+    fn a_partial_graphql_response_fails_only_the_missing_artifacts() {
+        let batch = vec![
+            pull(1),
+            GithubUpstream::issue("o", "r", 2),
+            pull(999),
+            GithubUpstream::issue("gone", "repo", 3),
+        ];
+        // `gh api graphql` output for a partial answer (exit status 1).
+        let response = r#"{"data":{"r0":{"a0":{"state":"MERGED"},"a1":{"state":"CLOSED"},"a2":null},"r1":null},"errors":[{"type":"NOT_FOUND","path":["r1"]},{"type":"NOT_FOUND","path":["r0","a2"]}]}"#;
+        assert_eq!(
+            parse_graphql_response(&batch, response),
+            vec![
+                Some(UpstreamState::Merged),
+                Some(UpstreamState::Closed),
+                None,
+                None,
+            ]
+        );
+        assert_eq!(parse_graphql_response(&batch, "not json"), vec![None; 4]);
+        assert_eq!(
+            parse_graphql_response(&batch, r#"{"errors":[{"message":"Bad credentials"}]}"#),
+            vec![None; 4]
+        );
     }
 
     #[test]
@@ -525,26 +794,36 @@ mod tests {
 
     #[cfg(unix)]
     #[test]
-    fn github_state_reads_the_gh_program_output() {
+    fn github_states_runs_one_graphql_call_and_reads_a_partial_answer() {
         use std::os::unix::fs::PermissionsExt;
         let dir = tempfile::tempdir().unwrap();
+        let args = dir.path().join("args");
         let fake = dir.path().join("gh");
+        // Partial answer: `gh` prints the data and exits 1.
         std::fs::write(
             &fake,
-            "#!/bin/sh\ncase \"$1 $3\" in\n  'pr 7') echo MERGED ;;\n  'issue 8') echo CLOSED ;;\n  *) exit 1 ;;\nesac\n",
+            format!(
+                "#!/bin/sh\nprintf '%s\\n' \"$@\" > '{}'\necho '{}'\nexit 1\n",
+                args.display(),
+                r#"{"data":{"r0":{"a0":{"state":"MERGED"},"a1":null},"r1":{"a2":{"state":"OPEN"}}},"errors":[{"type":"NOT_FOUND","path":["r0","a1"]}]}"#,
+            ),
         )
         .unwrap();
         std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let gh = fake.as_os_str();
-        assert_eq!(github_state_with(gh, &pull(7)), Some(UpstreamState::Merged));
+        let batch = vec![pull(7), pull(9), GithubUpstream::issue("x", "y", 8)];
         assert_eq!(
-            github_state_with(gh, &GithubUpstream::issue("o", "r", 8)),
-            Some(UpstreamState::Closed)
+            github_states_with(fake.as_os_str(), &batch),
+            vec![Some(UpstreamState::Merged), None, Some(UpstreamState::Open)]
         );
-        assert_eq!(github_state_with(gh, &pull(9)), None);
+        let recorded = std::fs::read_to_string(&args).unwrap();
         assert_eq!(
-            github_state_with(dir.path().join("missing").as_os_str(), &pull(7)),
-            None
+            recorded,
+            format!("api\ngraphql\n-f\nquery={}\n", graphql_query(&batch))
         );
+        assert_eq!(
+            github_states_with(dir.path().join("missing").as_os_str(), &batch),
+            vec![None; 3]
+        );
+        assert!(github_states_with(fake.as_os_str(), &[]).is_empty());
     }
 }

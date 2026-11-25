@@ -12862,25 +12862,32 @@ mod tests {
         assert_eq!(wanted, vec![11, 12, 13, 14, 15]);
 
         let lookups = std::cell::Cell::new(0);
-        let lookup = |upstream: &agent_doc_answer_ledger::graph::GithubUpstream| {
+        let lookup = |batch: &[agent_doc_answer_ledger::graph::GithubUpstream]| {
             lookups.set(lookups.get() + 1);
-            Some(match upstream.number {
-                12 => UpstreamState::Open,
-                13 => UpstreamState::Closed,
-                _ => UpstreamState::Merged,
-            })
+            batch
+                .iter()
+                .map(|upstream| {
+                    Some(match upstream.number {
+                        12 => UpstreamState::Open,
+                        13 => UpstreamState::Closed,
+                        _ => UpstreamState::Merged,
+                    })
+                })
+                .collect()
         };
         let report = upstream_state::observe_document(&doc, content, 1_000, &lookup)
             .unwrap()
             .expect("wanted artifacts");
         assert_eq!(report.observed.len(), 5);
-        assert_eq!(lookups.get(), 5);
+        // One batched call covers the whole watch set.
+        assert_eq!(report.calls, 1);
+        assert_eq!(lookups.get(), 1);
         // A second pass right after finds nothing due.
         let again = upstream_state::observe_document(&doc, content, 1_001, &lookup)
             .unwrap()
             .unwrap();
         assert!(again.observed.is_empty() && again.failed.is_empty());
-        assert_eq!(lookups.get(), 5);
+        assert_eq!(lookups.get(), 1);
 
         let signals = todo_signals_for_document(&doc, content);
         let flagged: std::collections::BTreeMap<&str, (&str, &str)> = signals

@@ -20,8 +20,10 @@
 //!   single-column layout, never `unknown`.
 //! - [`resolve_client_measured_layout`]: the JetBrains Client's measured main
 //!   window forwarded by the modular backend (GH #320 option B). Only measured,
-//!   distinct origins are authority; anything less keeps the last forwarded
-//!   layout in force instead of collapsing it.
+//!   distinct origins are authority. A window whose selected tab is not a
+//!   session document keeps the last forwarded layout only when publishing the
+//!   other windows would collapse the split (GH #443); it does not freeze
+//!   sibling columns that are already measured.
 //!
 //! Both are pure total functions over plain values. The plugin keeps a frozen
 //! compatibility copy only for a native library that cannot answer; new rules
@@ -398,15 +400,15 @@ pub fn resolve_client_measured_layout(
     let mut windows: Vec<&ClientWindowEvidence> = evidence.windows.iter().collect();
     windows.sort_by_key(|window| window.ordinal);
     let mut measured = Vec::new();
+    // A selected tab that is not a session document, while the window still
+    // holds one. Its own column is unknown. Sibling measured columns still
+    // publish (GH #443); the flag below keeps the last layout only when those
+    // siblings would collapse the split (`#stickymdpane`).
+    let mut sticky_non_session = false;
     for window in windows {
         let Some(selected) = window.selected_session.as_ref() else {
-            // `#stickymdpane`: a split showing a source tab next to its session
-            // documents is still on screen; its column is unknown, not gone.
-            // Keep the last forwarded layout rather than collapse it. A window
-            // with no session document contributes no column, so closing a
-            // split still collapses the layout.
             if window.holds_session_document {
-                return unavailable("split_shows_non_session_tab");
+                sticky_non_session = true;
             }
             continue;
         };
@@ -420,7 +422,11 @@ pub fn resolve_client_measured_layout(
         });
     }
     if measured.is_empty() {
-        return unavailable("no_session_documents");
+        return unavailable(if sticky_non_session {
+            "split_shows_non_session_tab"
+        } else {
+            "no_session_documents"
+        });
     }
     if !measured_column_order(&measured).is_geometry() {
         return unavailable("shared_origin");
@@ -440,6 +446,9 @@ pub fn resolve_client_measured_layout(
         .collect();
     if columns.is_empty() {
         return unavailable("no_session_documents");
+    }
+    if sticky_non_session && columns.len() < 2 {
+        return unavailable("split_shows_non_session_tab");
     }
     let focused = measured
         .iter()
@@ -812,6 +821,28 @@ mod tests {
         assert_eq!(
             reason(vec![client(0, None, false, Some((0, 0)))]),
             "no_session_documents"
+        );
+    }
+
+    #[test]
+    fn a_non_session_window_does_not_freeze_sibling_measured_columns() {
+        // GH #443: three measured windows. Two are the editor's current session
+        // pair; the third still holds a session document while its selected tab
+        // is not one. That unknown column must not keep the previously
+        // forwarded pair.
+        let layout = resolve_client_measured_layout(&ClientMeasuredLayoutEvidence {
+            windows: vec![
+                client(0, Some("/r/a.md"), true, Some((0, 0))),
+                client(1, None, true, Some((1600, 0))),
+                client(2, Some("/r/b.md"), true, Some((800, 0))),
+            ],
+        });
+        assert_eq!(
+            layout,
+            ClientMeasuredLayout::Measured {
+                columns: vec![vec!["/r/a.md".into()], vec!["/r/b.md".into()]],
+                focused: "/r/a.md".into(),
+            }
         );
     }
 

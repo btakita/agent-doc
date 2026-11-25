@@ -6,12 +6,14 @@ import com.github.btakita.agentdoc.AgentDocSessionFiles
 import com.github.btakita.agentdoc.CpRouteClient
 import com.github.btakita.agentdoc.EditorDerivation
 import com.github.btakita.agentdoc.EditorLayout
+import com.github.btakita.agentdoc.EditorOpenFileSurface
 import com.github.btakita.agentdoc.EditorTabSyncListener
 import com.github.btakita.agentdoc.LayoutColumn
 import com.github.btakita.agentdoc.LayoutDetector
 import com.github.btakita.agentdoc.RemoteClientLayoutAuthority
 import com.github.btakita.agentdoc.SyncLayoutAction
 import com.github.btakita.agentdoc.TerminalUtil
+import com.intellij.openapi.application.ReadAction
 import com.github.btakita.agentdoc.split.FrontendSurface
 import com.github.btakita.agentdoc.split.FrontendSurfaceSnapshot
 import com.github.btakita.agentdoc.split.FOCUSED_EDITOR_SURFACE_SNAPSHOT_SCHEMA_VERSION
@@ -441,7 +443,7 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
             noteUnavailable(surfaceId, "local_client")
             return
         }
-        val layout = when (val derived = RemoteClientMeasuredLayout.derive(snapshot, ::isSessionDocument)) {
+        val layout = when (val derived = RemoteClientMeasuredLayout.derive(snapshot, sessionDocumentClassifier())) {
             is MeasuredMainLayout.Unavailable -> {
                 noteUnavailable(surfaceId, derived.reason)
                 return
@@ -523,13 +525,64 @@ internal class ControllerRemoteClientLayoutForwarder(private val project: Projec
             marketplaceRemoteSessions(project),
         )
 
-    private fun isSessionDocument(path: String): Boolean {
+    /**
+     * GH #443: the layout detector classifies the remote editor's own
+     * [com.intellij.openapi.vfs.VirtualFile]. `LocalFileSystem.findFileByPath`
+     * misses that file when the snapshot path is not yet a local VFS entry, and
+     * a miss next to a still-open session tab freezes the last forwarded pair.
+     * An open editor path is the same fact the detector already accepted.
+     */
+    private fun sessionDocumentClassifier(): (String) -> Boolean {
+        val openSessionPaths = runCatching {
+            ReadAction.compute<List<String>, RuntimeException> {
+                EditorOpenFileSurface.snapshot(project)
+                    .filter(AgentDocSessionFiles::isSessionDocument)
+                    .map { it.path }
+            }
+        }.getOrDefault(emptyList())
+        return { path -> pathIsSessionDocument(path, openSessionPaths, ::fileSystemSessionDocument) }
+    }
+
+    private fun fileSystemSessionDocument(path: String): Boolean {
         val file = LocalFileSystem.getInstance().findFileByPath(path) ?: return false
         return AgentDocSessionFiles.isSessionDocument(file)
     }
 
     companion object {
         private val LOG = Logger.getInstance(ControllerRemoteClientLayoutForwarder::class.java)
+    }
+}
+
+/**
+ * GH #443: a snapshot path names a session document when an editor already open
+ * on this backend does, or when the local filesystem does. Empty paths never
+ * match. Canonical comparison is only for absolute paths, so a relative path
+ * cannot collide with the worker's working directory.
+ */
+internal fun pathIsSessionDocument(
+    path: String,
+    openSessionPaths: Collection<String>,
+    filesystemSaysSession: (String) -> Boolean,
+): Boolean =
+    path.isNotEmpty() &&
+        (snapshotPathIsOpenSession(path, openSessionPaths) || filesystemSaysSession(path))
+
+internal fun snapshotPathIsOpenSession(path: String, openSessionPaths: Collection<String>): Boolean =
+    path.isNotEmpty() && openSessionPaths.any { open -> snapshotPathsNameTheSameFile(path, open) }
+
+internal fun snapshotPathsNameTheSameFile(left: String, right: String): Boolean {
+    if (left.isEmpty() || right.isEmpty()) return false
+    if (left == right) return true
+    val normalizedLeft = java.nio.file.Paths.get(left).normalize().toString()
+    val normalizedRight = java.nio.file.Paths.get(right).normalize().toString()
+    if (normalizedLeft == normalizedRight) return true
+    val leftFile = java.io.File(left)
+    val rightFile = java.io.File(right)
+    if (!leftFile.isAbsolute || !rightFile.isAbsolute) return false
+    return try {
+        leftFile.canonicalPath == rightFile.canonicalPath
+    } catch (_: java.io.IOException) {
+        false
     }
 }
 

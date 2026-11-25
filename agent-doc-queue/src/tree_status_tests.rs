@@ -661,3 +661,274 @@ fn inerttreestrike_delete_plan_keeps_rows_with_remaining_work() {
         );
     }
 }
+
+// ---- `#operatorshouldnneed`: settled upstream headings --------------------
+
+/// 2026-11-24T12:00:00Z.
+const OBSERVED: u64 = 1_795_521_600;
+
+/// PR and issue headings in the shapes the live queues carry: note-only,
+/// with a live prompt child, a bare leaf, an issue heading with a generated
+/// id, one still open, and one already struck.
+const UPSTREAM_QUEUE: &str = concat!(
+    "- ### https://github.com/acme/widget-sdk/pull/403\n",
+    "  - %% ci(shadow): one-command setup and batch builds %%\n",
+    "- ### https://github.com/Acme/Widget-SDK/pull/404\n",
+    "  - %% docs %%\n",
+    "  - #rebase\n",
+    "- ### https://github.com/acme/widget-sdk/pull/405\n",
+    "- ### https://github.com/acme/widget-sdk/issues/435 [#q-7174ad2918b2]\n",
+    "  - %% first note %%\n",
+    "- ### https://github.com/acme/widget-sdk/pull/406\n",
+    "  - %% still open %%\n",
+    "- ### ~~https://github.com/acme/widget-sdk/pull/407~~\n",
+    "  - %% merged earlier %%\n",
+);
+
+fn upstream_states() -> UpstreamStates {
+    let mut states = UpstreamStates::default();
+    for (url, state) in [
+        (
+            "https://github.com/acme/widget-sdk/pull/403",
+            SettledUpstreamState::Merged,
+        ),
+        (
+            "https://github.com/acme/widget-sdk/pull/404",
+            SettledUpstreamState::Merged,
+        ),
+        (
+            "https://github.com/acme/widget-sdk/pull/405",
+            SettledUpstreamState::Closed,
+        ),
+        (
+            "https://github.com/acme/widget-sdk/issues/435",
+            SettledUpstreamState::Closed,
+        ),
+        (
+            "https://github.com/acme/widget-sdk/pull/407",
+            SettledUpstreamState::Merged,
+        ),
+    ] {
+        states.insert(url, state, OBSERVED);
+    }
+    states
+}
+
+#[test]
+fn settled_upstream_bare_github_artifact_url_normalizes_pull_and_issue_headings() {
+    use crate::document_queue::bare_github_artifact_url;
+    assert_eq!(
+        bare_github_artifact_url("### https://github.com/Acme/Widget-SDK/pull/404/").as_deref(),
+        Some("https://github.com/acme/widget-sdk/pull/404")
+    );
+    assert_eq!(
+        bare_github_artifact_url("https://github.com/acme/widget-sdk/issues/435 [#q-7174ad2918b2]")
+            .as_deref(),
+        Some("https://github.com/acme/widget-sdk/issues/435")
+    );
+    for not_a_heading in [
+        "review https://github.com/acme/widget-sdk/pull/404",
+        "https://github.com/acme/widget-sdk/pull/404/files",
+        "https://github.com/acme/widget-sdk/discussions/9",
+        "https://example.com/acme/widget-sdk/pull/404",
+    ] {
+        assert_eq!(
+            bare_github_artifact_url(not_a_heading),
+            None,
+            "{not_a_heading}"
+        );
+    }
+}
+
+/// Without observations tree status is unchanged: no heading is settled.
+#[test]
+fn settled_upstream_no_observations_reports_no_settled_heading() {
+    let document = queue_doc(UPSTREAM_QUEUE);
+    let plain = tree_status(&document, 1).unwrap();
+    let empty = tree_status_with_upstreams(&document, 1, &UpstreamStates::default()).unwrap();
+    assert_eq!(plain, empty);
+    assert!(plain.settled_upstream.is_empty(), "{plain:#?}");
+    assert!(
+        !plain.counts_line().contains("settled"),
+        "{}",
+        plain.counts_line()
+    );
+    assert!(!render_text(&plain).contains("Settled upstream"));
+}
+
+/// A merged or closed heading is flagged with the exact strike; one with an
+/// open child is flagged without it and the child stays agent work; an open
+/// or unobserved heading and a struck one are not flagged. Nothing is struck.
+#[test]
+fn settled_upstream_settled_headings_name_the_inerttreestrike_strike() {
+    let document = queue_doc(UPSTREAM_QUEUE);
+    let status = tree_status_with_upstreams(&document, 1, &upstream_states()).unwrap();
+    let settled = status
+        .settled_upstream
+        .iter()
+        .map(|row| (row.url.as_str(), row.upstream_state, row.open_children))
+        .collect::<Vec<_>>();
+    assert_eq!(
+        settled,
+        vec![
+            (
+                "https://github.com/acme/widget-sdk/pull/403",
+                SettledUpstreamState::Merged,
+                0
+            ),
+            (
+                "https://github.com/acme/widget-sdk/pull/404",
+                SettledUpstreamState::Merged,
+                1
+            ),
+            (
+                "https://github.com/acme/widget-sdk/pull/405",
+                SettledUpstreamState::Closed,
+                0
+            ),
+            (
+                "https://github.com/acme/widget-sdk/issues/435",
+                SettledUpstreamState::Closed,
+                0
+            ),
+        ],
+        "{status:#?}"
+    );
+    let note = &status.settled_upstream[0];
+    assert_eq!(note.row.line, line_of(&document, "pull/403"));
+    assert_eq!(
+        note.ack_text.as_deref(),
+        Some("https://github.com/acme/widget-sdk/pull/403")
+    );
+    assert_eq!(
+        note.summary.as_deref(),
+        Some("MERGED 2026-11-24: acme/widget-sdk#403 merged (upstream observation).")
+    );
+    assert!(note.row.action.contains("observed 2026-11-24"), "{note:#?}");
+    let unblocked = &status.settled_upstream[1];
+    assert_eq!(unblocked.ack_text, None, "an open child keeps the heading");
+    assert!(
+        unblocked.row.action.contains("unblocked, not done"),
+        "{unblocked:#?}"
+    );
+    let closed = &status.settled_upstream[2];
+    assert!(
+        closed
+            .row
+            .action
+            .starts_with("pull request closed unmerged (observed 2026-11-24); confirm it is moot"),
+        "{closed:#?}"
+    );
+    assert_eq!(
+        closed.summary.as_deref(),
+        Some("CLOSED 2026-11-24: acme/widget-sdk#405 closed unmerged (upstream observation).")
+    );
+    assert!(
+        status.settled_upstream[3]
+            .row
+            .action
+            .starts_with("issue closed (observed 2026-11-24); verify it is done or moot"),
+        "{status:#?}"
+    );
+    assert_eq!(
+        status.settled_upstream[3].ack_text.as_deref(),
+        Some("https://github.com/acme/widget-sdk/issues/435 [#q-7174ad2918b2]"),
+        "the ack text is the row as `--ack-text` matches it"
+    );
+
+    // The open child is still agent work; the bare merged leaf is not listed
+    // twice; the open heading 406 and struck 407 are in no settled row.
+    let agent = status
+        .agent
+        .iter()
+        .map(|row| row.text.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        agent.iter().any(|text| text.contains("#rebase")),
+        "{agent:?}"
+    );
+    assert!(
+        agent.iter().all(|text| !text.contains("pull/405")),
+        "{agent:?}"
+    );
+    assert!(status.counts_line().ends_with(" · 4 settled upstream"));
+
+    let text = render_text_for_file(&status, "tasks/session.md");
+    assert!(
+        text.contains(
+            "agent-doc queue consume 'tasks/session.md' --ack-text 'https://github.com/acme/widget-sdk/pull/403' --summary 'MERGED 2026-11-24: acme/widget-sdk#403 merged (upstream observation).'"
+        ),
+        "{text}"
+    );
+    assert!(
+        text.contains("agent-doc queue delete-tree 'tasks/session.md' --line 1 --apply"),
+        "{text}"
+    );
+    assert!(text.contains("Settled upstream (flag only"), "{text}");
+
+    // Asking about one heading answers for it alone.
+    let heading = tree_status_with_upstreams(
+        &document,
+        line_of(&document, "pull/403"),
+        &upstream_states(),
+    )
+    .unwrap();
+    assert_eq!(heading.settled_upstream.len(), 1, "{heading:#?}");
+    assert!(heading.agent.is_empty(), "{heading:#?}");
+
+    // The JSON answer carries the flag fields beside the row's own.
+    let json = serde_json::to_value(&status).unwrap();
+    let first = &json["settled_upstream"][0];
+    assert_eq!(first["upstream_state"], "merged");
+    assert_eq!(first["observed_at"], OBSERVED);
+    assert_eq!(first["line"], note.row.line);
+    assert_eq!(
+        first["ack_text"],
+        "https://github.com/acme/widget-sdk/pull/403"
+    );
+}
+
+/// The document form (`status?`) lists the settled headings as Status rows.
+#[test]
+fn settled_upstream_status_query_lists_settled_headings() {
+    let document = queue_doc(&format!("{UPSTREAM_QUEUE}- status?\n"));
+    let answered =
+        answer_status_queries_settled_with_upstreams(&document, &|_| true, &upstream_states())
+            .unwrap()
+            .unwrap()
+            .content;
+    assert!(
+        answered.contains(
+            "- **Settled upstream:** “https://github.com/acme/widget-sdk/pull/403” — pull request merged (observed 2026-11-24); verify the work landed"
+        ),
+        "{answered}"
+    );
+    assert!(answered.contains("· 4 settled upstream"), "{answered}");
+    // The plain entry point is unchanged.
+    let plain = answer_status_queries(&document).unwrap().unwrap().content;
+    assert!(!plain.contains("Settled upstream"), "{plain}");
+}
+
+/// After the suggested strike, the heading is no longer settled-open and the
+/// struck tree is Deletable, so `queue delete-tree` removes it.
+#[test]
+fn settled_upstream_a_struck_settled_heading_is_deletable() {
+    let document = queue_doc(concat!(
+        "- ### ~~https://github.com/acme/widget-sdk/pull/403~~\n",
+        "  - %% ci(shadow): one-command setup %%\n",
+        "  - **Response [#r-0123456789ab]**\n",
+        "    - **Timestamp:** 2026-11-25T03:46:03.000Z\n",
+        "    - **Summary:** MERGED 2026-11-24: acme/widget-sdk#403 merged (upstream observation).\n",
+        "    - **State:** Complete.\n",
+    ));
+    let status = tree_status_with_upstreams(&document, 1, &upstream_states()).unwrap();
+    assert!(status.settled_upstream.is_empty(), "{status:#?}");
+    assert_eq!(status.deletable.len(), 1, "{status:#?}");
+}
+
+#[test]
+fn settled_upstream_civil_date_matches_known_days() {
+    assert_eq!(civil_date(0), "1970-01-01");
+    assert_eq!(civil_date(OBSERVED), "2026-11-24");
+    assert_eq!(civil_date(951_782_400), "2000-02-29");
+}

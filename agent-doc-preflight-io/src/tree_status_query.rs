@@ -13,7 +13,8 @@ use std::path::Path;
 
 use agent_doc_queue::free_text_admission::FreeTextCoinGate;
 use agent_doc_queue::tree_status::{
-    AnsweredStatusQuery, answer_status_queries_settled, carry_status_answers_into_snapshot,
+    AnsweredStatusQuery, answer_status_queries_settled_with_upstreams,
+    carry_status_answers_into_snapshot,
 };
 use anyhow::Result;
 
@@ -35,8 +36,14 @@ pub fn run_tree_status_query_maintenance(
         }
         Some(_) => return Ok(Vec::new()),
     };
-    let Some(answers) =
-        answer_status_queries_settled(&content, &|line| coin_gate.allows_coining(line))?
+    // `#operatorshouldnneed`: URL headings the background observer recorded merged or
+    // closed are listed as Settled upstream, from the cache alone.
+    let upstreams = super::upstream_state::heading_states_for(file);
+    let Some(answers) = answer_status_queries_settled_with_upstreams(
+        &content,
+        &|line| coin_gate.allows_coining(line),
+        &upstreams,
+    )?
     else {
         return Ok(Vec::new());
     };

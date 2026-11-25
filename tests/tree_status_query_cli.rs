@@ -137,6 +137,84 @@ fn tree_status_answers_for_the_subtree_at_a_line() {
     assert!(!output.status.success(), "line 1 is outside every queue");
 }
 
+/// `#operatorshouldnneed`: a URL heading whose pull request the background observer
+/// recorded merged is listed under Settled upstream with the exact strike,
+/// read from the project cache alone (no `gh`: `AGENT_DOC_GH` points at a
+/// program that does not exist). Nothing is written.
+#[test]
+fn tree_status_flags_url_headings_the_cache_records_merged() {
+    let dir = tempfile::tempdir().unwrap();
+    let doc = session(
+        dir.path(),
+        concat!(
+            "- ### https://github.com/acme/widget-sdk/pull/403\n",
+            "  - %% ci(shadow): one-command setup %%\n",
+            "- ### https://github.com/acme/widget-sdk/pull/406\n",
+            "  - %% still open %%\n",
+        ),
+    );
+    fs::create_dir_all(dir.path().join(".agent-doc/state")).unwrap();
+    fs::write(
+        dir.path()
+            .join(".agent-doc/state/github-upstream-state.json"),
+        concat!(
+            "{\"upstreams\": {",
+            "\"github:acme/widget-sdk/pull/403\": {\"state\": \"merged\", \"observed_at\": 1795521600},",
+            "\"github:acme/widget-sdk/pull/406\": {\"state\": \"open\", \"observed_at\": 1795521600}",
+            "}}\n",
+        ),
+    )
+    .unwrap();
+    let path = doc.to_str().unwrap();
+    let content = fs::read_to_string(&doc).unwrap();
+    let marker = line_of(&content, "<!-- agent:queue").to_string();
+
+    let output = Command::new(env!("CARGO_BIN_EXE_agent-doc"))
+        .env(
+            agent_doc_controller_io::project_controller::TEST_CONTROLLER_LAUNCH_REASON_ENV,
+            CONTROLLER_LAUNCH_REASON,
+        )
+        .env(
+            "AGENT_DOC_ROOT_CEILING_DIRECTORIES",
+            dir.path().parent().unwrap(),
+        )
+        .env("AGENT_DOC_GH", dir.path().join("no-such-gh"))
+        .current_dir(dir.path())
+        .args(["queue", "tree-status", path, "--line", &marker])
+        .output()
+        .unwrap();
+    assert_ok(&output, "queue tree-status");
+    let text = String::from_utf8_lossy(&output.stdout);
+    assert!(text.contains("· 1 settled upstream"), "{text}");
+    assert!(
+        text.contains(&format!(
+            "agent-doc queue consume '{path}' --ack-text 'https://github.com/acme/widget-sdk/pull/403' --summary 'MERGED 2026-11-24: acme/widget-sdk#403 merged (upstream observation).'"
+        )),
+        "{text}"
+    );
+    assert!(
+        !text.contains("pull/406 —"),
+        "an open PR is not flagged: {text}"
+    );
+
+    let output = run_agent_doc(
+        dir.path(),
+        &["queue", "tree-status", path, "--line", &marker, "--json"],
+    );
+    assert_ok(&output, "queue tree-status --json");
+    let status: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        status["settled_upstream"][0]["url"], "https://github.com/acme/widget-sdk/pull/403",
+        "{status:#}"
+    );
+    assert_eq!(
+        status["settled_upstream"].as_array().map(Vec::len),
+        Some(1),
+        "{status:#}"
+    );
+    assert_eq!(fs::read_to_string(&doc).unwrap(), content, "read-only");
+}
+
 /// Preflight on `queue_rows` (whose snapshot is taken without the edit),
 /// after `edit` rewrote the document; returns the contract and the document.
 fn preflight_after(queue_rows: &str, edit: &dyn Fn(&str) -> String) -> (serde_json::Value, String) {

@@ -501,6 +501,33 @@ pub fn report(file: &Path, content: &str, now: u64) -> UpstreamReport {
     }
 }
 
+impl UpstreamStateCache {
+    /// The terminal observations, in the form `queue tree-status` reads
+    /// (`#operatorshouldnneed`): a live URL heading whose artifact is merged or closed is
+    /// listed under Settled upstream. Open, failed and unparseable entries
+    /// are left out. Reads the cache only; never runs `gh`.
+    pub fn heading_states(&self) -> agent_doc_queue::tree_status::UpstreamStates {
+        use agent_doc_queue::tree_status::SettledUpstreamState;
+        let mut states = agent_doc_queue::tree_status::UpstreamStates::default();
+        for (node_id, entry) in &self.upstreams {
+            let state = match entry.state {
+                Some(UpstreamState::Merged) => SettledUpstreamState::Merged,
+                Some(UpstreamState::Closed) => SettledUpstreamState::Closed,
+                Some(UpstreamState::Open) | None => continue,
+            };
+            if let Some(upstream) = GithubUpstream::from_node_id(node_id) {
+                states.insert(&upstream.url(), state, entry.observed_at);
+            }
+        }
+        states
+    }
+}
+
+/// [`UpstreamStateCache::heading_states`] of the project containing `file`.
+pub fn heading_states_for(file: &Path) -> agent_doc_queue::tree_status::UpstreamStates {
+    load_for(file).heading_states()
+}
+
 /// The current time in seconds, as the observation pass records it.
 pub fn now() -> u64 {
     now_secs()
@@ -533,6 +560,55 @@ mod tests {
         assert!(cache.is_due(&pull(3), later));
         assert!(cache.is_due(&pull(4), 0));
         assert!(cache.has_terminal());
+    }
+
+    /// `#operatorshouldnneed`: `queue tree-status` reads the terminal observations only,
+    /// from the project cache, keyed by the artifact URL.
+    #[test]
+    fn settled_upstream_heading_states_are_the_terminal_observations_of_the_project_cache() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("session.md");
+        let content = concat!(
+            "<!-- agent:queue id=\"main\" -->\n",
+            "- ### https://github.com/o/r/pull/1\n",
+            "  - %% merged %%\n",
+            "- ### https://github.com/o/r/issues/2\n",
+            "  - %% closed %%\n",
+            "- ### https://github.com/o/r/pull/3\n",
+            "  - %% open %%\n",
+            "- ### https://github.com/o/r/pull/4\n",
+            "  - %% lookup failed %%\n",
+            "<!-- /agent:queue -->\n",
+        );
+        std::fs::write(&doc, content).unwrap();
+        let mut cache = UpstreamStateCache::default();
+        cache.record(&pull(1), Some(UpstreamState::Merged), 1_795_521_600);
+        cache.record(
+            &GithubUpstream::issue("o", "r", 2),
+            Some(UpstreamState::Closed),
+            1_795_521_600,
+        );
+        cache.record(&pull(3), Some(UpstreamState::Open), 1_795_521_600);
+        cache.record(&pull(4), None, 1_795_521_600);
+        store(dir.path(), &cache).unwrap();
+
+        let states = heading_states_for(&doc);
+        assert_eq!(states.len(), 2, "{states:?}");
+        let status =
+            agent_doc_queue::tree_status::tree_status_with_upstreams(content, 1, &states).unwrap();
+        let settled = status
+            .settled_upstream
+            .iter()
+            .map(|row| (row.url.as_str(), row.upstream_state.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            settled,
+            vec![
+                ("https://github.com/o/r/pull/1", "merged"),
+                ("https://github.com/o/r/issues/2", "closed"),
+            ]
+        );
     }
 
     #[test]

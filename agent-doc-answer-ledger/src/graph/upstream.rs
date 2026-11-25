@@ -84,6 +84,11 @@ impl GithubUpstream {
         )
     }
 
+    /// The artifact an evidence-node id ([`Self::node_id`]) names.
+    pub fn from_node_id(id: &str) -> Option<Self> {
+        upstream_from_node_id(id)
+    }
+
     pub fn url(&self) -> String {
         format!(
             "https://github.com/{}/{}/{}/{}",

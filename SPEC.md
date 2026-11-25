@@ -121,11 +121,21 @@
     names. Flag-only: the agent verifies against the item, then closes it
     with the named flag or rewrites it. External blocker settlement
     (`#blockergraph`) reads the same terminal states before its own lookup.
+  - **Read (queue tree-status, `#operatorshouldnneed`):** `queue tree-status`, and the
+    `status?` Status rows preflight writes, list each live queue URL heading
+    (`### https://github.com/<o>/<r>/pull|issues/<n>`, optionally with a
+    generated `[#q-…]` id) whose cached state is merged or closed under
+    **Settled upstream**, from the cache alone (no `gh`). With nothing open
+    under it, the row names the exact `#inerttreestrike` strike
+    (`queue consume FILE --ack-text '<row>' --summary 'MERGED|CLOSED <date>:
+    <o>/<r>#<n> … (upstream observation).'`), after which the struck tree is
+    Deletable for `queue delete-tree`. With open rows under it, the heading is
+    flagged without a strike: a merge can mean those rows are unblocked, not
+    done. Flag-only: nothing is struck automatically.
   - **Next increments** (not yet built): a controller-scheduled refresh for
     documents with no admissions; queue (`agent:run`) heads and `agent:done`
-    trees citing artifacts; feeding settled ids to `queue tree-status`
-    (`#treestatusquery`) so the `#inerttreestrike` write paths can strike
-    them.
+    trees citing artifacts in the watch set (until then a heading is reported
+    only when a tracked item also cites its artifact).
   See [Document Format](specs/02-document-format.md#components).
 
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming

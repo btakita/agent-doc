@@ -28,9 +28,18 @@
 //! whether that prompt item tree is deletable; the answer is one Status row,
 //! and the still-open query is not itself a reason to keep the tree open.
 //!
+//! A URL heading whose GitHub pull request or issue the background observer
+//! recorded merged or closed (`#operatorshouldnneed`) is listed under
+//! **Settled upstream** (`#operatorshouldnneed`). The caller supplies those observations
+//! ([`UpstreamStates`], read from the project's cache; this module never asks
+//! GitHub). The row is flag-only: a merged pull request can mean the work
+//! under the heading is unblocked, not done, so the answer names the exact
+//! strike (`queue consume --ack-text … --summary …`) for the agent to run
+//! after it verifies, and never strikes anything itself.
+//!
 //! This module is pure: it reads a document string and returns a new one.
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use agent_doc_element::element;
 use agent_doc_markdown_ast::tree_status_row::{
@@ -70,6 +79,127 @@ pub struct TreeStatusRow {
     pub action: String,
 }
 
+/// A terminal GitHub state of a URL heading's artifact (`#operatorshouldnneed`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SettledUpstreamState {
+    /// A pull request that was merged.
+    Merged,
+    /// An issue that was closed, or a pull request closed without merging.
+    Closed,
+}
+
+impl SettledUpstreamState {
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Merged => "merged",
+            Self::Closed => "closed",
+        }
+    }
+
+    const fn upper(self) -> &'static str {
+        match self {
+            Self::Merged => "MERGED",
+            Self::Closed => "CLOSED",
+        }
+    }
+}
+
+/// One terminal observation: the state and when the observer recorded it
+/// (Unix seconds).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct UpstreamObservation {
+    pub state: SettledUpstreamState,
+    pub observed_at: u64,
+}
+
+/// The terminal GitHub states tree status may report, keyed by the
+/// normalized artifact URL ([`document_queue::bare_github_artifact_url`]).
+/// The caller builds it from the background observer's cache
+/// (`agent_doc_preflight_io::upstream_state::heading_states`); open and
+/// unobserved artifacts are simply absent.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct UpstreamStates {
+    by_url: BTreeMap<String, UpstreamObservation>,
+}
+
+impl UpstreamStates {
+    /// Record `url` (any form [`document_queue::bare_github_artifact_url`]
+    /// accepts) as observed `state` at `observed_at`.
+    pub fn insert(&mut self, url: &str, state: SettledUpstreamState, observed_at: u64) {
+        if let Some(key) = document_queue::bare_github_artifact_url(url) {
+            self.by_url
+                .insert(key, UpstreamObservation { state, observed_at });
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.by_url.is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.by_url.len()
+    }
+
+    fn get(&self, url: &str) -> Option<UpstreamObservation> {
+        self.by_url.get(url).copied()
+    }
+}
+
+/// A live URL heading whose artifact is observed merged or closed
+/// (`#operatorshouldnneed`). Flag-only: the agent verifies, then runs the strike.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct SettledUpstreamRow {
+    #[serde(flatten)]
+    pub row: TreeStatusRow,
+    /// The normalized artifact URL.
+    pub url: String,
+    pub upstream_state: SettledUpstreamState,
+    /// When the background observer recorded the state (Unix seconds).
+    pub observed_at: u64,
+    /// Live rows under the heading. While any is open the heading is not
+    /// struck: the merge may only have unblocked them.
+    pub open_children: usize,
+    /// The exact `queue consume --ack-text` value that strikes the heading,
+    /// when nothing under it is open.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ack_text: Option<String>,
+    /// A `--summary` naming the observation, to extend with what landed.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+}
+
+/// `YYYY-MM-DD` (UTC) of Unix seconds `secs`.
+fn civil_date(secs: u64) -> String {
+    let days = (secs / 86_400) as i64;
+    // Howard Hinnant's days-from-civil inverse.
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z.rem_euclid(146_097);
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let day = doy - (153 * mp + 2) / 5 + 1;
+    let month = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = yoe + era * 400 + i64::from(month <= 2);
+    format!("{year:04}-{month:02}-{day:02}")
+}
+
+/// `acme/widget#403` for a normalized artifact URL.
+fn short_ref(url: &str) -> String {
+    let rest = url.strip_prefix("https://github.com/").unwrap_or(url);
+    let parts = rest.split('/').collect::<Vec<_>>();
+    match parts.as_slice() {
+        [owner, repo, _, number] => format!("{owner}/{repo}#{number}"),
+        _ => url.to_string(),
+    }
+}
+
+/// POSIX single-quoted shell word.
+fn shell_quote(text: &str) -> String {
+    format!("'{}'", text.replace('\'', "'\\''"))
+}
+
 /// The answer to one tree-status query.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct TreeStatus {
@@ -97,18 +227,29 @@ pub struct TreeStatus {
     /// Rows the binary cannot classify; `status? deep` queues an agent turn
     /// for them.
     pub needs_review: Vec<TreeStatusRow>,
+    /// Live URL headings whose pull request or issue is observed merged or
+    /// closed (`#operatorshouldnneed`). Flag-only.
+    pub settled_upstream: Vec<SettledUpstreamRow>,
 }
 
 impl TreeStatus {
-    /// `1 you · 2 agent · 1 deletable · 0 need review`.
+    /// `1 you · 2 agent · 1 deletable · 0 need review`, plus
+    /// `· 1 settled upstream` when a heading is.
     pub fn counts_line(&self) -> String {
-        format!(
+        let mut line = format!(
             "{} you · {} agent · {} deletable · {} need review",
             self.you.len(),
             self.agent.len(),
             self.deletable.len(),
             self.needs_review.len()
-        )
+        );
+        if !self.settled_upstream.is_empty() {
+            line.push_str(&format!(
+                " · {} settled upstream",
+                self.settled_upstream.len()
+            ));
+        }
+        line
     }
 
     fn is_empty(&self) -> bool {
@@ -116,6 +257,7 @@ impl TreeStatus {
             && self.agent.is_empty()
             && self.deletable.is_empty()
             && self.needs_review.is_empty()
+            && self.settled_upstream.is_empty()
     }
 }
 
@@ -395,9 +537,89 @@ struct Context<'a> {
     scope: &'a [&'a QueueTreeNode],
     open_todo_ids: &'a HashSet<String>,
     as_of: Option<i64>,
+    upstreams: &'a UpstreamStates,
 }
 
 impl Context<'_> {
+    /// `#operatorshouldnneed`: a live URL heading whose artifact is observed terminal.
+    /// A row being worked (claimed, running, waiting, reported) is not one:
+    /// only an untouched heading (open, pending, seen, or a group parent).
+    fn settled_heading(&self, node: &QueueTreeNode, index: usize) -> Option<SettledUpstreamRow> {
+        if self.upstreams.is_empty()
+            || node.closed
+            || !matches!(
+                node.state,
+                QueueNodeState::Open
+                    | QueueNodeState::Pending
+                    | QueueNodeState::Seen
+                    | QueueNodeState::Group
+            )
+        {
+            return None;
+        }
+        let QueueEntry::Prompt(prompt) = self.view.entries.get(index)? else {
+            return None;
+        };
+        let url = document_queue::bare_github_artifact_url(&prompt.text)?;
+        let observation = self.upstreams.get(&url)?;
+        let open_children = self
+            .scope
+            .iter()
+            .filter(|other| {
+                other.line > node.line
+                    && other.line <= node.end_line
+                    && !other.closed
+                    && other.state != QueueNodeState::Group
+            })
+            .count();
+        let state = observation.state;
+        let date = civil_date(observation.observed_at);
+        let reference = short_ref(&url);
+        let pull = url.contains("/pull/");
+        // What the observation says, and what the agent checks before it
+        // strikes: a merge is likely DONE, a closed pull request likely MOOT.
+        let (what, verify) = match (pull, state) {
+            (true, SettledUpstreamState::Merged) => {
+                ("pull request merged", "verify the work landed")
+            }
+            (true, SettledUpstreamState::Closed) => (
+                "pull request closed unmerged",
+                "confirm it is moot or superseded",
+            ),
+            (false, _) => ("issue closed", "verify it is done or moot"),
+        };
+        let (ack_text, summary, action) = if open_children == 0 {
+            let ack = agent_doc_element_queue::strip_priority_markers(prompt.text.trim())
+                .trim()
+                .to_string();
+            let summary = format!(
+                "{} {date}: {reference} {} (upstream observation).",
+                state.upper(),
+                what.strip_prefix("pull request ")
+                    .or_else(|| what.strip_prefix("issue "))
+                    .unwrap_or(what)
+            );
+            let action = format!(
+                "{what} (observed {date}); {verify}, then strike the heading with `queue consume --ack-text` and a `--summary`"
+            );
+            (Some(ack), Some(summary), action)
+        } else {
+            let action = format!(
+                "{what} (observed {date}), but {open_children} row(s) under it are still open; that can mean they are unblocked, not done: settle each first, then strike the heading"
+            );
+            (None, None, action)
+        };
+        Some(SettledUpstreamRow {
+            row: row_of(node, action),
+            url,
+            upstream_state: state,
+            observed_at: observation.observed_at,
+            open_children,
+            ack_text,
+            summary,
+        })
+    }
+
     fn node_at(&self, line: usize) -> Option<&QueueTreeNode> {
         self.scope.iter().copied().find(|node| node.line == line)
     }
@@ -502,6 +724,16 @@ impl Context<'_> {
 /// `document`: the deepest queue row whose subtree contains the line, or the
 /// whole queue component when the line is inside one but on no row.
 pub fn tree_status(document: &str, line: usize) -> Result<TreeStatus> {
+    tree_status_with_upstreams(document, line, &UpstreamStates::default())
+}
+
+/// [`tree_status`], also listing the live URL headings `upstreams` reports
+/// merged or closed under **Settled upstream** (`#operatorshouldnneed`).
+pub fn tree_status_with_upstreams(
+    document: &str,
+    line: usize,
+    upstreams: &UpstreamStates,
+) -> Result<TreeStatus> {
     // `#staleguidance`: a struck row's State is derived, not stored. A
     // response still in the follow-up form whose action items all have their
     // own follow-up rows reads as the document re-derives it
@@ -545,10 +777,12 @@ pub fn tree_status(document: &str, line: usize) -> Result<TreeStatus> {
         scope: &scope,
         open_todo_ids: &open_todo_ids,
         as_of,
+        upstreams,
     };
     let document_lines = document.lines().collect::<Vec<_>>();
 
     let mut out = Buckets::default();
+    let mut settled_upstream = Vec::new();
     let mut covered: Vec<(usize, usize)> = Vec::new();
     let is_covered = |covered: &[(usize, usize)], line: usize| {
         covered
@@ -556,12 +790,26 @@ pub fn tree_status(document: &str, line: usize) -> Result<TreeStatus> {
             .any(|(start, end)| *start <= line && line <= *end)
     };
     for node in &scope {
-        if is_covered(&covered, node.line) || node.state == QueueNodeState::Group {
+        if is_covered(&covered, node.line) {
             continue;
         }
         let Some(index) = view.index_at_line(node.line) else {
             continue;
         };
+        // `#operatorshouldnneed`: a heading whose artifact is merged or closed is flagged,
+        // never struck. With nothing open under it, its strike replaces the
+        // `pick up this queued item` an executable bare URL would read; its
+        // open children are still classified on their own.
+        if let Some(settled) = context.settled_heading(node, index) {
+            let strikeable = settled.ack_text.is_some();
+            settled_upstream.push(settled);
+            if strikeable {
+                continue;
+            }
+        }
+        if node.state == QueueNodeState::Group {
+            continue;
+        }
         if context.is_live_waiting_head(node, index) {
             context.waiting_head(node, index, &mut out);
             covered.push((node.line, node.end_line));
@@ -665,6 +913,7 @@ pub fn tree_status(document: &str, line: usize) -> Result<TreeStatus> {
         agent: out.agent,
         deletable: out.deletable,
         needs_review: out.needs_review,
+        settled_upstream,
     })
 }
 
@@ -678,6 +927,11 @@ fn line_range(row: &TreeStatusRow) -> String {
 
 /// The compact text answer `agent-doc queue tree-status` prints.
 pub fn render_text(status: &TreeStatus) -> String {
+    render_text_for_file(status, "FILE")
+}
+
+/// [`render_text`] with `file` spelled into the commands it names.
+pub fn render_text_for_file(status: &TreeStatus, file: &str) -> String {
     let mut out = format!(
         "{} {} — {}\n",
         line_range(&TreeStatusRow {
@@ -714,6 +968,32 @@ pub fn render_text(status: &TreeStatus) -> String {
                 row.action
             ));
         }
+    }
+    if !status.settled_upstream.is_empty() {
+        out.push_str("Settled upstream (flag only; verify before striking):\n");
+        for settled in &status.settled_upstream {
+            let row = &settled.row;
+            out.push_str(&format!(
+                "  {:>9} {} {} — {}\n",
+                line_range(row),
+                row.glyph,
+                row.text,
+                row.action
+            ));
+            if let (Some(ack), Some(summary)) = (&settled.ack_text, &settled.summary) {
+                out.push_str(&format!(
+                    "            agent-doc queue consume {} --ack-text {} --summary {}\n",
+                    shell_quote(file),
+                    shell_quote(ack),
+                    shell_quote(summary)
+                ));
+            }
+        }
+        out.push_str(&format!(
+            "A struck heading is then Deletable: `agent-doc queue delete-tree {} --line {} --apply`.\n",
+            shell_quote(file),
+            status.line
+        ));
     }
     if !status.needs_review.is_empty() {
         out.push_str(
@@ -897,6 +1177,13 @@ pub fn reply_rows(status: &TreeStatus, indent: usize, kind: StatusQueryKind) -> 
             ));
         }
     }
+    for settled in &status.settled_upstream {
+        rows.push(format!(
+            "{child}- **Settled upstream:** “{}” — {} {AGENT_DOC_REPLY_GLYPH}",
+            sanitize(&settled.row.text),
+            sanitize(&settled.row.action)
+        ));
+    }
     rows
 }
 
@@ -1064,7 +1351,11 @@ fn deletable_answer_sentence(document: &str, target_line: usize) -> Result<Strin
     })
 }
 
-fn answer_query(document: &str, query: Query) -> Result<(String, AnsweredStatusQuery)> {
+fn answer_query(
+    document: &str,
+    query: Query,
+    upstreams: &UpstreamStates,
+) -> Result<(String, AnsweredStatusQuery)> {
     let views = component_views(document)?;
     let view = views
         .iter()
@@ -1122,7 +1413,7 @@ fn answer_query(document: &str, query: Query) -> Result<(String, AnsweredStatusQ
         }
     };
     let cleaned = lines.concat();
-    let status = tree_status(&cleaned, target_line)?;
+    let status = tree_status_with_upstreams(&cleaned, target_line, upstreams)?;
     let (rows, counts, queued_agent_turn) = if query.kind == StatusQueryKind::Deletable {
         let sentence = deletable_answer_sentence(&cleaned, target_line)?;
         let verdict = if sentence.starts_with("Safe to delete") {
@@ -1187,6 +1478,16 @@ pub fn answer_status_queries_settled(
     document: &str,
     allow: &dyn Fn(&str) -> bool,
 ) -> Result<Option<StatusQueryAnswers>> {
+    answer_status_queries_settled_with_upstreams(document, allow, &UpstreamStates::default())
+}
+
+/// [`answer_status_queries_settled`], with the Status rows also listing the
+/// URL headings `upstreams` reports merged or closed (`#operatorshouldnneed`).
+pub fn answer_status_queries_settled_with_upstreams(
+    document: &str,
+    allow: &dyn Fn(&str) -> bool,
+    upstreams: &UpstreamStates,
+) -> Result<Option<StatusQueryAnswers>> {
     let lower = document.to_ascii_lowercase();
     if !lower.contains(syntax::STATUS_QUERY) && !lower.contains(syntax::DELETABLE_QUERY) {
         return Ok(None);
@@ -1197,7 +1498,7 @@ pub fn answer_status_queries_settled(
         let Some(query) = first_query(&content, allow)? else {
             break;
         };
-        let (next, answer) = answer_query(&content, query)?;
+        let (next, answer) = answer_query(&content, query, upstreams)?;
         if next == content {
             break;
         }

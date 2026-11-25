@@ -474,6 +474,22 @@ A pull-request or issue URL heading whose only children are `%% … %%` notes is
 a navigation heading. The queue never claims or runs it, so tree status does
 not list it as agent work.
 
+When agent-doc's background check has seen that a heading's pull request
+merged or closed (or its issue closed), tree status lists the heading under
+**Settled upstream** with the exact command that strikes it:
+
+```text
+Settled upstream (flag only; verify before striking):
+  L277–L278 · https://github.com/acme/sdk/pull/100 — pull request merged (observed 2026-11-24); verify the work landed, then strike the heading with `queue consume --ack-text` and a `--summary`
+            agent-doc queue consume 'session.md' --ack-text 'https://github.com/acme/sdk/pull/100' --summary 'MERGED 2026-11-24: acme/sdk#100 merged (upstream observation).'
+A struck heading is then Deletable: `agent-doc queue delete-tree 'session.md' --line 273 --apply`.
+```
+
+Nothing is struck for you. A merge can mean the work under the heading is
+unblocked rather than done, so a heading with open rows under it is listed
+without a command until those rows are settled. Tree status reads the saved
+check results only; it never calls GitHub.
+
 ### Editing one line
 
 `agent-doc queue edit FILE` changes or deletes one line of a queue tree,

@@ -595,7 +595,10 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      --apply` deletes exactly the subtrees `queue tree-status --line <N>`
      lists as Deletable. A row the queue never runs because its only children
      are `%% … %%` notes (a PR or issue URL heading) closes with
-     `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<MERGED|CLOSED|MOOT: evidence>'`,
+     `agent-doc queue consume <FILE> --ack-text '<row>' --summary '<MERGED|CLOSED|MOOT: evidence>'`
+     (`queue tree-status` lists such headings whose PR the background check
+     saw merged or closed under **Settled upstream**, with that exact command;
+     verify first, a merge can mean unblocked rather than done, `#operatorshouldnneed`),
      and an extra copy of a `do [#id]` head in another queue goes with
      `agent-doc queue prune-duplicates <FILE> --apply` (add
      `--keep-copy <id>@<queue>` when it reports one unresolved); neither

@@ -6479,7 +6479,11 @@ enum QueueAction {
     /// `--line`; a line inside a queue component but on no row selects the
     /// whole queue. The document form is a `status?` child line (or a
     /// `[status?]` token on the row), which preflight answers with Status
-    /// reply rows. Never writes the document.
+    /// reply rows. A live GitHub pull-request or issue URL heading whose
+    /// state the background observer cached as merged or closed is listed
+    /// under `Settled upstream` with the exact `queue consume --ack-text …
+    /// --summary …` strike (`#operatorshouldnneed`); flag-only, read from the cache, never
+    /// `gh`. Never writes the document.
     #[command(after_help = agent_doc_frontmatter::frontmatter::queue_marker_legend_help())]
     TreeStatus {
         /// Path to the session document
@@ -11899,12 +11903,23 @@ fn try_main() -> anyhow::Result<()> {
             QueueAction::TreeStatus { file, line, json } => {
                 let content = std::fs::read_to_string(&file)
                     .with_context(|| format!("failed to read {}", file.display()))?;
-                let status = agent_doc_queue::tree_status::tree_status(&content, line)
-                    .with_context(|| format!("no queue tree status for {}", file.display()))?;
+                // `#operatorshouldnneed`: URL headings the background observer recorded
+                // merged or closed, read from the cache (never `gh`).
+                let upstreams = agent_doc_preflight_io::upstream_state::heading_states_for(&file);
+                let status = agent_doc_queue::tree_status::tree_status_with_upstreams(
+                    &content, line, &upstreams,
+                )
+                .with_context(|| format!("no queue tree status for {}", file.display()))?;
                 if json {
                     println!("{}", serde_json::to_string_pretty(&status)?);
                 } else {
-                    print!("{}", agent_doc_queue::tree_status::render_text(&status));
+                    print!(
+                        "{}",
+                        agent_doc_queue::tree_status::render_text_for_file(
+                            &status,
+                            &file.display().to_string()
+                        )
+                    );
                 }
                 Ok(())
             }

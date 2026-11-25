@@ -5271,6 +5271,47 @@ fn following_lines_are_only_comments(after: &str, own_indent: usize) -> bool {
 }
 
 fn is_bare_pull_request_url(text: &str) -> bool {
+    let work = bare_heading_work(text);
+    let work = work.trim();
+    work.split_whitespace().count() == 1 && github_pull_request_url(work)
+}
+
+/// The GitHub pull request or issue a URL heading row names, normalized to
+/// `https://github.com/<owner>/<repo>/<pull|issues>/<n>` with a lowercase
+/// owner and repo (`#operatorshouldnneed`): the row's whole work text, after the `### `
+/// heading, a strike wrapper, attempt projection and a generated `[#q-…]` id
+/// are stripped, is that one URL. Anything else is `None`.
+pub fn bare_github_artifact_url(text: &str) -> Option<String> {
+    let work = bare_heading_work(text);
+    let work = work.trim();
+    if work.split_whitespace().count() != 1 {
+        return None;
+    }
+    let token = work.strip_suffix('/').unwrap_or(work);
+    let rest = token
+        .strip_prefix("https://github.com/")
+        .or_else(|| token.strip_prefix("http://github.com/"))
+        .or_else(|| token.strip_prefix("https://www.github.com/"))
+        .or_else(|| token.strip_prefix("http://www.github.com/"))?;
+    let mut parts = rest.split('/');
+    let (owner, repo, kind, number) = (parts.next()?, parts.next()?, parts.next()?, parts.next()?);
+    (parts.next().is_none()
+        && matches!(kind, "pull" | "issues")
+        && github_slug(owner)
+        && github_slug(repo)
+        && !number.is_empty()
+        && number.bytes().all(|byte| byte.is_ascii_digit()))
+    .then(|| {
+        format!(
+            "https://github.com/{}/{}/{kind}/{number}",
+            owner.to_ascii_lowercase(),
+            repo.to_ascii_lowercase()
+        )
+    })
+}
+
+/// A heading row's work text with its presentation wrappers removed.
+fn bare_heading_work(text: &str) -> String {
     let mut work = text.trim().to_string();
     for _ in 0..4 {
         let trimmed = work.trim();
@@ -5286,8 +5327,7 @@ fn is_bare_pull_request_url(text: &str) -> bool {
         }
         work = next;
     }
-    let work = work.trim();
-    work.split_whitespace().count() == 1 && github_pull_request_url(work)
+    work
 }
 
 fn github_pull_request_url(token: &str) -> bool {

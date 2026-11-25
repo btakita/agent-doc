@@ -146,6 +146,14 @@ The controller runs **one** queue scheduler per process for every scheduled
   (`QueueScheduleGraph`): `Source` maps for each `(document, queue_id)` parsed
   spec, durable state, and in-flight mark; one `Computed` for the earliest wake;
   one `Effect` on that `Computed` that notifies the parked loop. No observers.
+- **Project timers.** The same loop serves named project timers
+  (`QueueScheduleGraph::arm_timer`, a `Source` of next deadlines that joins
+  the earliest wake). A due timer is disarmed and handed to the worker, which
+  runs it on a short-lived thread and re-arms it with the next deadline, so a
+  run never overlaps itself or holds a queue tick; a timer is dispatched at
+  most once per second. The one timer today is each project's scheduled
+  GitHub upstream-state refresh (`#operatorshouldnneed`, see SPEC.md), through
+  the `ProjectControllerRuntimeEffects::refresh_upstream_state` port.
 - **Realtime ingress.** Every relay-hub operation publishes a per-document
   queue-region change key (a hash of the `agent:run` region, plus a schedule
   hint) into a Lazily `Source`; an `Effect` enqueues a worker refresh when a

@@ -802,6 +802,19 @@ impl agent_doc_controller_io::project_controller::ProjectControllerRuntimeEffect
             source_content,
         )
     }
+
+    fn refresh_upstream_state(
+        &self,
+        project_root: &Path,
+        documents: &[(PathBuf, String)],
+    ) -> anyhow::Result<Option<u64>> {
+        // `#operatorshouldnneed`: the controller's scheduled refresh for
+        // documents with no admissions.
+        agent_doc_preflight_io::upstream_state::run_scheduled_upstream_refresh(
+            project_root,
+            documents,
+        )
+    }
 }
 
 /// The first step of every background maintenance run, detached child or

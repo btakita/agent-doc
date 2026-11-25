@@ -123,6 +123,25 @@
     and a call that fails outright fails its batch as a failed lookup.
     Logged `upstream_observation wanted= observed= terminal= failed=
     deferred= calls=`. `AGENT_DOC_UPSTREAM_OBSERVATION=off` disables it.
+  - **Effect (scheduled):** a document nobody admits still has its artifacts
+    observed. The project controller's scheduled-queue loop
+    (`#queueschedule`) carries one project timer per project
+    (`QueueScheduleGraph::arm_timer`), whose deadline joins the loop's
+    earliest wake; it needs no queue schedule and no extra thread or park.
+    First run 60 s after the scheduler starts (re-armed on every scheduler
+    replacement). A run, on its own short-lived thread so its lookups never
+    hold a queue tick, reads every session document's current text (relay
+    canonical or disk), unions their watch sets (an artifact live in any
+    document is live), and runs the same bounded, live-first refresh once
+    for the project (the cache is project-wide, so an artifact
+    an admitted document refreshed is not due). It re-arms for the earliest
+    watched artifact to come due, clamped to 60 s..30 min: the floor
+    continues a pass that deferred lookups, the ceiling picks up newly
+    tracked work. The timer is disarmed while it runs, so runs never
+    overlap. Logged `upstream_observation_scheduled root= documents= wanted=
+    observed= terminal= failed= deferred= calls= next_due=` when it looked anything
+    up, `upstream_observation_scheduled_failed` on error. The same
+    `AGENT_DOC_UPSTREAM_OBSERVATION=off` disables it.
   - **Computed (drift signal):** every preflight derives `stale_tracked_item`
     signals with `stale_kind` `upstream_merged` / `upstream_closed` from the
     cache alone (no `gh` on admission;
@@ -153,8 +172,6 @@
     Deletable for `queue delete-tree`. With open rows under it, the heading is
     flagged without a strike: a merge can mean those rows are unblocked, not
     done. Flag-only: nothing is struck automatically.
-  - **Next increments** (not yet built): a controller-scheduled refresh for
-    documents with no admissions.
   See [Document Format](specs/02-document-format.md#components).
 
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming

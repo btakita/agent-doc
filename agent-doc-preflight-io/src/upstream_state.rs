@@ -19,6 +19,11 @@
 //!   document. Terminal states are never refreshed;
 //!   an open state is refreshed after [`OPEN_TTL_SECS`]; a failed lookup is
 //!   retried after [`FAILED_LOOKUP_TTL_SECS`].
+//! - **Effect (scheduled)**: [`run_scheduled_upstream_refresh`], the same
+//!   bounded refresh over the union of every session document's watch set,
+//!   run by the project controller's scheduled-queue loop as a project timer
+//!   so a document nobody admits still has its artifacts observed. It re-arms
+//!   for [`UpstreamStateCache::next_due`].
 //! - **Computed**: preflight derives `stale_tracked_item` signals with
 //!   `stale_kind` `upstream_merged` / `upstream_closed` from the cache alone
 //!   ([`DecisionGraph::work_settled_by_upstream`]), `stale_queue_head` signals
@@ -116,6 +121,23 @@ impl UpstreamStateCache {
             Some(_) => age >= OPEN_TTL_SECS,
             None => age >= FAILED_LOOKUP_TTL_SECS,
         }
+    }
+
+    /// When the earliest artifact of `wanted` becomes due: `0` for a
+    /// never-observed one, `None` when every one is terminal (or `wanted` is
+    /// empty).
+    pub fn next_due(&self, wanted: &BTreeSet<GithubUpstream>) -> Option<u64> {
+        wanted
+            .iter()
+            .filter_map(|upstream| match self.upstreams.get(&upstream.node_id()) {
+                None => Some(0),
+                Some(entry) => match entry.state {
+                    Some(state) if state.is_terminal() => None,
+                    Some(_) => Some(entry.observed_at.saturating_add(OPEN_TTL_SECS)),
+                    None => Some(entry.observed_at.saturating_add(FAILED_LOOKUP_TTL_SECS)),
+                },
+            })
+            .min()
     }
 
     /// The due artifacts of `wanted`, at most `limit`: never-observed first,
@@ -430,11 +452,22 @@ pub fn observe_document(
     if live.is_empty() && done_only.is_empty() {
         return Ok(None);
     }
-    // Live work first; done entries get the calls the pass has left.
+    observe_tiers(&root, &live, &done_only, now, lookup).map(Some)
+}
+
+/// One bounded pass over `live` then `done_only`: live work first; done
+/// entries get the calls and wall budget the pass has left.
+fn observe_tiers(
+    root: &Path,
+    live: &BTreeSet<GithubUpstream>,
+    done_only: &BTreeSet<GithubUpstream>,
+    now: u64,
+    lookup: &BatchLookup<'_>,
+) -> Result<ObservationReport> {
     let started = Instant::now();
     let mut report = observe(
-        &root,
-        &live,
+        root,
+        live,
         now,
         CALLS_PER_PASS,
         ARTIFACTS_PER_CALL,
@@ -443,8 +476,8 @@ pub fn observe_document(
     )?;
     if !done_only.is_empty() {
         let rest = observe(
-            &root,
-            &done_only,
+            root,
+            done_only,
             now,
             CALLS_PER_PASS.saturating_sub(report.calls),
             ARTIFACTS_PER_CALL,
@@ -457,7 +490,7 @@ pub fn observe_document(
         report.deferred += rest.deferred;
         report.calls += rest.calls;
     }
-    Ok(Some(report))
+    Ok(report)
 }
 
 /// The deferred admission reconcile's observation pass (`#operatorshouldnneed`).
@@ -496,6 +529,89 @@ pub fn run_upstream_observation_on_admitted_cut(
         ),
     );
     Ok(None)
+}
+
+/// What one scheduled (project-wide) refresh did.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ScheduledRefreshReport {
+    /// Session documents whose watch sets were read.
+    pub documents: usize,
+    pub observation: ObservationReport,
+    /// When the next watched artifact becomes due (see
+    /// [`UpstreamStateCache::next_due`]); `None` when none will.
+    pub next_due: Option<u64>,
+}
+
+/// The scheduled refresh over `documents` (path and current text) with
+/// `lookup`: one bounded pass over the union of their watch sets, since the
+/// cache is project-wide. Never writes a document. A document admitted
+/// recently already refreshed its own artifacts, so they are not due here.
+pub fn refresh_project_upstreams(
+    root: &Path,
+    documents: &[(PathBuf, String)],
+    now: u64,
+    lookup: &BatchLookup<'_>,
+) -> Result<ScheduledRefreshReport> {
+    let mut live = BTreeSet::new();
+    let mut done_only = BTreeSet::new();
+    for (file, content) in documents {
+        let (doc_live, doc_done) = crate::answer_ledger::work_upstream_tiers(file, content);
+        live.extend(doc_live);
+        done_only.extend(doc_done);
+    }
+    // An artifact live in any document is live for the project.
+    done_only.retain(|upstream| !live.contains(upstream));
+    let wanted: BTreeSet<GithubUpstream> = live.union(&done_only).cloned().collect();
+    let observation = if wanted.is_empty() {
+        ObservationReport::default()
+    } else {
+        observe_tiers(root, &live, &done_only, now, lookup)?
+    };
+    Ok(ScheduledRefreshReport {
+        documents: documents.len(),
+        next_due: load(root).next_due(&wanted),
+        observation,
+    })
+}
+
+/// The project controller's scheduled refresh (`#operatorshouldnneed`):
+/// [`refresh_project_upstreams`] with `gh`, logged as
+/// `upstream_observation_scheduled` when it looked anything up. Returns when
+/// the next watched artifact becomes due; `None` when none will or the pass is
+/// disabled ([`DISABLE_ENV`]).
+pub fn run_scheduled_upstream_refresh(
+    root: &Path,
+    documents: &[(PathBuf, String)],
+) -> Result<Option<u64>> {
+    if disabled() {
+        return Ok(None);
+    }
+    let report = refresh_project_upstreams(root, documents, now_secs(), &github_states)?;
+    let observation = &report.observation;
+    if !observation.observed.is_empty() || !observation.failed.is_empty() {
+        let terminal = observation
+            .observed
+            .iter()
+            .filter(|(_, state)| state.is_terminal())
+            .count();
+        agent_doc_ops_log_io::log_op(
+            root,
+            &format!(
+                "upstream_observation_scheduled root={} documents={} wanted={} observed={} terminal={terminal} failed={} deferred={} calls={} next_due={} (#operatorshouldnneed)",
+                root.display(),
+                report.documents,
+                observation.wanted,
+                observation.observed.len(),
+                observation.failed.len(),
+                observation.deferred,
+                observation.calls,
+                report
+                    .next_due
+                    .map_or_else(|| "never".to_string(), |due| due.to_string()),
+            ),
+        );
+    }
+    Ok(report.next_due)
 }
 
 /// One watched artifact and its cached observation.
@@ -826,6 +942,22 @@ mod tests {
         assert_eq!(cache.state_of(&pull(1)), Some(UpstreamState::Merged));
         assert_eq!(cache.state_of(&pull(2)), Some(UpstreamState::Open));
         assert_eq!(cache.state_of(&pull(3)), None);
+    }
+
+    #[test]
+    fn next_due_is_the_earliest_non_terminal_expiry() {
+        let mut cache = UpstreamStateCache::default();
+        assert_eq!(cache.next_due(&wanted(&[])), None);
+        assert_eq!(cache.next_due(&wanted(&[1])), Some(0), "never observed");
+        cache.record(&pull(1), Some(UpstreamState::Merged), 100);
+        assert_eq!(cache.next_due(&wanted(&[1])), None, "terminal never");
+        cache.record(&pull(2), Some(UpstreamState::Open), 200);
+        cache.record(&pull(3), None, 150);
+        assert_eq!(
+            cache.next_due(&wanted(&[1, 2, 3])),
+            Some((200 + OPEN_TTL_SECS).min(150 + FAILED_LOOKUP_TTL_SECS))
+        );
+        assert_eq!(cache.next_due(&wanted(&[1, 2])), Some(200 + OPEN_TTL_SECS));
     }
 
     #[test]

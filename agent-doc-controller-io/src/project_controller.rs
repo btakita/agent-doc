@@ -3838,6 +3838,23 @@ pub trait ProjectControllerRuntimeEffects: Send + Sync + 'static {
             file.display()
         )
     }
+
+    /// `#operatorshouldnneed`: refresh the cached GitHub state of the
+    /// artifacts `documents`' (path, current text) open tracked items wait on,
+    /// one bounded pass, never writing a document. Returns the epoch second
+    /// the next watched artifact becomes due (`None`: none will). The
+    /// observation pass lives in `agent-doc-preflight-io`, which depends on
+    /// this crate, hence the port.
+    fn refresh_upstream_state(
+        &self,
+        project_root: &Path,
+        _documents: &[(PathBuf, String)],
+    ) -> Result<Option<u64>> {
+        anyhow::bail!(
+            "upstream-state refresh is not wired in this binary ({})",
+            project_root.display()
+        )
+    }
 }
 
 static RUNTIME_EFFECTS: OnceLock<&'static dyn ProjectControllerRuntimeEffects> = OnceLock::new();

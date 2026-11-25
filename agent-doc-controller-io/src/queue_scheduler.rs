@@ -21,6 +21,17 @@
 //! watch, in-session loop, subagent fan-out) — which treats every head of a
 //! closed window as held — dispatches the heads through its existing paths.
 //!
+//! The same loop runs the project's scheduled GitHub upstream-state refresh
+//! (`#operatorshouldnneed`) as a project timer
+//! ([`QueueScheduleGraph::arm_timer`]): the admission-time observation pass
+//! only runs when a document is admitted, so a document nobody admits would
+//! never see its pull requests merge. The timer's run reads every session
+//! document's current text, refreshes the union of their watch sets through
+//! [`QueueScheduleIo::refresh_upstream_state`] on its own short-lived thread
+//! (its `gh` lookups never hold the schedule worker), and re-arms for the
+//! earliest artifact to come due, clamped to
+//! [`UPSTREAM_REFRESH_MIN_SECS`]..=[`UPSTREAM_REFRESH_MAX_SECS`].
+//!
 //! Durability: every transition is a `BEGIN IMMEDIATE` read-modify-write of
 //! that queue's row, re-applying the pure transition to the freshly loaded
 //! state, so a restarted, hot-updated, or hand-over controller neither refires
@@ -38,7 +49,8 @@ use agent_doc_queue::queue_schedule::{
     QueueScheduleState,
 };
 use agent_doc_queue::queue_schedule_runtime::{
-    DueSchedule, QueueScheduleGraph, ScheduledDocument, SystemScheduleClock, run_scheduler_loop,
+    DueSchedule, QueueScheduleGraph, ScheduledDocument, SystemScheduleClock,
+    run_scheduler_loop_with_timers,
 };
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
@@ -58,9 +70,42 @@ pub trait QueueScheduleIo: Send + Sync + 'static {
         source_content: &str,
     ) -> Result<usize>;
     fn now_secs(&self) -> u64;
+    /// `#operatorshouldnneed`: one scheduled upstream-state refresh for
+    /// `project_root`. Returns when the next watched artifact becomes due
+    /// (`None`: none will).
+    fn refresh_upstream_state(&self, project_root: &Path) -> Result<Option<u64>>;
     fn log(&self, file: &Path, line: &str) {
         agent_doc_ops_log_io::log_op(file, line);
     }
+}
+
+/// First scheduled upstream-state refresh after the scheduler starts: late
+/// enough to stay off the controller's startup path.
+pub const UPSTREAM_REFRESH_FIRST_DELAY_SECS: u64 = 60;
+/// Shortest re-arm: a pass that deferred lookups continues after this.
+pub const UPSTREAM_REFRESH_MIN_SECS: u64 = 60;
+/// Longest re-arm: newly tracked artifacts are picked up at least this often
+/// even when nothing watched is due (or the refresh failed).
+pub const UPSTREAM_REFRESH_MAX_SECS: u64 = 30 * 60;
+
+const UPSTREAM_REFRESH_TIMER_PREFIX: &str = "upstream-state:";
+
+/// The project timer name of `project_root`'s upstream-state refresh.
+pub fn upstream_refresh_timer(project_root: &Path) -> String {
+    format!("{UPSTREAM_REFRESH_TIMER_PREFIX}{}", project_root.display())
+}
+
+fn upstream_refresh_root(timer: &str) -> Option<PathBuf> {
+    timer
+        .strip_prefix(UPSTREAM_REFRESH_TIMER_PREFIX)
+        .map(PathBuf::from)
+}
+
+/// The next refresh deadline after a run at `now` that reported `next_due`.
+pub fn next_upstream_refresh(now: u64, next_due: Option<u64>) -> u64 {
+    let floor = now.saturating_add(UPSTREAM_REFRESH_MIN_SECS);
+    let ceiling = now.saturating_add(UPSTREAM_REFRESH_MAX_SECS);
+    next_due.map_or(ceiling, |due| due.clamp(floor, ceiling))
 }
 
 /// The platform's local zone, via `localtime_r` (UTC where unavailable).
@@ -116,6 +161,20 @@ impl QueueScheduleIo for ProductionIo {
 
     fn now_secs(&self) -> u64 {
         agent_doc_log_time::current_epoch_secs()
+    }
+
+    fn refresh_upstream_state(&self, project_root: &Path) -> Result<Option<u64>> {
+        // A document whose authority is unavailable this tick (an editor
+        // replica mid-recovery) is skipped; the next tick reads it again.
+        let documents = agent_doc_fs::project_session_documents(project_root)
+            .into_iter()
+            .filter_map(|file| {
+                let text = self.current_text(&file).ok()?;
+                Some((file, text))
+            })
+            .collect::<Vec<_>>();
+        crate::project_controller::runtime_effects()?
+            .refresh_upstream_state(project_root, &documents)
     }
 }
 
@@ -447,9 +506,11 @@ fn stored_queue_ids(file: &Path) -> Result<Vec<String>> {
 enum Job {
     Refresh(PathBuf),
     Due(DueSchedule),
+    Timer(String),
 }
 
 /// The worker's handle on the graph and its effects.
+#[derive(Clone)]
 pub struct QueueScheduleWorker {
     graph: Arc<QueueScheduleGraph>,
     io: Arc<dyn QueueScheduleIo>,
@@ -699,6 +760,31 @@ impl QueueScheduleWorker {
         );
     }
 
+    /// Run the project timer `timer` and re-arm it. Today the only timer is
+    /// the upstream-state refresh ([`upstream_refresh_timer`]); an unknown one
+    /// stays disarmed.
+    pub fn run_timer(&self, timer: &str) {
+        let Some(project_root) = upstream_refresh_root(timer) else {
+            return;
+        };
+        let outcome = self.io.refresh_upstream_state(&project_root);
+        let now = self.io.now_secs();
+        let next = match outcome {
+            Ok(next_due) => next_upstream_refresh(now, next_due),
+            Err(err) => {
+                self.io.log(
+                    &project_root,
+                    &format!(
+                        "upstream_observation_scheduled_failed root={} error={err:#} (#operatorshouldnneed)",
+                        project_root.display()
+                    ),
+                );
+                next_upstream_refresh(now, None)
+            }
+        };
+        self.graph.arm_timer(timer, Some(next));
+    }
+
     /// Run one due tick (or a pending restore) for `due`.
     pub fn run_due(&self, due: &DueSchedule) {
         let state = match self.try_run_due(due) {
@@ -840,6 +926,9 @@ impl RunningScheduler {
 struct ProcessScheduler {
     running: Option<RunningScheduler>,
     documents: HashSet<PathBuf>,
+    /// Projects whose upstream-state refresh timer every (re)started
+    /// scheduler arms.
+    project_roots: HashSet<PathBuf>,
 }
 
 enum EnsureScheduler {
@@ -868,8 +957,35 @@ impl ProcessScheduler {
         if let Some(stale) = self.running.take() {
             stale.stop();
         }
-        self.running = Some(spawn().context("failed to spawn replacement queue scheduler")?);
+        let running = spawn().context("failed to spawn replacement queue scheduler")?;
+        // A replacement's graph is new: re-arm every project's timer on it.
+        let first = agent_doc_log_time::current_epoch_secs()
+            .saturating_add(UPSTREAM_REFRESH_FIRST_DELAY_SECS);
+        for root in &self.project_roots {
+            running
+                .graph
+                .arm_timer(&upstream_refresh_timer(root), Some(first));
+        }
+        self.running = Some(running);
         Ok(())
+    }
+
+    /// Arm `project_root`'s upstream-state refresh on the running scheduler
+    /// the first time the project is seen ([`Self::replace_with`] re-arms it
+    /// on every replacement).
+    fn add_project_root(&mut self, project_root: &Path) {
+        if !self.project_roots.insert(project_root.to_path_buf()) {
+            return;
+        }
+        if let Some(running) = self.running.as_ref() {
+            running.graph.arm_timer(
+                &upstream_refresh_timer(project_root),
+                Some(
+                    agent_doc_log_time::current_epoch_secs()
+                        .saturating_add(UPSTREAM_REFRESH_FIRST_DELAY_SECS),
+                ),
+            );
+        }
     }
 
     fn ensure_with(
@@ -968,6 +1084,7 @@ impl ProcessScheduler {
 
     fn start_with(
         &mut self,
+        project_root: &Path,
         documents: Vec<PathBuf>,
         spawn: &mut impl FnMut() -> Result<RunningScheduler>,
     ) -> Result<()> {
@@ -975,6 +1092,7 @@ impl ProcessScheduler {
             self.documents.insert(file.clone());
         }
         let ensured = self.ensure_with(spawn)?;
+        self.add_project_root(project_root);
         let refreshes = if matches!(ensured, EnsureScheduler::Existing) {
             documents
         } else {
@@ -1027,8 +1145,9 @@ pub fn note_document_changed(file: &Path) -> Result<QueueRefreshEnqueueReceipt> 
     Ok(receipt)
 }
 
-/// Start this process's single queue scheduler (idempotent) and enqueue a
-/// refresh of every document with a durable schedule under `project_root`.
+/// Start this process's single queue scheduler (idempotent), enqueue a
+/// refresh of every document with a durable schedule under `project_root`, and
+/// arm the project's scheduled upstream-state refresh (`#operatorshouldnneed`).
 pub fn start_queue_scheduler(project_root: &Path) -> Result<()> {
     let documents = scheduled_documents(project_root).with_context(|| {
         format!(
@@ -1038,7 +1157,9 @@ pub fn start_queue_scheduler(project_root: &Path) -> Result<()> {
     })?;
     process_scheduler()
         .lock()
-        .start_with(documents, &mut || spawn_scheduler(Arc::new(ProductionIo)))?;
+        .start_with(project_root, documents, &mut || {
+            spawn_scheduler(Arc::new(ProductionIo))
+        })?;
     region_effect_installed().get_or_init(install_region_effect);
     Ok(())
 }
@@ -1064,11 +1185,21 @@ fn spawn_scheduler(io: Arc<dyn QueueScheduleIo>) -> Result<RunningScheduler> {
         .name("agent-doc-queue-scheduler".to_string())
         .spawn(move || {
             // The loop lives as long as the controller process.
-            run_scheduler_loop(&loop_graph, &SystemScheduleClock, &loop_stop, |due| {
-                if loop_sender.send(Job::Due(due.clone())).is_err() {
-                    loop_graph.release(&due.key);
-                }
-            });
+            run_scheduler_loop_with_timers(
+                &loop_graph,
+                &SystemScheduleClock,
+                &loop_stop,
+                |due| {
+                    if loop_sender.send(Job::Due(due.clone())).is_err() {
+                        loop_graph.release(&due.key);
+                    }
+                },
+                |timer| {
+                    // A dead worker means this scheduler is being replaced;
+                    // the replacement re-arms every project timer.
+                    let _ = loop_sender.send(Job::Timer(timer));
+                },
+            );
         })
         .context("failed to start queue-schedule loop")?;
     Ok(RunningScheduler {
@@ -1093,6 +1224,7 @@ fn run_worker(worker: &QueueScheduleWorker, receiver: &Receiver<Job>) {
                 }
             }
             Job::Due(due) => dues.push(due),
+            Job::Timer(timer) => spawn_timer_run(worker, timer),
         };
         push(job);
         while let Ok(job) = receiver.try_recv() {
@@ -1104,6 +1236,25 @@ fn run_worker(worker: &QueueScheduleWorker, receiver: &Receiver<Job>) {
         for due in dues {
             worker.run_due(&due);
         }
+    }
+}
+
+/// Run a project timer off the worker thread: an upstream refresh may spend
+/// its whole lookup budget, and queue ticks must not wait behind it. The
+/// timer is disarmed until the run re-arms it, so runs never overlap.
+fn spawn_timer_run(worker: &QueueScheduleWorker, timer: String) {
+    let runner = worker.clone();
+    let name = timer.clone();
+    let spawned = std::thread::Builder::new()
+        .name("agent-doc-upstream-refresh".to_string())
+        .spawn(move || runner.run_timer(&name));
+    if let Err(err) = spawned {
+        eprintln!("[queue-schedule] WARNING: could not start project timer `{timer}`: {err}");
+        // Re-arm for a later attempt rather than leave the timer disarmed.
+        worker.graph.arm_timer(
+            &timer,
+            Some(next_upstream_refresh(worker.io.now_secs(), None)),
+        );
     }
 }
 
@@ -1173,6 +1324,9 @@ mod tests {
         restores: Mutex<Vec<Vec<String>>>,
         fail_restore: AtomicBool,
         logs: Mutex<Vec<String>>,
+        /// What each upstream refresh reports (`Err` text fails it).
+        upstream_next_due: Mutex<std::result::Result<Option<u64>, String>>,
+        upstream_runs: Mutex<Vec<PathBuf>>,
     }
 
     impl FakeIo {
@@ -1183,6 +1337,8 @@ mod tests {
                 restores: Mutex::new(Vec::new()),
                 fail_restore: AtomicBool::new(false),
                 logs: Mutex::new(Vec::new()),
+                upstream_next_due: Mutex::new(Ok(None)),
+                upstream_runs: Mutex::new(Vec::new()),
             })
         }
     }
@@ -1212,6 +1368,13 @@ mod tests {
         }
         fn now_secs(&self) -> u64 {
             *self.now.lock()
+        }
+        fn refresh_upstream_state(&self, project_root: &Path) -> Result<Option<u64>> {
+            self.upstream_runs.lock().push(project_root.to_path_buf());
+            self.upstream_next_due
+                .lock()
+                .clone()
+                .map_err(|err| anyhow::anyhow!(err))
         }
         fn log(&self, _file: &Path, line: &str) {
             self.logs.lock().push(line.to_string());
@@ -1296,6 +1459,124 @@ mod tests {
     }
 
     #[test]
+    fn upstream_refresh_rearms_between_the_floor_and_the_ceiling() {
+        let now = 10_000;
+        assert_eq!(
+            next_upstream_refresh(now, None),
+            now + UPSTREAM_REFRESH_MAX_SECS,
+            "nothing will come due: the ceiling picks up newly tracked work"
+        );
+        assert_eq!(
+            next_upstream_refresh(now, Some(0)),
+            now + UPSTREAM_REFRESH_MIN_SECS,
+            "deferred lookups are due now: continue after the floor"
+        );
+        assert_eq!(next_upstream_refresh(now, Some(now + 300)), now + 300);
+        assert_eq!(
+            next_upstream_refresh(now, Some(now + 86_400)),
+            now + UPSTREAM_REFRESH_MAX_SECS
+        );
+    }
+
+    /// `#operatorshouldnneed`: a timer run refreshes its project and re-arms
+    /// for the earliest artifact to come due; a failed run is logged and
+    /// re-armed at the ceiling; an unknown timer stays disarmed.
+    #[test]
+    fn a_timer_run_refreshes_its_project_and_rearms() {
+        let io = FakeIo::new("");
+        let worker = worker(&io);
+        let root = PathBuf::from("/sample/project");
+        let timer = upstream_refresh_timer(&root);
+
+        *io.upstream_next_due.lock() = Ok(Some(1_000 + 600));
+        worker.run_timer(&timer);
+        assert_eq!(*io.upstream_runs.lock(), vec![root.clone()]);
+        assert_eq!(worker.graph().timer(&timer), Some(1_600));
+
+        *io.upstream_next_due.lock() = Err("gh missing".to_string());
+        worker.run_timer(&timer);
+        assert_eq!(
+            worker.graph().timer(&timer),
+            Some(1_000 + UPSTREAM_REFRESH_MAX_SECS)
+        );
+        assert!(
+            io.logs.lock().iter().any(|line| line
+                .starts_with("upstream_observation_scheduled_failed")
+                && line.contains("gh missing")),
+            "{:?}",
+            io.logs.lock()
+        );
+
+        worker.run_timer("some-other-timer");
+        assert_eq!(worker.graph().timer("some-other-timer"), None);
+        assert_eq!(io.upstream_runs.lock().len(), 2);
+    }
+
+    /// The real loop and worker threads: an armed project timer that is due
+    /// runs off the worker thread and re-arms itself, with no queue schedule
+    /// anywhere in the project.
+    #[test]
+    fn the_scheduler_loop_runs_a_due_upstream_refresh_without_any_queue_schedule() {
+        let io = FakeIo::new("");
+        *io.now.lock() = agent_doc_log_time::current_epoch_secs();
+        let running = spawn_scheduler(Arc::clone(&io) as Arc<dyn QueueScheduleIo>).unwrap();
+        let root = PathBuf::from("/sample/project");
+        let timer = upstream_refresh_timer(&root);
+        running.graph.arm_timer(&timer, Some(0));
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+        while running.graph.timer(&timer).is_none_or(|due| due == 0) {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "the timer never ran and re-armed"
+            );
+            std::thread::sleep(std::time::Duration::from_millis(10));
+        }
+        assert_eq!(*io.upstream_runs.lock(), vec![root]);
+        assert_eq!(
+            running.graph.timer(&timer),
+            Some(*io.now.lock() + UPSTREAM_REFRESH_MAX_SECS)
+        );
+        running.stop();
+    }
+
+    #[test]
+    fn starting_and_replacing_the_scheduler_arms_the_project_timer() {
+        let (sender, _receiver) = std::sync::mpsc::channel();
+        let mut first = Some(parked_scheduler(sender));
+        let mut state = ProcessScheduler::default();
+        let root = PathBuf::from("/sample/project");
+        let timer = upstream_refresh_timer(&root);
+        let before = agent_doc_log_time::current_epoch_secs();
+        state
+            .start_with(&root, Vec::new(), &mut || {
+                Ok(first.take().expect("one scheduler"))
+            })
+            .unwrap();
+        let armed = state.running.as_ref().unwrap().graph.timer(&timer);
+        assert!(
+            armed.is_some_and(|due| due >= before + UPSTREAM_REFRESH_FIRST_DELAY_SECS),
+            "{armed:?}"
+        );
+
+        // A replacement's new graph is armed too.
+        let (sender, _receiver2) = std::sync::mpsc::channel();
+        let mut replacement = Some(parked_scheduler(sender));
+        state
+            .replace_with(&mut || Ok(replacement.take().expect("one replacement")))
+            .unwrap();
+        assert!(
+            state
+                .running
+                .as_ref()
+                .unwrap()
+                .graph
+                .timer(&timer)
+                .is_some()
+        );
+        state.running.take().unwrap().stop();
+    }
+
+    #[test]
     fn a_disconnected_worker_is_replaced_and_the_refresh_is_retried() {
         let (dead_sender, dead_receiver) = std::sync::mpsc::channel();
         drop(dead_receiver);
@@ -1328,7 +1609,9 @@ mod tests {
             .expect("replacement received the retried refresh")
         {
             Job::Refresh(received) => assert_eq!(received, file),
-            Job::Due(_) => panic!("replacement received a due job instead of the refresh"),
+            Job::Due(_) | Job::Timer(_) => {
+                panic!("replacement received a due or timer job instead of the refresh")
+            }
         }
         state.running.take().unwrap().stop();
     }
@@ -1363,7 +1646,9 @@ mod tests {
             .expect("replacement received the refresh")
         {
             Job::Refresh(received) => assert_eq!(received, file),
-            Job::Due(_) => panic!("replacement received a due job instead of the refresh"),
+            Job::Due(_) | Job::Timer(_) => {
+                panic!("replacement received a due or timer job instead of the refresh")
+            }
         }
         state.running.take().unwrap().stop();
     }

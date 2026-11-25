@@ -24,6 +24,13 @@
 //!   schedules are excluded from the earliest wake;
 //! - a wake that dispatched nothing parks at least [`MIN_SCHEDULER_IDLE_PARK_SECS`].
 //!
+//! The same loop also serves project timers ([`QueueScheduleGraph::arm_timer`]):
+//! a named deadline that is not a queue, such as the controller's scheduled
+//! GitHub upstream-state refresh (`#operatorshouldnneed`). A timer's deadline
+//! joins the earliest wake, so it costs no extra thread and no extra park. A
+//! timer is disarmed when it is taken and stays disarmed until its worker arms
+//! it again with the next deadline, so a slow run never overlaps itself.
+//!
 //! No IO happens here: the caller supplies the clock, the zone, and the
 //! dispatch sink. Tests drive it with a virtual clock.
 
@@ -122,6 +129,9 @@ pub struct QueueScheduleGraph {
     documents: ThreadSafeSourceMap<String, Option<ScheduledDocument>>,
     states: ThreadSafeSourceMap<String, Option<QueueScheduleState>>,
     in_flight: ThreadSafeSourceMap<String, bool>,
+    /// Project timers: name to next deadline (`None` while disarmed or in
+    /// flight).
+    timers: ThreadSafeSourceMap<String, Option<u64>>,
     earliest: Computed<Option<u64>>,
     wake_effect: Effect,
     waker: Arc<ScheduleWaker>,
@@ -154,19 +164,22 @@ impl QueueScheduleGraph {
         let documents = ThreadSafeSourceMap::<String, Option<ScheduledDocument>>::new(&ctx);
         let states = ThreadSafeSourceMap::<String, Option<QueueScheduleState>>::new(&ctx);
         let in_flight = ThreadSafeSourceMap::<String, bool>::new(&ctx);
+        let timers = ThreadSafeSourceMap::<String, Option<u64>>::new(&ctx);
         let earliest = {
             let documents = documents.clone();
             let states = states.clone();
             let in_flight = in_flight.clone();
+            let timers = timers.clone();
             let tz = Arc::clone(&tz);
             ctx.computed(move |ctx| {
-                documents
+                let document_wakes = documents.keys(ctx).into_iter().filter_map(|key| {
+                    document_wake(&documents, &states, &in_flight, tz.as_ref(), ctx, &key)
+                });
+                let timer_wakes = timers
                     .keys(ctx)
-                    .iter()
-                    .filter_map(|key| {
-                        document_wake(&documents, &states, &in_flight, tz.as_ref(), ctx, key)
-                    })
-                    .min()
+                    .into_iter()
+                    .filter_map(|key| timers.observe(ctx, &key).flatten());
+                document_wakes.chain(timer_wakes).min()
             })
         };
         let waker = Arc::new(ScheduleWaker::default());
@@ -182,6 +195,7 @@ impl QueueScheduleGraph {
             documents,
             states,
             in_flight,
+            timers,
             earliest,
             wake_effect,
             waker,
@@ -270,7 +284,49 @@ impl QueueScheduleGraph {
         keys
     }
 
-    /// The earliest wake across every document not in flight.
+    /// Arm (`Some(deadline)`, epoch seconds) or disarm (`None`) the project
+    /// timer `name`. Its deadline joins the earliest wake, so re-arming wakes
+    /// the parked loop.
+    pub fn arm_timer(&self, name: &str, deadline: Option<u64>) {
+        self.timers.set(&self.ctx, name.to_string(), deadline);
+    }
+
+    /// The armed deadline of timer `name` (`None` when disarmed, in flight,
+    /// or unknown).
+    pub fn timer(&self, name: &str) -> Option<u64> {
+        self.timers.observe(&self.ctx, &name.to_string()).flatten()
+    }
+
+    /// Every timer due at `now`, disarmed until its worker arms it again.
+    /// Like a schedule, a timer is taken at most once per second.
+    pub fn take_due_timers(&self, now: u64) -> Vec<String> {
+        let mut dispatched_at = self.dispatched_at.lock();
+        let mut due: Vec<String> = self
+            .timers
+            .keys(&self.ctx)
+            .into_iter()
+            .filter(|name| {
+                self.timer(name).is_some_and(|deadline| deadline <= now)
+                    && dispatched_at.get(&timer_dispatch_key(name)) != Some(&now)
+            })
+            .collect();
+        due.sort();
+        for name in &due {
+            dispatched_at.insert(timer_dispatch_key(name), now);
+        }
+        drop(dispatched_at);
+        if !due.is_empty() {
+            self.ctx.batch(|ctx| {
+                for name in &due {
+                    self.timers.set(ctx, name.clone(), None);
+                }
+            });
+        }
+        due
+    }
+
+    /// The earliest wake across every document not in flight and every armed
+    /// timer.
     pub fn earliest_wake(&self) -> Option<u64> {
         self.ctx.get(&self.earliest)
     }
@@ -324,6 +380,12 @@ impl Drop for QueueScheduleGraph {
     }
 }
 
+/// Timers share the once-per-second dispatch guard with schedules under a
+/// key no schedule key (`<path hash>:<queue id>`) can take.
+fn timer_dispatch_key(name: &str) -> String {
+    format!("timer\u{0}{name}")
+}
+
 fn document_wake(
     documents: &ThreadSafeSourceMap<String, Option<ScheduledDocument>>,
     states: &ThreadSafeSourceMap<String, Option<QueueScheduleState>>,
@@ -352,9 +414,12 @@ pub struct SchedulerLoopStats {
     pub productive_wakeups: u64,
     /// Documents dispatched.
     pub dispatched: u64,
+    /// Project timers fired.
+    pub timers_fired: u64,
 }
 
-/// Run the one scheduler loop until `should_stop`.
+/// Run the one scheduler loop until `should_stop`, with no timer sink (a
+/// timer armed on `graph` is taken and dropped).
 ///
 /// `dispatch` must only enqueue (the background worker does the work and
 /// reports back through [`QueueScheduleGraph::complete`]).
@@ -362,20 +427,38 @@ pub fn run_scheduler_loop(
     graph: &QueueScheduleGraph,
     clock: &dyn ScheduleClock,
     should_stop: &AtomicBool,
+    dispatch: impl FnMut(DueSchedule),
+) -> SchedulerLoopStats {
+    run_scheduler_loop_with_timers(graph, clock, should_stop, dispatch, |_| {})
+}
+
+/// [`run_scheduler_loop`] that also hands each due project timer to
+/// `dispatch_timer`, which must only enqueue; the worker re-arms the timer
+/// through [`QueueScheduleGraph::arm_timer`].
+pub fn run_scheduler_loop_with_timers(
+    graph: &QueueScheduleGraph,
+    clock: &dyn ScheduleClock,
+    should_stop: &AtomicBool,
     mut dispatch: impl FnMut(DueSchedule),
+    mut dispatch_timer: impl FnMut(String),
 ) -> SchedulerLoopStats {
     let mut stats = SchedulerLoopStats::default();
     while !should_stop.load(Ordering::SeqCst) {
         let observed = graph.waker().generation();
         let now = clock.now_secs();
         let due = graph.take_due(now);
+        let timers = graph.take_due_timers(now);
         stats.wakeups += 1;
-        if !due.is_empty() {
+        if !due.is_empty() || !timers.is_empty() {
             stats.productive_wakeups += 1;
         }
         for item in due.iter().cloned() {
             stats.dispatched += 1;
             dispatch(item);
+        }
+        for name in timers.iter().cloned() {
+            stats.timers_fired += 1;
+            dispatch_timer(name);
         }
         if should_stop.load(Ordering::SeqCst) {
             break;
@@ -386,7 +469,7 @@ pub fn run_scheduler_loop(
         // sleeping. That turn cannot redispatch a document dispatched this
         // second, so it either dispatches something new or parks at the idle
         // floor: a wake that dispatched nothing never re-runs sooner.
-        let floor = if due.is_empty() {
+        let floor = if due.is_empty() && timers.is_empty() {
             now.saturating_add(MIN_SCHEDULER_IDLE_PARK_SECS)
         } else {
             now
@@ -695,6 +778,67 @@ mod tests {
             horizon,
             "one park per virtual second"
         );
+    }
+
+    #[test]
+    fn a_project_timer_fires_at_its_deadline_and_waits_for_its_worker_to_rearm() {
+        // `#operatorshouldnneed`: the upstream-state refresh rides the same
+        // loop. Its deadline joins the earliest wake; once taken it is
+        // disarmed, so a worker that has not re-armed it is never re-run.
+        let single = graph();
+        let before = single.waker().generation();
+        single.arm_timer("upstream", Some(600));
+        assert_ne!(single.waker().generation(), before, "arming wakes the loop");
+        assert_eq!(single.earliest_wake(), Some(600));
+        assert_eq!(single.take_due_timers(599), Vec::<String>::new());
+        assert_eq!(single.take_due_timers(600), vec!["upstream".to_string()]);
+        assert_eq!(single.timer("upstream"), None, "disarmed while in flight");
+        assert_eq!(single.earliest_wake(), None);
+        assert_eq!(single.take_due_timers(10_000), Vec::<String>::new());
+
+        // A worker that re-arms every 30 min fires at each deadline and wakes only at those deadlines plus the bounded heartbeat.
+        let graph = graph();
+        graph.arm_timer("upstream", Some(1_800));
+        let day = 86_400;
+        let stop = Arc::new(AtomicBool::new(false));
+        let clock = VirtualClock::new(0, day, Arc::clone(&stop));
+        let graph_ref = &graph;
+        let clock_ref = &clock;
+        let stats = run_scheduler_loop_with_timers(
+            graph_ref,
+            clock_ref,
+            &stop,
+            |_| panic!("no queue is scheduled"),
+            |name| graph_ref.arm_timer(&name, Some(clock_ref.now_secs() + 1_800)),
+        );
+        // 1_800, 3_600, ... 84_600; the run stops on reaching the horizon.
+        assert_eq!(stats.timers_fired, day / 1_800 - 1);
+        assert_eq!(stats.dispatched, 0);
+        assert!(
+            stats.wakeups <= stats.timers_fired + day / MAX_SCHEDULER_PARK_SECS + 2,
+            "{stats:?}"
+        );
+    }
+
+    #[test]
+    fn a_timer_rearmed_in_the_past_cannot_spin_the_loop() {
+        // A buggy worker re-arms at a deadline already passed: the loop runs
+        // it at most once per second and parks between runs.
+        let graph = graph();
+        graph.arm_timer("upstream", Some(0));
+        let horizon = 60;
+        let stop = Arc::new(AtomicBool::new(false));
+        let clock = VirtualClock::new(0, horizon, Arc::clone(&stop));
+        let graph_ref = &graph;
+        let stats = run_scheduler_loop_with_timers(
+            graph_ref,
+            &clock,
+            &stop,
+            |_| {},
+            |name| graph_ref.arm_timer(&name, Some(0)),
+        );
+        assert!(stats.timers_fired <= horizon + 1, "{stats:?}");
+        assert_eq!(clock.parks.lock().len() as u64, horizon);
     }
 
     #[test]

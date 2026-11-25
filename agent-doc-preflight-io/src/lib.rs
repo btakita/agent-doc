@@ -13024,6 +13024,98 @@ mod tests {
         assert!(done[0].action.contains("reopen abandoned"), "{:?}", done[0]);
     }
 
+    /// `#operatorshouldnneed` next increment: a document nobody admits still
+    /// has its artifacts observed. The controller's scheduled refresh reads
+    /// every session document's watch set, refreshes their union in one bounded
+    /// pass, and re-arms for the earliest artifact to come due; the idle
+    /// document's next preflight flags what merged meanwhile.
+    #[test]
+    fn scheduled_refresh_observes_documents_with_no_admission() {
+        use agent_doc_answer_ledger::graph::UpstreamState;
+        let dir = setup_project();
+        let busy = dir.path().join("busy.md");
+        let idle = dir.path().join("idle.md");
+        let busy_text = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#landfix] Land https://github.com/o/r/pull/21\n",
+            "<!-- /agent:todo -->\n",
+        );
+        let idle_text = concat!(
+            "<!-- agent:todo -->\n",
+            "- [ ] [#idleship] Ship https://github.com/o/r/pull/22\n",
+            "- [ ] [#idlewait] Wait on https://github.com/o/r/issues/23\n",
+            "<!-- /agent:todo -->\n",
+        );
+        std::fs::write(&busy, busy_text).unwrap();
+        std::fs::write(&idle, idle_text).unwrap();
+        let documents = vec![
+            (busy.clone(), busy_text.to_string()),
+            (idle.clone(), idle_text.to_string()),
+        ];
+
+        // The busy document's own admission pass already observed pull 21.
+        let open = |batch: &[agent_doc_answer_ledger::graph::GithubUpstream]| {
+            vec![Some(UpstreamState::Open); batch.len()]
+        };
+        upstream_state::observe_document(&busy, busy_text, 1_000, &open)
+            .unwrap()
+            .unwrap();
+
+        let looked_up = std::cell::RefCell::new(Vec::new());
+        let lookup = |batch: &[agent_doc_answer_ledger::graph::GithubUpstream]| {
+            batch
+                .iter()
+                .map(|upstream| {
+                    looked_up.borrow_mut().push(upstream.number);
+                    Some(match upstream.number {
+                        22 => UpstreamState::Merged,
+                        _ => UpstreamState::Open,
+                    })
+                })
+                .collect::<Vec<_>>()
+        };
+        let report =
+            upstream_state::refresh_project_upstreams(dir.path(), &documents, 1_100, &lookup)
+                .unwrap();
+        assert_eq!(report.documents, 2);
+        assert_eq!(report.observation.wanted, 3);
+        assert_eq!(
+            report.observation.calls, 1,
+            "one batched call for the union"
+        );
+        let mut numbers = looked_up.borrow().clone();
+        numbers.sort();
+        assert_eq!(
+            numbers,
+            vec![22, 23],
+            "only the idle document's artifacts were due"
+        );
+        // Pull 22 is terminal; the open ones come due 30 min after their
+        // observation, the busy one's first.
+        assert_eq!(report.next_due, Some(1_000 + upstream_state::OPEN_TTL_SECS));
+
+        let flagged: Vec<String> = todo_signals_for_document(&idle, idle_text)
+            .into_iter()
+            .filter(|signal| signal.stale_kind.as_deref() == Some("upstream_merged"))
+            .map(|signal| signal.todo)
+            .collect();
+        assert_eq!(flagged, vec!["idleship".to_string()]);
+
+        // Nothing due on the next tick: no lookup.
+        let again =
+            upstream_state::refresh_project_upstreams(dir.path(), &documents, 1_200, &lookup)
+                .unwrap();
+        assert!(again.observation.observed.is_empty());
+        assert_eq!(looked_up.borrow().len(), 2);
+
+        // No document watches anything: nothing is looked up or ever due.
+        let quiet = vec![(busy.clone(), "# nothing tracked\n".to_string())];
+        let none =
+            upstream_state::refresh_project_upstreams(dir.path(), &quiet, 1_300, &lookup).unwrap();
+        assert_eq!(none.observation.wanted, 0);
+        assert_eq!(none.next_due, None);
+    }
+
     /// GH #381 repro: `.agent-doc/project.md` declares `'#review'`; the session
     /// document has an empty `agent:backlog` and a go queue whose only live head
     /// is `- #review`, and never carries the preset itself. Preflight reported

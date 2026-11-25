@@ -1,6 +1,6 @@
 [package]
 name = "agent-doc-response-replay-io"
-version = "0.35.590"
+version = "0.35.591"
 edition = "2024"
 description = "Response replay file-effect adapters for agent-doc"
 license = "Apache-2.0"
@@ -11,11 +11,11 @@ publish = false
 name = "agent_doc_response_replay_io"
 
 [dependencies]
-agent-doc-effect-cas = { path = "../agent-doc-effect-cas", version = "0.35.590" }
-agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.590" }
-agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.590" }
-agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.590" }
-agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.590" }
+agent-doc-effect-cas = { path = "../agent-doc-effect-cas", version = "0.35.591" }
+agent-doc-document-realtime-io = { path = "../agent-doc-document-realtime-io", version = "0.35.591" }
+agent-doc-hash = { path = "../agent-doc-hash", version = "0.35.591" }
+agent-doc-fs = { path = "../agent-doc-fs", version = "0.35.591" }
+agent-doc-turn = { path = "../agent-doc-turn", version = "0.35.591" }
 anyhow = "1"
 
 [dev-dependencies]

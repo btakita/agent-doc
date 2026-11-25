@@ -1115,6 +1115,22 @@ impl HarnessConfig {
             })
     }
 
+    /// Proof that a busy ready-wait should stop instead of spending its budget.
+    ///
+    /// [`busy_proof_line`] only matches `esc to interrupt` and a Claude working
+    /// spinner. Grok Build's live turn is `Ctrl+c:cancel` or a `[stop]` footer,
+    /// so a dispatch-only route waited out the editor budget and Idea reported
+    /// the unclassified deferral as a persistent failure. Permission prompts
+    /// are not this proof: those can clear inside the wait.
+    pub fn active_turn_budget_abort_cue(&self, output: &str) -> Option<String> {
+        if self.binary == "grok" {
+            if let Some(reason) = grok::blocker(output) {
+                return Some(reason);
+            }
+        }
+        self.busy_proof_line(output)
+    }
+
     /// True when Codex's bottom active-turn window contains a live busy cue.
     ///
     /// Route admission and post-submit dispatch proof must share this exact
@@ -3815,6 +3831,45 @@ gpt-5.4 high · Context 54% used
         assert!(
             h.busy_proof_line(CLAUDE_IDLE_PANE).is_none(),
             "idle composer/permission footer is not a busy-proof line"
+        );
+    }
+
+    #[test]
+    fn grok_live_turn_aborts_the_busy_ready_wait_without_treating_idle_as_busy() {
+        let grok = HarnessConfig::grok();
+        assert!(
+            grok.active_turn_budget_abort_cue("Shift+Tab:mode │ Ctrl+x:shortcuts\n")
+                .is_none(),
+            "an idle Grok footer is not a live turn"
+        );
+        assert_eq!(
+            grok.active_turn_budget_abort_cue(
+                "Shift+Tab:mode │ Ctrl+c:cancel │ Ctrl+x:shortcuts\n"
+            )
+            .as_deref(),
+            Some("active Grok Build turn")
+        );
+        assert_eq!(
+            grok.active_turn_budget_abort_cue("Waiting for response… 1.0s [stop]\n")
+                .as_deref(),
+            Some("active Grok Build turn")
+        );
+        assert!(
+            grok.active_turn_budget_abort_cue("Authorize this tool?\n❯ 1. Yes\n")
+                .is_none(),
+            "a permission prompt can still clear inside the ready-wait"
+        );
+        assert!(
+            grok.busy_proof_line("Shift+Tab:mode │ Ctrl+c:cancel │ Ctrl+x:shortcuts\n")
+                .is_none(),
+            "the interrupt-hint scan still misses Grok's footer"
+        );
+
+        let claude = HarnessConfig::claude();
+        assert!(
+            claude
+                .active_turn_budget_abort_cue("• Working (1s · esc to interrupt)\n")
+                .is_some()
         );
     }
 

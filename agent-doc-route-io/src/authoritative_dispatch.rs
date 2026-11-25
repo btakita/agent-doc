@@ -21,7 +21,8 @@ use agent_doc_controller::dispatch::{
     dispatch_only_busy_refusal_wait_secs, dispatch_only_busy_should_wait_for_ready,
     dispatch_only_focus_only_should_fail_closed, dispatch_only_should_probe_active_turn_cue,
     dispatch_only_starting_pane_recovery_timeout_for_binary, failclosed_wait_context,
-    prompt_ready_barrier_failed_event, route_closeout_user_outcome_fields,
+    prompt_ready_barrier_failed_event, retained_busy_generation_deferral,
+    route_closeout_user_outcome_fields,
 };
 use agent_doc_harness::HarnessConfig;
 use agent_doc_session_registry_io::dispatch_registry::lookup_dispatch_registration;
@@ -37,9 +38,9 @@ use crate::admission_projection::{RouteAdmissionEffects, require_routed_admissio
 use crate::authoritative_actor::{
     AuthoritativeActorDispatchTarget, PendingHarnessSwitch, RouteDispatchAuthorization,
     actor_dispatch_state, authoritative_actor_dispatch_recovery_hint,
-    authorize_controller_dispatch, current_generation_ready_prompt_proven,
-    current_pane_ready_prompt_proven, load_authoritative_actor_binding,
-    promote_starting_authoritative_actor_if_dispatch_ready,
+    authorize_controller_dispatch, capture_active_turn_budget_abort_cue,
+    current_generation_ready_prompt_proven, current_pane_ready_prompt_proven,
+    load_authoritative_actor_binding, promote_starting_authoritative_actor_if_dispatch_ready,
     recover_starting_timeout_blocked_actor_if_dispatch_ready, route_dispatch_deduped_pane,
     wait_for_authoritative_actor_ready,
 };
@@ -2417,12 +2418,52 @@ pub fn route_via_authoritative_actor(
 
     if waited_and_timed_out && actor_dispatch_state(actor_state) == ActorDispatchState::Busy {
         // The wait has a transport budget. Ending it says nothing about
-        // whether the current turn can still produce a response.
-        crate::invocation::record_route_deferral(format!(
-            "[route] dispatch for {} deferred: generation {} on pane {} remained busy without a verified ready prompt; its current turn and the pending prompt are retained",
-            file.display(),
-            actor.record.generation,
-            dispatch_pane,
+        // whether the current turn can still produce a response, so the turn
+        // and its pending prompt stay. The report is the same busy refusal
+        // Idea classifies as still-running. The old unclassified sentence was
+        // a persistent Run Agent Doc error after the budget (observed: a live
+        // Grok turn, `has_busy_cue=true`, exit 75 shown as a failure).
+        let live_turn_cue = capture_active_turn_budget_abort_cue(tmux, &dispatch_pane, harness);
+        let file_display = file.display().to_string();
+        let recovery_hint = authoritative_actor_dispatch_recovery_hint(actor_state, file);
+        let unblocker = if live_turn_cue.is_some() {
+            "wait_for_owner_turn_to_finish"
+        } else {
+            "wait_for_dispatch_ready_prompt"
+        };
+        let blocked_outcome =
+            agent_doc_flow::outcome::blocked_with_exact_unblocker_fields(unblocker);
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_dispatch_retained_busy_generation file={} pane={} harness={} generation={} cue={:?} unblocker={}",
+                file.display(),
+                dispatch_pane,
+                harness.binary,
+                actor.record.generation,
+                live_turn_cue.as_deref().unwrap_or("none"),
+                unblocker,
+            ),
+        );
+        crate::invocation::record_route_deferral(retained_busy_generation_deferral(
+            DispatchOnlyBusyRefusalFacts {
+                generation: actor.record.generation,
+                file_display: &file_display,
+                dispatch_pane: &dispatch_pane,
+                harness_binary: &harness.binary,
+                reason: actor_dispatch_blocker_reason(actor_dispatch_state(actor_state))
+                    .unwrap_or("the authoritative actor is busy"),
+                wait_secs: dispatch_only_busy_refusal_wait_secs(
+                    (effects.wait_for_ready_override)(),
+                    dispatch_only_starting_pane_recovery_timeout_for_binary(
+                        Some(harness.binary.as_str()),
+                        cfg!(test),
+                    ),
+                ),
+                recovery_hint: &recovery_hint,
+                active_turn_busy_cue: live_turn_cue.as_deref(),
+                blocked_outcome_fields: &blocked_outcome,
+            },
         ));
         return Ok(dispatch_pane);
     }

@@ -381,6 +381,19 @@ static BUSY_SINCE: LazyLock<Regex> = LazyLock::new(|| java_regex(r"\bbusy since 
 /// The pane's harness as the operator knows it. Outputs that name none keep the
 /// pre-move wording ("Codex").
 fn still_running_harness_label(output: &str) -> &'static str {
+    let lower = output.to_ascii_lowercase();
+    // A retained busy generation names the live turn (`active grok turn
+    // (active Grok Build turn)`) without the `dispatch-only <harness> reopen`
+    // token. Match that phrase before the regex, or Idea calls a Grok pane Codex.
+    if lower.contains("active grok build turn") || lower.contains("active grok turn") {
+        return "Grok Build";
+    }
+    if lower.contains("active claude turn") {
+        return "Claude";
+    }
+    if lower.contains("opencode active turn") {
+        return "OpenCode";
+    }
     let harness = DISPATCH_ONLY_HARNESS
         .captures(output)
         .and_then(|captures| captures.get(1))

@@ -3318,6 +3318,32 @@ pub struct DispatchOnlyBusyRefusalFacts<'a> {
     pub blocked_outcome_fields: &'a str,
 }
 
+/// A busy generation whose ready-wait ended without a verified prompt.
+///
+/// The turn and its pending prompt stay where they are. The wording is the
+/// dispatch-only busy refusal Idea already classifies as still-running, not
+/// the unclassified deferral that became a persistent Run Agent Doc error.
+pub fn retained_busy_generation_deferral(facts: DispatchOnlyBusyRefusalFacts<'_>) -> String {
+    let body = dispatch_only_busy_refusal_message(facts);
+    // The no-cue refusal names the actor, not the pane harness. Without this
+    // phrase Idea's still-running summary calls a Grok pane Codex.
+    let harness_cue = match facts.harness_binary {
+        "grok" => "active grok turn",
+        "claude" => "active claude turn",
+        "opencode" => "opencode active turn",
+        _ => "",
+    };
+    let suffix = if harness_cue.is_empty() || body.to_ascii_lowercase().contains(harness_cue) {
+        String::new()
+    } else {
+        format!(" ({harness_cue})")
+    };
+    format!(
+        "[route] dispatch for {} deferred: {body} Its current turn and the pending prompt are retained{suffix}.",
+        facts.file_display,
+    )
+}
+
 pub fn dispatch_only_busy_refusal_message(facts: DispatchOnlyBusyRefusalFacts<'_>) -> String {
     match facts.active_turn_busy_cue {
         Some(cue) => format!(
@@ -8221,6 +8247,80 @@ gpt-5.5 xhigh · ~/work/btakita/agent-loop/src/sample-app · Context 0% use
                 && cold.contains("unblocker=wait_for_dispatch_ready_prompt"),
             "cold-wait refusal must carry the typed unblocker outcome: {cold}"
         );
+    }
+
+    #[test]
+    fn retained_busy_generation_deferral_is_still_running_not_a_persistent_failure() {
+        let old = "[route] dispatch for /tmp/doc.md deferred: generation 209 on pane %9 remained busy without a verified ready prompt; its current turn and the pending prompt are retained";
+        let old_outcome = agent_doc_editor_surface::derive_route_outcome(
+            &agent_doc_editor_surface::RouteOutcomeEvidence {
+                output: Some(old.to_string()),
+                relative_path: Some("tasks/doc.md".to_string()),
+            },
+        );
+        assert_eq!(
+            old_outcome.kind,
+            agent_doc_editor_surface::RouteOutcomeKind::Persistent,
+            "the unclassified deferral is the Idea error"
+        );
+
+        let grok = retained_busy_generation_deferral(DispatchOnlyBusyRefusalFacts {
+            generation: 209,
+            file_display: "/tmp/doc.md",
+            dispatch_pane: "%9",
+            harness_binary: "grok",
+            reason: "the authoritative actor is busy",
+            wait_secs: 118,
+            recovery_hint: "Wait for the active turn to finish before rerouting this document.",
+            active_turn_busy_cue: Some("active Grok Build turn"),
+            blocked_outcome_fields: "ui_outcome=blocked_with_exact_unblocker unblocker=wait_for_owner_turn_to_finish",
+        });
+        let grok_outcome = agent_doc_editor_surface::derive_route_outcome(
+            &agent_doc_editor_surface::RouteOutcomeEvidence {
+                output: Some(grok.clone()),
+                relative_path: Some("tasks/doc.md".to_string()),
+            },
+        );
+        assert_eq!(
+            grok_outcome.kind,
+            agent_doc_editor_surface::RouteOutcomeKind::BusyRunning,
+            "{grok}"
+        );
+        let summary = grok_outcome.summary.unwrap_or_default();
+        assert!(
+            summary.contains("still running") && summary.contains("Grok Build"),
+            "{summary}"
+        );
+        assert!(!summary.contains("Codex"), "{summary}");
+
+        let cold = retained_busy_generation_deferral(DispatchOnlyBusyRefusalFacts {
+            generation: 209,
+            file_display: "/tmp/doc.md",
+            dispatch_pane: "%9",
+            harness_binary: "grok",
+            reason: "the authoritative actor is busy",
+            wait_secs: 118,
+            recovery_hint: "Wait for the active turn to finish before rerouting this document.",
+            active_turn_busy_cue: None,
+            blocked_outcome_fields: "ui_outcome=blocked_with_exact_unblocker unblocker=wait_for_dispatch_ready_prompt",
+        });
+        let cold_outcome = agent_doc_editor_surface::derive_route_outcome(
+            &agent_doc_editor_surface::RouteOutcomeEvidence {
+                output: Some(cold.clone()),
+                relative_path: Some("tasks/doc.md".to_string()),
+            },
+        );
+        assert_eq!(
+            cold_outcome.kind,
+            agent_doc_editor_surface::RouteOutcomeKind::BusyRunning,
+            "{cold}"
+        );
+        let cold_summary = cold_outcome.summary.unwrap_or_default();
+        assert!(
+            cold_summary.contains("still running") && cold_summary.contains("Grok Build"),
+            "{cold_summary}"
+        );
+        assert!(!cold_summary.contains("Codex"), "{cold_summary}");
     }
 
     #[test]

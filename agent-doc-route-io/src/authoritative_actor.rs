@@ -554,6 +554,7 @@ pub fn wait_for_authoritative_actor_ready(
         None => authoritative_actor_ready_retry_budget(Some(harness.binary.as_str()), cfg!(test)),
     };
     let deadline = Instant::now() + budget.timeout;
+    let mut ready_polls = 0u32;
     let mut last_facts = authoritative_actor_ready_facts_from_target(
         initial,
         current_generation_ready_prompt_proven(tmux, initial, harness),
@@ -661,7 +662,36 @@ pub fn wait_for_authoritative_actor_ready(
                     );
                     return Ok(Some(refreshed));
                 }
-                PromptReadyBarrierDecision::Continue => {}
+                PromptReadyBarrierDecision::Continue => {
+                    // A proven live turn will not grow a ready prompt inside this
+                    // transport budget. Stop on the first look, then about once a
+                    // second, instead of holding Run Agent Doc for the whole
+                    // editor wait. Grok's `Ctrl+c:cancel` footer is included;
+                    // `busy_proof_line` does not see it.
+                    ready_polls = ready_polls.saturating_add(1);
+                    if last_facts.actor_state == ActorDispatchState::Busy
+                        && (ready_polls == 1 || ready_polls.is_multiple_of(10))
+                        && let Some(cue) = capture_active_turn_budget_abort_cue(
+                            tmux,
+                            &refreshed.record.pane_id,
+                            harness,
+                        )
+                    {
+                        agent_doc_ops_log_io::log_op(
+                            file,
+                            &format!(
+                                "route_wait_for_ready_aborted_live_turn file={} pane={} harness={} generation={} elapsed_ms={} cue={:?}",
+                                file.display(),
+                                refreshed.record.pane_id,
+                                harness.binary,
+                                refreshed.record.generation,
+                                start.elapsed().as_millis(),
+                                cue
+                            ),
+                        );
+                        return Ok(None);
+                    }
+                }
             }
         }
         std::thread::sleep(budget.poll_interval);
@@ -755,6 +785,16 @@ pub fn wait_for_authoritative_actor_ready(
         );
     }
     Ok(None)
+}
+
+pub(crate) fn capture_active_turn_budget_abort_cue(
+    tmux: &Tmux,
+    pane: &str,
+    harness: &HarnessConfig,
+) -> Option<String> {
+    agent_doc_tmux_io::capture_pane_with_ansi(tmux, pane)
+        .ok()
+        .and_then(|content| harness.active_turn_budget_abort_cue(&content))
 }
 
 /// Poll the live pane of a blocked-by-starting-timeout actor for a dispatch-ready

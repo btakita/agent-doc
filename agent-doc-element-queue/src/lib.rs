@@ -210,6 +210,21 @@ impl QueueItemIdentity {
     pub fn is_id_backed(&self) -> bool {
         matches!(self, QueueItemIdentity::Id(_))
     }
+
+    /// One string a queue-tree row and a claim can both carry (`#servequeuetree`).
+    ///
+    /// A claim's stored identity is not the tree row's first tag, and the
+    /// tree's display text is truncated, so the two cannot be joined by
+    /// looking at either of those. This key is the identity itself:
+    /// `queue-id:q-…` when the claim stores that free-text key, `id:…` for a
+    /// tracked-work id, and `text:…` for a row keyed on its normalized text.
+    pub fn join_key(&self) -> String {
+        match self {
+            QueueItemIdentity::Id(id) => format!("id:{id}"),
+            QueueItemIdentity::FreeText(key) if key.starts_with("queue-id:") => key.clone(),
+            QueueItemIdentity::FreeText(key) => format!("text:{key}"),
+        }
+    }
 }
 
 /// Lifecycle state of a single queue item, in ascending lawful order.
@@ -1830,6 +1845,30 @@ mod tests {
             queue_prompt_stable_identity("do [#q-authored]"),
             QueueItemIdentity::Id("q-authored".into())
         );
+    }
+
+    /// `#servequeuetree`: the join key is the claim identity, not the row's
+    /// first tag and not its truncated display text.
+    #[test]
+    fn join_key_matches_a_claim_identity() {
+        assert_eq!(
+            QueueItemIdentity::Id("jbfrontendswap".into()).join_key(),
+            "id:jbfrontendswap"
+        );
+        assert_eq!(
+            QueueItemIdentity::FreeText("queue-id:q-aaaaaaaaaaaa".into()).join_key(),
+            "queue-id:q-aaaaaaaaaaaa"
+        );
+        assert_eq!(
+            QueueItemIdentity::FreeText("yes".into()).join_key(),
+            "text:yes"
+        );
+        let followup = "[#q-origin] follow-up: keep the row [#q-aaaaaaaaaaaa]";
+        assert_eq!(
+            queue_prompt_stable_identity(followup).join_key(),
+            "queue-id:q-aaaaaaaaaaaa"
+        );
+        assert_eq!(queue_prompt_stable_identity("yes").join_key(), "text:yes");
     }
 
     use super::*;

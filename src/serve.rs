@@ -13,8 +13,16 @@
 //!   - `GET /doc/<path-or-hash>` → current text for a project session document.
 //!   - `GET /api/auth` → current auth mode and token scope.
 //!   - `GET /api/sessions` → project session list.
-//!   - `GET /board` → embedded fleet work board page (`BOARD_HTML`).
-//!   - `GET /api/board` → read-only fleet work board JSON (`agent-doc board --json`).
+//!   - `GET /board` → embedded per-project work board page (`BOARD_HTML`).
+//!   - `GET /api/board` → read-only work board JSON for this server's project
+//!     (`agent-doc board --json`).
+//!   - `GET /fleet` → embedded global board page (`FLEET_HTML`).
+//!   - `GET /api/fleet` → read-only board across every project a running
+//!     controller serves. Cached for 30 seconds. Never writes.
+//!   - `GET /tree` → embedded per-document queue page (`TREE_HTML`).
+//!   - `GET /api/queue-tree/<doc>` → that document's queue tree. Each row's
+//!     `queue_id` is the claim join key, and `claims` use the same key.
+//!     Reads the claim ledger read-only and never creates `state.db`.
 //!   - `POST /save` → body = full document text, with `X-Agent-Doc-Base-Revision` naming its
 //!     base cut. Merges independent changes and returns the committed text and
 //!     its `ETag`. An overlap or unavailable authority returns `409 Conflict`.
@@ -55,11 +63,14 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tiny_http::{Header, Method, Response, Server, SslConfig, StatusCode};
 
 const INDEX_HTML: &str = include_str!("../assets/serve/index.html");
 const BOARD_HTML: &str = include_str!("../assets/serve/board.html");
+const FLEET_HTML: &str = include_str!("../assets/serve/fleet.html");
+const TREE_HTML: &str = include_str!("../assets/serve/tree.html");
+const FLEET_CACHE_TTL: Duration = Duration::from_secs(30);
 const DEFAULT_PORT: u16 = 7333;
 const DEFAULT_HOST: &str = "127.0.0.1";
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024; // 4 MiB cap for the MVP
@@ -146,6 +157,15 @@ struct ServeState {
     browse_root: bool,
     auth: ServeAuth,
     revisions: Arc<Mutex<VecDeque<BrowserRevision>>>,
+    /// Last `/api/fleet` body. The scan of every running controller is slow,
+    /// so a second read inside [`FLEET_CACHE_TTL`] returns this copy.
+    fleet_cache: Arc<Mutex<Option<FleetCache>>>,
+}
+
+#[derive(Clone, Debug)]
+struct FleetCache {
+    at: Instant,
+    body: String,
 }
 
 #[derive(Debug)]
@@ -179,6 +199,7 @@ impl ServeState {
                 browse_root: false,
                 auth,
                 revisions: Arc::default(),
+                fleet_cache: Arc::default(),
             })
         } else {
             let root = agent_doc_fs::find_project_root(&canonical).unwrap_or(canonical);
@@ -188,6 +209,7 @@ impl ServeState {
                 browse_root: true,
                 auth,
                 revisions: Arc::default(),
+                fleet_cache: Arc::default(),
             })
         }
     }
@@ -267,6 +289,42 @@ impl ServeState {
         }
         if !is_agent_doc_file(&canonical)? {
             anyhow::bail!("not an agent-doc session document: {decoded}");
+        }
+        Ok(canonical)
+    }
+
+    /// A queue-tree document is one this server already serves, or an
+    /// agent-doc file under a project whose controller is running. Anything
+    /// else is refused: the fleet view must not become a general file read.
+    fn resolve_queue_tree_doc(&self, token: Option<&str>) -> Result<PathBuf> {
+        let Some(token) = token.filter(|token| !token.is_empty()) else {
+            return self.resolve_doc(None);
+        };
+        let decoded = percent_decode(token)?;
+        let path = Path::new(&decoded);
+        if path.is_absolute() {
+            return self.resolve_absolute_session(path);
+        }
+        self.resolve_doc(Some(token))
+    }
+
+    fn resolve_absolute_session(&self, path: &Path) -> Result<PathBuf> {
+        let canonical = path
+            .canonicalize()
+            .with_context(|| format!("session document not found: {}", path.display()))?;
+        let under_server = canonical.starts_with(&self.root);
+        let under_controller =
+            agent_doc_controller_io::process::controller_project_roots(std::process::id())
+                .iter()
+                .any(|root| canonical.starts_with(root));
+        if !under_server && !under_controller {
+            anyhow::bail!(
+                "document is outside this server and the projects with a running controller: {}",
+                path.display()
+            );
+        }
+        if !is_agent_doc_file(&canonical)? {
+            anyhow::bail!("not an agent-doc session document: {}", path.display());
         }
         Ok(canonical)
     }
@@ -467,6 +525,23 @@ fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()>
             StatusCode(200),
         ),
         (Method::Get, "/api/board") => handle_board(request, state),
+        (Method::Get, "/fleet") => respond(
+            request,
+            FLEET_HTML,
+            "text/html; charset=utf-8",
+            StatusCode(200),
+        ),
+        (Method::Get, "/api/fleet") => handle_fleet(request, state),
+        (Method::Get, "/tree") => respond(
+            request,
+            TREE_HTML,
+            "text/html; charset=utf-8",
+            StatusCode(200),
+        ),
+        (Method::Get, "/api/queue-tree") => handle_queue_tree(request, state, None),
+        (Method::Get, route) if route.starts_with("/api/queue-tree/") => {
+            handle_queue_tree(request, state, Some(&route["/api/queue-tree/".len()..]))
+        }
         (Method::Get, "/doc") => handle_doc(request, state, None),
         (Method::Get, route) if route.starts_with("/doc/") => {
             handle_doc(request, state, Some(&route["/doc/".len()..]))
@@ -547,6 +622,195 @@ fn handle_board(request: tiny_http::Request, state: &ServeState) -> Result<()> {
         "application/json; charset=utf-8",
         StatusCode(200),
     )
+}
+
+/// Read-only board of every project a live controller serves.
+fn handle_fleet(request: tiny_http::Request, state: &ServeState) -> Result<()> {
+    let body = match fleet_json(state) {
+        Ok(body) => body,
+        Err(error) => {
+            return respond(
+                request,
+                &format!("{error:#}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(500),
+            );
+        }
+    };
+    respond(
+        request,
+        &body,
+        "application/json; charset=utf-8",
+        StatusCode(200),
+    )
+}
+
+fn fleet_json(state: &ServeState) -> Result<String> {
+    let mut cache = state.fleet_cache.lock();
+    if let Some(hit) = cache.as_ref()
+        && hit.at.elapsed() < FLEET_CACHE_TTL
+    {
+        return Ok(hit.body.clone());
+    }
+    let roots = controller_sections();
+    let controllers = roots.len();
+    let board = crate::fleet_board_cmd::board_for_projects(&roots, false);
+    let body = serde_json::to_string(&ServeFleet {
+        schema: "agent-doc-fleet-v1",
+        controllers,
+        board,
+    })?;
+    *cache = Some(FleetCache {
+        at: Instant::now(),
+        body: body.clone(),
+    });
+    Ok(body)
+}
+
+/// One section per running controller. The label is the directory name, or
+/// the whole path when two controllers share a directory name, so the board
+/// does not merge them into one group.
+fn controller_sections() -> Vec<crate::fleet_board_cmd::ProjectRoot> {
+    let roots: Vec<PathBuf> =
+        agent_doc_controller_io::process::controller_project_roots(std::process::id())
+            .into_iter()
+            .collect();
+    let names: Vec<String> = roots.iter().map(|root| controller_dir_name(root)).collect();
+    roots
+        .into_iter()
+        .enumerate()
+        .map(|(index, root)| {
+            let name = &names[index];
+            let duplicated = names.iter().filter(|other| *other == name).count() > 1;
+            let label = if duplicated {
+                root.display().to_string()
+            } else {
+                name.clone()
+            };
+            crate::fleet_board_cmd::ProjectRoot { label, root }
+        })
+        .collect()
+}
+
+fn controller_dir_name(root: &Path) -> String {
+    root.file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .filter(|name| !name.is_empty())
+        .unwrap_or_else(|| root.display().to_string())
+}
+
+#[derive(Serialize)]
+struct ServeFleet {
+    schema: &'static str,
+    controllers: usize,
+    #[serde(flatten)]
+    board: agent_doc_work_graph::fleet_board::FleetBoard,
+}
+
+/// One document's queue tree plus the claims that join its rows on `queue_id`.
+fn handle_queue_tree(
+    request: tiny_http::Request,
+    state: &ServeState,
+    token: Option<&str>,
+) -> Result<()> {
+    let doc = match state.resolve_queue_tree_doc(token) {
+        Ok(doc) => doc,
+        Err(error) => {
+            return respond(
+                request,
+                &format!("{error:#}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(404),
+            );
+        }
+    };
+    let body = match agent_doc_document_realtime_io::peek_current_document_content(
+        &doc,
+        "serve_queue_tree",
+    ) {
+        Ok(body) => body,
+        Err(error) => {
+            return respond(
+                request,
+                &format!("document authority unavailable: {error:#}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(503),
+            );
+        }
+    };
+    let payload = match serve_queue_tree(&doc, &body) {
+        Ok(payload) => payload,
+        Err(error) => {
+            return respond(
+                request,
+                &format!("{error:#}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(500),
+            );
+        }
+    };
+    respond(
+        request,
+        &serde_json::to_string(&payload)?,
+        "application/json; charset=utf-8",
+        StatusCode(200),
+    )
+}
+
+fn serve_queue_tree(doc: &Path, body: &str) -> Result<ServeQueueTree> {
+    let tree = agent_doc_queue::queue_tree::queue_tree(
+        body,
+        &agent_doc_queue::queue_tree::QueueTreeOptions::default(),
+    )?;
+    let (claims, claims_error) = queue_tree_claims(doc, body);
+    Ok(ServeQueueTree {
+        schema: "agent-doc-queue-tree-v1",
+        document: doc.display().to_string(),
+        summary: tree.summary,
+        nodes: tree.nodes,
+        claims,
+        claims_error,
+    })
+}
+
+/// Claims from the read-only ledger. A missing database is an empty list,
+/// not an error and not a reason to create `state.db`.
+fn queue_tree_claims(doc: &Path, body: &str) -> (Vec<ServeQueueClaim>, Option<String>) {
+    match agent_doc_queue_io::queue_claim::load_ledger_following_read_only(doc, body) {
+        Ok(ledger) => (
+            ledger
+                .claims
+                .into_iter()
+                .map(|claim| ServeQueueClaim {
+                    queue_id: claim.identity.join_key(),
+                    owner: claim.owner,
+                    state: claim.state,
+                })
+                .collect(),
+            None,
+        ),
+        Err(error) => (Vec::new(), Some(format!("{error:#}"))),
+    }
+}
+
+#[derive(Serialize)]
+struct ServeQueueTree {
+    schema: &'static str,
+    document: String,
+    summary: agent_doc_queue::queue_tree::QueueTreeSummary,
+    nodes: Vec<agent_doc_queue::queue_tree::QueueTreeNode>,
+    claims: Vec<ServeQueueClaim>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    claims_error: Option<String>,
+}
+
+#[derive(Serialize)]
+struct ServeQueueClaim {
+    /// [`agent_doc_element_queue::QueueItemIdentity::join_key`], the same
+    /// string each tree row's `queue_id` carries.
+    queue_id: String,
+    owner: String,
+    state: agent_doc_queue::queue_claim::QueueClaimState,
 }
 
 fn handle_auth(request: tiny_http::Request, state: &ServeState, scope: AuthScope) -> Result<()> {
@@ -1780,6 +2044,7 @@ mod tests {
             browse_root: true,
             auth: ServeAuth::Disabled,
             revisions: Arc::default(),
+            fleet_cache: Arc::default(),
         };
         let sessions = list_sessions(&state).unwrap();
 
@@ -1812,6 +2077,7 @@ mod tests {
             browse_root: true,
             auth: ServeAuth::Disabled,
             revisions: Arc::default(),
+            fleet_cache: Arc::default(),
         };
         let sessions = list_sessions(&state).unwrap();
         let session = sessions
@@ -1845,8 +2111,75 @@ mod tests {
             BOARD_HTML.contains("/api/board"),
             "the board page must fetch its own read-only endpoint"
         );
+        assert!(
+            BOARD_HTML.contains("/fleet"),
+            "the board links to the fleet"
+        );
+        assert!(
+            FLEET_HTML.contains("/api/fleet"),
+            "the fleet page must fetch its own read-only endpoint"
+        );
+        assert!(
+            TREE_HTML.contains("/api/queue-tree/"),
+            "the document page must fetch the queue-tree endpoint"
+        );
+        assert!(
+            TREE_HTML.contains("queue_id"),
+            "the document page joins a row to its claim on queue_id"
+        );
         assert!(INDEX_HTML.contains("docNav"));
         assert!(INDEX_HTML.contains("hashchange"));
+    }
+
+    #[test]
+    fn serve_fleet_and_queue_tree_are_read_only_json() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join(".agent-doc")).unwrap();
+        let doc = root.join("session.md");
+        std::fs::write(
+            &doc,
+            "<!-- agent:queue id=\"main\" -->\n- [#q-origin] follow-up: keep it [#q-aaaaaaaaaaaa]\n- yes\n<!-- /agent:queue -->\n",
+        )
+        .unwrap();
+        let state = ServeState::new(Some(root), ServeAuth::Disabled).unwrap();
+
+        let (status, _, body) = browser_request(&state, "GET", "/api/fleet", None, "");
+        assert_eq!(status, 200, "{body}");
+        let fleet: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(fleet["schema"], "agent-doc-fleet-v1");
+        assert!(fleet["groups"].is_array());
+        assert!(fleet["controllers"].is_number());
+
+        let (status, _, body) =
+            browser_request(&state, "GET", "/api/queue-tree/session.md", None, "");
+        assert_eq!(status, 200, "{body}");
+        let tree: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(tree["schema"], "agent-doc-queue-tree-v1");
+        let nodes = tree["nodes"].as_array().unwrap();
+        let follow = nodes
+            .iter()
+            .find(|node| node["text"].as_str().unwrap_or("").contains("keep it"))
+            .unwrap();
+        assert_eq!(follow["queue_id"], "queue-id:q-aaaaaaaaaaaa");
+        let yes = nodes
+            .iter()
+            .find(|node| node["text"].as_str() == Some("yes"))
+            .unwrap();
+        assert_eq!(yes["queue_id"], "text:yes");
+        assert!(tree["claims"].as_array().unwrap().is_empty());
+        assert!(tree.get("claims_error").is_none());
+
+        let (status, _, body) =
+            browser_request(&state, "GET", "/api/queue-tree/%2Fetc%2Fpasswd", None, "");
+        assert_eq!(status, 404, "{body}");
+
+        let (status, _, body) = browser_request(&state, "GET", "/fleet", None, "");
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("/api/fleet"));
+        let (status, _, body) = browser_request(&state, "GET", "/tree", None, "");
+        assert_eq!(status, 200, "{body}");
+        assert!(body.contains("/api/queue-tree/"));
     }
 
     #[test]

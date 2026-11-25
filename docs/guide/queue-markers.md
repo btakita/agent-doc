@@ -432,8 +432,10 @@ queue main
 `--open-only` hides closed rows with their subtrees, `--item ID` shows one
 subtree, and `--json` prints the nodes editors read through the
 `agent_doc_queue_tree_json` FFI export (1-based `line`, inclusive `end_line`
-for folding, `state`, `glyph`, `closed`, `rollup`). The view never writes the
-document.
+for folding, `state`, `glyph`, `closed`, `rollup`). Each node also carries
+`queue_id`, the same join key a claim uses (`queue-id:q-…`, `id:…`, or
+`text:…`), so a reader does not match a claim by the row's first tag or its
+truncated text. The view never writes the document.
 
 ## Asking a subtree's status
 

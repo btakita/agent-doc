@@ -175,6 +175,13 @@ pub struct QueueTreeNode {
     /// The row's own `[#id]`, when it has one.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub id: Option<String>,
+    /// Claim join key (`#servequeuetree`): the same string
+    /// [`agent_doc_element_queue::QueueItemIdentity::join_key`] produces for
+    /// this row's prompt. `queue-id:q-…`, `id:…`, or `text:…`. Absent when
+    /// the row has no prompt text. A reader joins a claim on this key and
+    /// does not compare `id` (the first tag) or the truncated `text`.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub queue_id: Option<String>,
     /// Whether the node is closed (`state == done`).
     pub closed: bool,
     /// Whether the node is a Waiting-on-you item head.
@@ -388,6 +395,15 @@ fn truncate(text: &str, limit: usize) -> String {
     out
 }
 
+/// The claim join key of one queue row, from the prompt text the claim
+/// ledger keys on. Empty rows have none.
+fn queue_row_join_key(raw: &str) -> Option<String> {
+    if raw.trim().is_empty() {
+        return None;
+    }
+    Some(agent_doc_element_queue::queue_prompt_stable_identity(raw).join_key())
+}
+
 fn own_id(text: &str) -> Option<String> {
     let work = waiting_status::without_status_token(agent_doc_element_queue::struck_work_text(
         text.lines().next().unwrap_or_default(),
@@ -592,6 +608,7 @@ fn queue_tree_nodes(document: &str) -> anyhow::Result<Vec<QueueTreeNode>> {
                 },
                 text,
                 id: own_id(raw),
+                queue_id: queue_row_join_key(raw),
                 closed: state.is_closed(),
                 waiting_item: waiting_packet::is_waiting_item_head(entry),
                 todo_open: waiting_packet::is_waiting_item_head(entry)
@@ -1391,6 +1408,59 @@ mod tests {
         assert_eq!(json["nodes"][3]["state"], "needs-integration");
         assert_eq!(json["nodes"][0]["closed"], true);
         assert_eq!(json["nodes"][6]["rollup"]["you"], 1);
+        let beta = json["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|node| node["text"] == "Build beta [#q-beta]")
+            .unwrap();
+        assert_eq!(beta["queue_id"], "queue-id:q-beta");
+    }
+
+    /// `#servequeuetree`: a row's `queue_id` is the claim identity of its
+    /// prompt, including a follow-up whose first tag is the origin's id and
+    /// an answer row that has no tag.
+    #[test]
+    fn queue_id_is_the_claim_join_key() {
+        let followup = "[#q-origin] follow-up: keep the row [#q-aaaaaaaaaaaa]";
+        let doc = format!(
+            "<!-- agent:queue id=\"main\" -->\n- do [#jbfrontendswap]\n- {followup}\n- yes\n<!-- /agent:queue -->\n"
+        );
+        let tree = queue_tree(&doc, &QueueTreeOptions::default()).unwrap();
+        let key = |text: &str| {
+            tree.nodes
+                .iter()
+                .find(|node| node.text.contains(text))
+                .and_then(|node| node.queue_id.clone())
+        };
+        assert_eq!(
+            key("jbfrontendswap").as_deref(),
+            Some(
+                agent_doc_element_queue::queue_prompt_stable_identity("do [#jbfrontendswap]")
+                    .join_key()
+                    .as_str()
+            )
+        );
+        assert_eq!(
+            key("keep the row").as_deref(),
+            Some(
+                agent_doc_element_queue::queue_prompt_stable_identity(followup)
+                    .join_key()
+                    .as_str()
+            )
+        );
+        assert_eq!(
+            key("keep the row").as_deref(),
+            Some("queue-id:q-aaaaaaaaaaaa")
+        );
+        assert_eq!(
+            key("yes").as_deref(),
+            Some(
+                agent_doc_element_queue::queue_prompt_stable_identity("yes")
+                    .join_key()
+                    .as_str()
+            )
+        );
     }
 
     /// `#queuetreegutter`: editors show the native tooltip verbatim, so the

@@ -59,12 +59,21 @@
       .muted { color: var(--dim); }
       .status { color: var(--dim); margin-bottom: 16px; }
       .status.err { color: var(--blocked); }
+      nav { margin: 0 0 16px; }
+      nav a { color: var(--ready); margin-right: 14px; text-decoration: none; }
+      nav a:hover, td.doc a:hover { text-decoration: underline; }
+      td.doc a { color: var(--fg); text-decoration: none; }
       footer { color: var(--dim); border-top: 1px solid var(--rule); padding-top: 12px; }
       @media (max-width: 640px) { main { padding: 16px; } }
     </style>
   </head>
   <body>
     <main>
+      <nav>
+        <a href="/board">Board</a>
+        <a href="/fleet">Fleet</a>
+        <a href="/tree">Document</a>
+      </nav>
       <h1 id="headline">agent-doc board</h1>
       <p class="lede">
         Ordered by severity, not alphabetically. The load-bearing signal is a drainable queue head
@@ -141,6 +150,16 @@
         return row.actor_harness ? row.actor_pane + " " + row.actor_harness : row.actor_pane;
       }
 
+      function docCell(path) {
+        const td = document.createElement("td");
+        td.className = "doc";
+        const link = document.createElement("a");
+        link.href = "/tree?doc=" + encodeURIComponent(path);
+        link.textContent = path;
+        td.appendChild(link);
+        return td;
+      }
+
       function cell(text, className) {
         const td = document.createElement("td");
         td.textContent = text;
@@ -174,7 +193,7 @@
         for (const row of group.rows) {
           const tr = document.createElement("tr");
           tr.appendChild(cell(STATE_LABEL[row.state] || row.state, "state state-" + row.state));
-          tr.appendChild(cell(row.path, "doc"));
+          tr.appendChild(docCell(row.path));
           tr.appendChild(cell(queueCell(row), "num"));
           tr.appendChild(cell(String(row.backlog_open), "num"));
           tr.appendChild(cell(reviewCell(row), "num"));

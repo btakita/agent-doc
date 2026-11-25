@@ -1,0 +1,177 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-doc queue</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #12100c;
+        --fg: #d8d2c4;
+        --dim: #8a8477;
+        --rule: #332f27;
+        --blocked: #f0736a;
+        --operator: #e3d06a;
+        --ready: #7aa6d6;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.55 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+      main { padding: 24px 16px 64px; max-width: 1100px; margin: 0 auto; }
+      h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+      .lede, .status { color: var(--dim); }
+      .status.err { color: var(--blocked); }
+      nav { margin: 0 0 16px; }
+      nav a { color: var(--ready); margin-right: 14px; text-decoration: none; }
+      nav a:hover { text-decoration: underline; }
+      .chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0 18px; }
+      .chip {
+        background: #1c1914;
+        border-radius: 8px;
+        padding: 2px 10px;
+      }
+      .chip strong { margin-right: 6px; }
+      .row {
+        display: flex;
+        gap: 10px;
+        padding: 2px 0;
+      }
+      .row.closed { opacity: 0.5; }
+      .glyph { width: 1.5em; flex: none; }
+      .state { width: 11em; flex: none; color: var(--dim); }
+      .text { flex: 1; min-width: 0; }
+      .owner { width: 16em; flex: none; color: var(--dim); }
+      @media (max-width: 640px) {
+        main { padding: 16px; }
+        .state, .owner { width: auto; }
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav>
+        <a href="/board">Board</a>
+        <a href="/fleet">Fleet</a>
+        <a href="/tree">Document</a>
+      </nav>
+      <h1 id="headline">queue</h1>
+      <p class="lede" id="path"></p>
+      <p class="status" id="status">loading…</p>
+      <div class="chips" id="chips"></div>
+      <div id="rows"></div>
+    </main>
+    <script>
+      function readToken() {
+        const fromQuery = new URLSearchParams(window.location.search).get("token");
+        if (fromQuery) {
+          window.localStorage.setItem("agentDocServeToken", fromQuery);
+          return fromQuery;
+        }
+        try {
+          return window.localStorage.getItem("agentDocServeToken") || "";
+        } catch (_) {
+          return "";
+        }
+      }
+      const authToken = readToken();
+      const doc = new URLSearchParams(window.location.search).get("doc") || "";
+
+      function withAuth(url) {
+        if (!authToken) return url;
+        return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(authToken);
+      }
+      function authHeaders() {
+        return authToken ? { Authorization: "Bearer " + authToken } : {};
+      }
+
+      function setStatus(text, isError) {
+        const el = document.getElementById("status");
+        el.textContent = text;
+        el.className = isError ? "status err" : "status";
+      }
+
+      function claimOwners(claims, queueId) {
+        if (!queueId) return "";
+        return claims
+          .filter((claim) => claim.queue_id === queueId)
+          .map((claim) => claim.owner + " · " + claim.state)
+          .join(", ");
+      }
+
+      function render(payload) {
+        document.getElementById("headline").textContent = payload.summary
+          ? payload.summary.items + " queue rows"
+          : "queue";
+        document.getElementById("path").textContent = payload.document || doc;
+        const chips = document.getElementById("chips");
+        chips.textContent = "";
+        for (const count of (payload.summary && payload.summary.counts) || []) {
+          const chip = document.createElement("span");
+          chip.className = "chip";
+          const n = document.createElement("strong");
+          n.textContent = String(count.count);
+          chip.appendChild(n);
+          chip.appendChild(document.createTextNode(count.state));
+          chips.appendChild(chip);
+        }
+        const rows = document.getElementById("rows");
+        rows.textContent = "";
+        const claims = payload.claims || [];
+        for (const node of payload.nodes || []) {
+          const row = document.createElement("div");
+          row.className = node.closed ? "row closed" : "row";
+          row.style.paddingLeft = (node.depth || 0) * 16 + "px";
+          const glyph = document.createElement("span");
+          glyph.className = "glyph";
+          glyph.textContent = node.glyph || "";
+          const state = document.createElement("span");
+          state.className = "state";
+          state.textContent = node.state || "";
+          const text = document.createElement("span");
+          text.className = "text";
+          text.textContent = node.text || "";
+          const owner = document.createElement("span");
+          owner.className = "owner";
+          owner.textContent = claimOwners(claims, node.queue_id);
+          row.appendChild(glyph);
+          row.appendChild(state);
+          row.appendChild(text);
+          row.appendChild(owner);
+          rows.appendChild(row);
+        }
+        const note = payload.claims_error ? " · claims unreadable" : "";
+        setStatus("refreshed " + new Date().toLocaleTimeString() + note, Boolean(payload.claims_error));
+      }
+
+      async function load() {
+        if (!doc) {
+          document.getElementById("path").textContent =
+            "Open a document from Board or Fleet, or add ?doc= to this page.";
+          setStatus("no document selected", false);
+          return;
+        }
+        try {
+          const response = await fetch(withAuth("/api/queue-tree/" + encodeURIComponent(doc)), {
+            cache: "no-store",
+            headers: authHeaders(),
+          });
+          if (!response.ok) {
+            setStatus("/api/queue-tree/ returned " + response.status, true);
+            return;
+          }
+          render(await response.json());
+        } catch (error) {
+          setStatus(String(error), true);
+        }
+      }
+
+      load();
+      if (doc) setInterval(load, 5000);
+    </script>
+  </body>
+</html>

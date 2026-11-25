@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>agent-doc fleet</title>
+    <style>
+      :root {
+        color-scheme: dark;
+        --bg: #12100c;
+        --fg: #d8d2c4;
+        --dim: #8a8477;
+        --rule: #332f27;
+        --blocked: #f0736a;
+        --stalled: #f0a94c;
+        --operator: #e3d06a;
+        --draining: #7fc98a;
+        --ready: #7aa6d6;
+        --clear: #6b6559;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        padding: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.55 ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+      main { padding: 24px 16px 64px; max-width: 1400px; margin: 0 auto; }
+      h1 { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+      .lede { color: var(--dim); margin: 0 0 28px; max-width: 78ch; }
+      .project { margin: 0 0 32px; }
+      .project h2 {
+        font-size: 13px;
+        font-weight: 600;
+        margin: 0 0 8px;
+        padding-bottom: 6px;
+        border-bottom: 1px solid var(--rule);
+      }
+      .project h2 .root { color: var(--dim); font-weight: 400; margin-left: 8px; }
+      .scroll { overflow-x: auto; }
+      table { border-collapse: collapse; width: 100%; }
+      th, td {
+        text-align: left;
+        padding: 4px 14px 4px 0;
+        white-space: nowrap;
+        vertical-align: top;
+      }
+      th { color: var(--dim); font-weight: 400; }
+      td.num { text-align: right; padding-right: 22px; }
+      td.doc { white-space: normal; word-break: break-word; }
+      .state { font-weight: 600; }
+      .state-blocked { color: var(--blocked); }
+      .state-stalled { color: var(--stalled); }
+      .state-operator_verify { color: var(--operator); }
+      .state-draining { color: var(--draining); }
+      .state-ready { color: var(--ready); }
+      .state-clear { color: var(--clear); }
+      .muted { color: var(--dim); }
+      .status { color: var(--dim); margin-bottom: 16px; }
+      .status.err { color: var(--blocked); }
+      nav { margin: 0 0 16px; }
+      nav a { color: var(--ready); margin-right: 14px; text-decoration: none; }
+      nav a:hover, td.doc a:hover { text-decoration: underline; }
+      td.doc a { color: var(--fg); text-decoration: none; }
+      @media (max-width: 640px) { main { padding: 16px; } }
+    </style>
+  </head>
+  <body>
+    <main>
+      <nav>
+        <a href="/board">Board</a>
+        <a href="/fleet">Fleet</a>
+        <a href="/tree">Document</a>
+      </nav>
+      <h1 id="headline">agent-doc fleet</h1>
+      <p class="lede">
+        Every project on this machine with a running controller. This server's own project, including
+        its submodules, stays on Board. A document opens its queue.
+      </p>
+      <p class="status" id="status">loading…</p>
+      <div id="projects"></div>
+    </main>
+    <script>
+      const STATE_LABEL = {
+        blocked: "BLOCKED",
+        stalled: "STALLED",
+        operator_verify: "OPERATOR",
+        draining: "DRAINING",
+        ready: "READY",
+        clear: "CLEAR",
+      };
+      const COLUMNS = ["state", "document", "queue", "backlog", "review", "actor", "needs"];
+
+      function readToken() {
+        const fromQuery = new URLSearchParams(window.location.search).get("token");
+        if (fromQuery) {
+          window.localStorage.setItem("agentDocServeToken", fromQuery);
+          return fromQuery;
+        }
+        try {
+          return window.localStorage.getItem("agentDocServeToken") || "";
+        } catch (_) {
+          return "";
+        }
+      }
+      const authToken = readToken();
+
+      function withAuth(url) {
+        if (!authToken) return url;
+        return url + (url.includes("?") ? "&" : "?") + "token=" + encodeURIComponent(authToken);
+      }
+      function authHeaders() {
+        return authToken ? { Authorization: "Bearer " + authToken } : {};
+      }
+
+      function queueCell(row) {
+        if (row.queue_stopped) return "stopped";
+        if (!row.queue_active) return "—";
+        return row.deferred_heads > 0
+          ? row.drainable_heads + "+" + row.deferred_heads
+          : String(row.drainable_heads);
+      }
+      function actorCell(row) {
+        if (!row.actor_pane) return "—";
+        if (!row.actor_alive) return row.actor_pane + " dead";
+        return row.actor_harness ? row.actor_pane + " " + row.actor_harness : row.actor_pane;
+      }
+      function absoluteDoc(row) {
+        const root = (row.project_root || "").replace(/\/$/, "");
+        return root ? root + "/" + row.path : row.path;
+      }
+
+      function cell(text, className) {
+        const td = document.createElement("td");
+        td.textContent = text;
+        if (className) td.className = className;
+        return td;
+      }
+      function docCell(row) {
+        const td = document.createElement("td");
+        td.className = "doc";
+        const link = document.createElement("a");
+        link.href = "/tree?doc=" + encodeURIComponent(absoluteDoc(row));
+        link.textContent = row.path;
+        td.appendChild(link);
+        return td;
+      }
+
+      function renderProject(group) {
+        const section = document.createElement("section");
+        section.className = "project";
+        const heading = document.createElement("h2");
+        heading.textContent = `${group.project} · ${group.attention_count} of ${group.rows.length} need attention`;
+        const root = document.createElement("span");
+        root.className = "root";
+        root.textContent = group.project_root;
+        heading.appendChild(root);
+        section.appendChild(heading);
+
+        const scroll = document.createElement("div");
+        scroll.className = "scroll";
+        const table = document.createElement("table");
+        const head = document.createElement("tr");
+        for (const name of COLUMNS) {
+          const th = document.createElement("th");
+          th.textContent = name;
+          head.appendChild(th);
+        }
+        table.appendChild(head);
+        for (const row of group.rows) {
+          const tr = document.createElement("tr");
+          tr.appendChild(cell(STATE_LABEL[row.state] || row.state, "state state-" + row.state));
+          tr.appendChild(docCell(row));
+          tr.appendChild(cell(queueCell(row), "num"));
+          tr.appendChild(cell(String(row.backlog_open), "num"));
+          tr.appendChild(cell(String(row.review_open), "num"));
+          tr.appendChild(cell(actorCell(row), "muted"));
+          tr.appendChild(cell(row.reason || "—", row.reason ? "" : "muted"));
+          table.appendChild(tr);
+        }
+        scroll.appendChild(table);
+        section.appendChild(scroll);
+        return section;
+      }
+
+      function setStatus(text, isError) {
+        const el = document.getElementById("status");
+        el.textContent = text;
+        el.className = isError ? "status err" : "status";
+      }
+
+      async function load() {
+        try {
+          const response = await fetch(withAuth("/api/fleet"), {
+            cache: "no-store",
+            headers: authHeaders(),
+          });
+          if (!response.ok) {
+            setStatus(`/api/fleet returned ${response.status}`, true);
+            return;
+          }
+          const fleet = await response.json();
+          document.getElementById("headline").textContent =
+            `agent-doc fleet — ${fleet.attention_count} of ${fleet.document_count} document(s) need attention`;
+          const projects = document.getElementById("projects");
+          projects.textContent = "";
+          for (const group of fleet.groups) {
+            projects.appendChild(renderProject(group));
+          }
+          const controllers = fleet.controllers == null ? "?" : fleet.controllers;
+          setStatus(
+            fleet.groups.length
+              ? `${controllers} controller(s) · ${fleet.groups.length} project(s) · refreshed ${new Date().toLocaleTimeString()}`
+              : `${controllers} running controller(s). Nothing to list.`,
+            false,
+          );
+        } catch (error) {
+          setStatus(String(error), true);
+        }
+      }
+
+      load();
+      setInterval(load, 15000);
+    </script>
+  </body>
+</html>

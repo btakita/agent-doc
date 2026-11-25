@@ -666,9 +666,11 @@ pub unsafe extern "C" fn agent_doc_exchange_nodes(file_path: *const c_char) -> *
 /// `reconciling`, `blocked`, `pending`, `open`, `skipped`, `unknown`, `reply`,
 /// `choice`, `follow-up`, `group`), the `glyph` a gutter icon shows, and a
 /// waiting item's `rollup` (`you`, `agent`, `done`), and the `tooltip` the
-/// gutter icon shows verbatim (`#queuetreegutter`). Editor plugins render
-/// these as gutter icons and fold closed subtrees; they never derive state
-/// or word it themselves (FFI-first).
+/// gutter icon shows verbatim (`#queuetreegutter`). A node also carries
+/// `queue_id` when the row has prompt text: the claim join key
+/// (`queue-id:q-…`, `id:…`, or `text:…`, `#servequeuetree`). Editor plugins
+/// render these as gutter icons and fold closed subtrees; they never derive
+/// state or word it themselves (FFI-first). Extra fields are safe to ignore.
 ///
 /// Returns null when `doc` is not UTF-8 or the document's components do not
 /// parse (the reason goes to stderr). Caller must free with

@@ -10334,6 +10334,57 @@ mod tests {
         assert!(!refreshed.contains("What decision or completion result should be recorded?"));
     }
 
+    /// An operator question typed after a complete waiting packet is operator
+    /// text. A refresh keeps the words and drops a trailing reply glyph an
+    /// inline completion appended. Generated rows keep the glyph.
+    #[test]
+    fn refresh_keeps_an_operator_question_after_the_packet_without_a_trailing_glyph() {
+        let reply = agent_doc_reply_suffix();
+        let bare = "    - Why do we want this?\n";
+        let marked = format!("    - Why do we want this? {reply}\n");
+        let child = format!(
+            concat!(
+                "  - [#approve-pr] Approve and merge PR #42. <!-- agent-doc:waiting-item -->\n",
+                "    - **Response:** Approve and merge PR #42 after CI. {r}\n",
+                "      - **Question:** Merge now or wait for the soak? {r}\n",
+                "{question}",
+            ),
+            r = reply,
+            question = marked,
+        );
+        let queue = format!(
+            "- ### Waiting on you — answer by adding a child line under an item <!-- agent-doc:waiting-on-you -->\n{child}"
+        );
+        let response = "### Re: unrelated · 2026-11-03T18:25-05:00\n\nNothing.";
+        let document = waiting_tree_document(
+            &queue,
+            "- [ ] [#approve-pr] Approve and merge PR #42.\n",
+            response,
+        );
+        let refreshed = project_waiting_on_you_tree(&document, response)
+            .unwrap()
+            .expect("the state token follows the question");
+        assert!(
+            refreshed.contains(bare),
+            "the question must survive without the glyph: {refreshed}"
+        );
+        assert!(
+            !refreshed.contains(&marked),
+            "the trailing glyph must not stick: {refreshed}"
+        );
+        assert!(
+            refreshed.contains(&format!(
+                "**Response:** Approve and merge PR #42 after CI. {reply}"
+            )),
+            "{refreshed}"
+        );
+        assert_eq!(
+            project_waiting_on_you_tree(&refreshed, response).unwrap(),
+            None,
+            "a second refresh is a fixed point"
+        );
+    }
+
     /// Without an operator answer, an existing rich packet is still not
     /// downgraded to the generic stub when no fresher packet is available.
     #[test]

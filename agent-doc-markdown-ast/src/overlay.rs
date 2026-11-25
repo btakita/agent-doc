@@ -937,8 +937,10 @@ pub fn inert_list_child_end(
 
 /// Normalize binary-owned reply rows to the bare trailing-glyph form and
 /// remove legacy strike wrappers and hidden ownership comments
-/// (`#barereplymarker`). Operator-authored descendants and lookalikes remain
-/// byte-for-byte unchanged; see [`crate::reply_row::normalize_reply_rows`].
+/// (`#barereplymarker`). An unlabeled operator line inside a waiting packet
+/// also loses a trailing ownership glyph an inline completion appended.
+/// Generated rows, choice rows, and rows outside a packet stay byte-for-byte.
+/// See [`crate::reply_row::normalize_reply_rows`].
 pub fn normalize_agent_doc_reply_rows(source: &str) -> String {
     crate::reply_row::normalize_reply_rows(source)
 }

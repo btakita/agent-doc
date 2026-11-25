@@ -872,7 +872,12 @@ pub fn merge_by_component(
 
 fn finish_component_merge(text: String) -> String {
     let stripped = drop_queue_empty_list_placeholders(text);
-    agent_doc_element_queue::repair_generated_id_before_list_marker(&stripped).into_owned()
+    let repaired =
+        agent_doc_element_queue::repair_generated_id_before_list_marker(&stripped).into_owned();
+    // A trailing reply glyph on an unlabeled packet row is not a new list
+    // key. The keyed merge already joined the marked editor line; drop only
+    // that token so the operator's words stay.
+    agent_doc_markdown_ast::reply_row::strip_spurious_operator_reply_glyphs(&repaired)
 }
 
 /// Drop editor placeholder bullets from queue bodies after a merge.
@@ -6910,6 +6915,68 @@ Second answer line three.
             "{merged}"
         );
         assert!(!merged.contains("- [ ] Decide the merge order"), "{merged}");
+    }
+
+    /// An accepted inline completion suffixes the reply glyph onto an operator
+    /// line inside a waiting packet. That suffix is a different `txt:` key, so
+    /// the keyed merge would replace the line with the marked copy. The merge
+    /// result keeps the words once, without the glyph. Generated rows and
+    /// choice rows keep theirs. The same holds when the agent side omitted the
+    /// line and only the editor still has the marked copy.
+    #[test]
+    fn merge_by_component_drops_a_trailing_reply_glyph_from_an_operator_packet_row() {
+        let _guard = crate::document_cell::CELL_MERGE_ENV_LOCK.lock();
+        let glyph = agent_doc_markdown_ast::reply_row::AGENT_DOC_REPLY_GLYPH;
+        let packet = |question: &str| {
+            format!(
+                concat!(
+                    "- [#pick] Pick a port. <!-- agent-doc:waiting-item -->\n",
+                    "  - **Response:** Pick a port. {glyph}\n",
+                    "    - **Choices:** {glyph}\n",
+                    "      - Commit only {glyph}\n",
+                    "{question}",
+                    "- plain work {glyph}\n",
+                ),
+                glyph = glyph,
+                question = question,
+            )
+        };
+        let bare = "  - Why do we want this?\n";
+        let marked = format!("  - Why do we want this? {glyph}\n");
+        let base = doc_with_exchange_queue("note", &packet(bare));
+        let ours = base.clone();
+        let theirs = doc_with_exchange_queue("note", &packet(&marked));
+        let base_state = CrdtDoc::from_text(&base).encode_state();
+        let merged = merge_by_component(Some(&base_state), &ours, &theirs).unwrap();
+        assert_eq!(
+            merged.matches("Why do we want this?").count(),
+            1,
+            "{merged}"
+        );
+        assert!(merged.contains(bare), "{merged}");
+        assert!(!merged.contains(&marked), "{merged}");
+        assert!(
+            merged.contains(&format!("**Response:** Pick a port. {glyph}")),
+            "{merged}"
+        );
+        assert!(
+            merged.contains(&format!("- Commit only {glyph}")),
+            "{merged}"
+        );
+        assert!(
+            merged.contains(&format!("- plain work {glyph}\n")),
+            "{merged}"
+        );
+
+        let ours_omitted = doc_with_exchange_queue("note", &packet(""));
+        let merged = merge_by_component(Some(&base_state), &ours_omitted, &theirs).unwrap();
+        assert!(merged.contains(bare), "{merged}");
+        assert!(!merged.contains(&marked), "{merged}");
+        assert_eq!(
+            merged.matches("Why do we want this?").count(),
+            1,
+            "{merged}"
+        );
     }
 
     /// `#todoids`: the operator's editor-native done signal is checking the

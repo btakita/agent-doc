@@ -30,11 +30,16 @@
 //!    row, whose children are free-text offered choices.
 //!
 //! Anywhere else (top-level queue rows, rows outside the Waiting-on-you tree,
-//! an unlabeled line typed under an item, a choice, or a `**Response:**` row) a
-//! trailing `▫️` is operator text and stays operator text, so it can never be
-//! regenerated away by a packet refresh. The only operator text the rule can
-//! claim is a line that reproduces a generated row's exact rendered shape in
-//! its rendered position, which is the reserved syntax this glyph names in the
+//! or a `**Response:**` row outside a packet) a trailing `▫️` is operator text
+//! and stays byte-for-byte, so it can never be regenerated away. An unlabeled
+//! line inside a waiting packet is operator text too: a packet refresh does
+//! not claim it. Normalization still drops a trailing glyph token from that
+//! line. An accepted inline completion can suffix the ownership glyph onto
+//! text the operator typed, and the next keyed merge then treats the marked
+//! line as a different row. Generated rows and the free-text children of
+//! `**Choices:**` keep the glyph. The only operator text the rule can claim
+//! is a line that reproduces a generated row's exact rendered shape in its
+//! rendered position, which is the reserved syntax this glyph names in the
 //! legend. Nothing is appended after the glyph. A generated Next, Question,
 //! Response, or Action row is never queue work, including when its item head
 //! is missing and the row sits under the root.
@@ -297,7 +302,9 @@ pub fn is_agent_doc_reply_row_at(lines: &[&str], index: usize) -> bool {
 /// trailing-glyph form, but only where the bare form is still recognized in
 /// that position. A legacy row outside a waiting packet keeps a canonical
 /// `▫️ <!-- agent-doc:reply -->` suffix so it never loses its ownership proof.
-/// Every other line, including operator text, is returned byte-for-byte.
+/// Every other line is returned byte-for-byte, except an unlabeled operator
+/// row inside a waiting packet: [`strip_spurious_operator_reply_glyphs`]
+/// removes a trailing glyph an inline completion appended there.
 pub fn normalize_reply_rows(source: &str) -> String {
     let mut lines = source
         .split_inclusive('\n')
@@ -341,7 +348,81 @@ pub fn normalize_reply_rows(source: &str) -> String {
             lines[index] = original;
         }
     }
-    lines.concat()
+    strip_spurious_operator_reply_glyphs(&lines.concat())
+}
+
+/// Drop a trailing reply-glyph token from an unlabeled operator list row
+/// inside a waiting packet.
+///
+/// The row stays operator text ([`is_agent_doc_reply_row_in`] is false). Only
+/// the trailing token goes, so an accepted inline completion cannot make the
+/// next keyed merge replace the line. Generated rows, choice rows, labeled
+/// rows, struck rows, and rows outside a packet keep the glyph.
+pub fn strip_spurious_operator_reply_glyphs(source: &str) -> String {
+    if !source.contains(AGENT_DOC_REPLY_GLYPH) {
+        return source.to_string();
+    }
+    let mut lines = source
+        .split_inclusive('\n')
+        .map(str::to_string)
+        .collect::<Vec<_>>();
+    let mut changed = false;
+    for index in 0..lines.len() {
+        let Some(stripped) = strip_one_spurious_operator_glyph(&lines, index) else {
+            continue;
+        };
+        lines[index] = stripped;
+        changed = true;
+    }
+    if changed {
+        lines.concat()
+    } else {
+        source.to_string()
+    }
+}
+
+/// The line at `index` with a spurious trailing glyph removed, when it is an
+/// unlabeled operator row inside a waiting packet.
+fn strip_one_spurious_operator_glyph(lines: &[String], index: usize) -> Option<String> {
+    let original = lines.get(index)?;
+    if !original.contains(AGENT_DOC_REPLY_GLYPH) {
+        return None;
+    }
+    let core_end = original.trim_end_matches(['\n', '\r']).len();
+    let core = &original[..core_end];
+    let newline = &original[core_end..];
+    let ReplyRow::Item { indent, body } = reply_row_of_line(core) else {
+        return None;
+    };
+    // A strike wrapper is a consumed answer, not an inline-completion suffix.
+    if has_legacy_reply_marker(body) || body.contains("~~") {
+        return None;
+    }
+    if is_agent_doc_reply_row_in(lines, index) {
+        return None;
+    }
+    match parent_of(lines, index, indent) {
+        Parent::WaitingItem | Parent::Reply { choices: false } => {}
+        Parent::Reply { choices: true } | Parent::Other => return None,
+    }
+    let trimmed = body.trim_end();
+    let before = trimmed.strip_suffix(AGENT_DOC_REPLY_GLYPH)?;
+    if !before.ends_with(char::is_whitespace) {
+        return None;
+    }
+    let content = before.trim_end();
+    if content.is_empty() || content.starts_with("**") {
+        return None;
+    }
+    // `body` is a subslice of `original` (`reply_row_of_line` trims only the
+    // newline, and `strip_bullet` returns the item text in place).
+    let kept_end = (content.as_ptr() as usize)
+        .checked_sub(original.as_ptr() as usize)?
+        .checked_add(content.len())?;
+    if kept_end > core_end {
+        return None;
+    }
+    Some(format!("{}{newline}", &original[..kept_end]))
 }
 
 #[cfg(test)]
@@ -443,7 +524,7 @@ mod tests {
             "    - **Response:** Pick a port. ▫️ <!-- agent-doc:reply -->\n",
             "      - **Choices:** <!-- agent-doc:reply -->\n",
             "        - Commit only ▫️ <!-- agent-doc:reply -->\n",
-            "          - operator child stays byte-stable ▫️\n",
+            "          - operator child loses the trailing glyph ▫️\n",
             "    - ~~**Question:** old <!-- agent-doc:waiting-metadata -->~~\n",
         );
         let normalized = normalize_reply_rows(legacy);
@@ -454,7 +535,7 @@ mod tests {
                 "    - **Response:** Pick a port. ▫️\n",
                 "      - **Choices:** ▫️\n",
                 "        - Commit only ▫️\n",
-                "          - operator child stays byte-stable ▫️\n",
+                "          - operator child loses the trailing glyph\n",
                 "    - **Question:** old ▫️\n",
             )
         );
@@ -476,6 +557,58 @@ mod tests {
 
         let operator = "  - ▫️ operator-authored queue work\n";
         assert_eq!(normalize_reply_rows(operator), operator);
+    }
+
+    #[test]
+    fn normalization_strips_a_trailing_glyph_from_an_unlabeled_packet_row() {
+        let source = concat!(
+            "- ### Waiting on you <!-- agent-doc:waiting-on-you -->\n",
+            "  - [#pick] Pick a port. <!-- agent-doc:waiting-item -->\n",
+            "    - **Next:** you — answer: Which port? (evidence: Question) ▫️\n",
+            "    - **Response:** Pick a port. ▫️\n",
+            "      - **Choices:** ▫️\n",
+            "        - Commit only ▫️\n",
+            "          - yes, this one ▫️\n",
+            "    - Why do we want this? ▫️\n",
+            "    - ~~kept strike ▫️~~\n",
+            "- plain work ▫️\n",
+            "- **Response:** an operator note ▫️\n",
+            "  - ▫️ operator-authored queue work\n",
+        );
+        let normalized = normalize_reply_rows(source);
+        assert!(
+            normalized.contains("          - yes, this one\n"),
+            "{normalized}"
+        );
+        assert!(
+            normalized.contains("    - Why do we want this?\n"),
+            "{normalized}"
+        );
+        assert!(!normalized.contains("yes, this one ▫️"), "{normalized}");
+        assert!(
+            !normalized.contains("Why do we want this? ▫️"),
+            "{normalized}"
+        );
+        assert!(
+            normalized.contains("    - ~~kept strike ▫️~~\n"),
+            "{normalized}"
+        );
+        for kept in [
+            "    - **Next:** you — answer: Which port? (evidence: Question) ▫️\n",
+            "    - **Response:** Pick a port. ▫️\n",
+            "      - **Choices:** ▫️\n",
+            "        - Commit only ▫️\n",
+            "- plain work ▫️\n",
+            "- **Response:** an operator note ▫️\n",
+            "  - ▫️ operator-authored queue work\n",
+        ] {
+            assert!(normalized.contains(kept), "lost `{kept}` in {normalized}");
+        }
+        assert_eq!(normalize_reply_rows(&normalized), normalized);
+        assert_eq!(
+            strip_spurious_operator_reply_glyphs(&normalized),
+            normalized
+        );
     }
 
     #[test]

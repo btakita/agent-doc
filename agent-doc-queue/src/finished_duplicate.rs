@@ -43,12 +43,15 @@
 //!
 //! # Operator completion reply
 //!
-//! A live `[operator-verify]` row (no inline verdict) whose only live child is
-//! the operator's completion reply (`done`, `done.`, `✅`, `completed`, …) is
-//! resolved: the row and the reply are struck and the response quotes the
-//! reply. The reply must be settled (in the committed baseline) and a leaf;
-//! every other row beneath the parent must already be struck. Without such an
-//! operator answer no agent strikes an operator row.
+//! A live `[operator-verify]` row (no inline verdict) whose only direct child
+//! is the operator's completion reply (`done`, `done.`, `✅`, `completed`, …)
+//! is resolved: the row and the reply are struck and the response quotes the
+//! reply. The reply the operator already struck (`~~done~~`) is that same
+//! answer, not a separate head: it strikes the parent too. A response tree
+//! under the reply is the reply's record, not more work. The reply must be
+//! settled (in the committed baseline); every other row beneath the parent
+//! must already be struck. Without such an operator answer no agent strikes
+//! an operator row.
 //!
 //! This module is pure: document text in, document text out.
 
@@ -91,17 +94,37 @@ const COMPLETION_REPLIES: [&str; 12] = [
     "finished.",
 ];
 
-/// Whether `text` (a row's work text) is an operator completion reply.
-pub fn is_completion_reply(text: &str) -> bool {
+/// The completion word inside `text`, strike wrapper removed.
+fn completion_reply_quote(text: &str) -> String {
     let text = agent_doc_element_queue::struck_work_text(text).trim();
-    let text = text
-        .strip_prefix("~~")
+    text.strip_prefix("~~")
         .and_then(|rest| rest.strip_suffix("~~"))
         .unwrap_or(text)
-        .trim();
+        .trim()
+        .to_string()
+}
+
+/// Whether `text` (a row's work text) is an operator completion reply.
+pub fn is_completion_reply(text: &str) -> bool {
+    let text = completion_reply_quote(text);
     COMPLETION_REPLIES
         .iter()
         .any(|reply| text.eq_ignore_ascii_case(reply))
+}
+
+/// A line under a completion reply that records the reply, not new work.
+fn line_is_response_record(line: &str) -> bool {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return true;
+    }
+    let content = ["- ", "* ", "+ "]
+        .iter()
+        .find_map(|marker| trimmed.strip_prefix(marker))
+        .unwrap_or(trimmed)
+        .trim();
+    content.starts_with("**Response ")
+        || agent_doc_markdown_ast::overlay::is_generated_response_structure_row(content)
 }
 
 /// A finished request: the evidence a live row may be a duplicate of.
@@ -792,10 +815,22 @@ fn resolve_done_reply(
     summary: Option<&str>,
 ) -> Option<(Rewrite, Rewrite, Insert)> {
     let parent = line_at(lines, node.line);
-    let reply_quote = reply.trim();
+    let reply_quote = completion_reply_quote(reply);
     let note = format!("operator answered “{reply_quote}” {OPERATOR_DONE_MARKER}");
     let struck_parent = struck_line(parent, &note)?;
-    let struck_reply = struck_line(line_at(lines, reply_line), "")?;
+    let reply_raw = line_at(lines, reply_line);
+    // The operator may have struck the reply already (`~~done~~`). Keep that
+    // line; striking it again would fail the whole resolution.
+    let struck_reply = match struck_line(reply_raw, "") {
+        Some(struck) => struck,
+        None => {
+            let (_, body) = split_row(reply_raw)?;
+            if !body.trim_start().starts_with("~~") || !is_completion_reply(body) {
+                return None;
+            }
+            reply_raw.trim_end().to_string()
+        }
+    };
     let summary = match summary.map(str::trim).filter(|summary| !summary.is_empty()) {
         Some(summary) => format!("The operator answered “{reply_quote}” under this row. {summary}"),
         None => format!(
@@ -936,13 +971,21 @@ fn operator_done_reply(
         if child.depth <= node.depth {
             break;
         }
-        if child.closed {
+        let raw = line_at(lines, child.line);
+        // A response recorded under the reply is not another row of work.
+        if child.depth > node.depth + 1 {
+            if line_is_response_record(raw) {
+                continue;
+            }
+            return None;
+        }
+        let (_, child_body) = split_row(raw)?;
+        if child.closed && !is_completion_reply(child_body) {
             continue;
         }
-        let raw = line_at(lines, child.line);
-        let (_, child_body) = split_row(raw)?;
-        if child.depth != node.depth + 1
-            || child.end_line != child.line
+        let span_is_reply_record = (child.line..=child.end_line)
+            .all(|line| line == child.line || line_is_response_record(line_at(lines, line)));
+        if !span_is_reply_record
             || reply.is_some()
             || !is_completion_reply(child_body)
             || !settled(baseline, raw)
@@ -952,10 +995,7 @@ fn operator_done_reply(
         {
             return None;
         }
-        reply = Some((
-            child.line,
-            agent_doc_element_queue::struck_work_text(child_body).to_string(),
-        ));
+        reply = Some((child.line, completion_reply_quote(child_body)));
     }
     reply
 }

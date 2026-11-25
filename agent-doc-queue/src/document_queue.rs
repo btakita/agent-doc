@@ -2413,8 +2413,13 @@ pub fn set_prompt_runtime_projections_with(
                 // `#keepunstrike`: the top-level row is the container the
                 // operator marked `keep`. Completing its children does not
                 // strike it. A nested group still closes.
+                // `#opdonereply`: a nested `~~done~~` is the operator closing
+                // this row. Keep must not reopen that strike.
+                let operator_done = prompt_carries_operator_done(source);
                 let close_parent = all_leaves_struck
-                    && !(policy.keep_top_level_unstruck && entry_indent(entry).unwrap_or(0) == 0);
+                    && !(policy.keep_top_level_unstruck
+                        && entry_indent(entry).unwrap_or(0) == 0
+                        && !operator_done);
                 let work = struck_work_text(&parent.text);
                 // `#pipeprompt` ` |>`: a hand-off row that is a container has
                 // finished its own stage 1; while a stage under it is open it
@@ -4632,6 +4637,50 @@ pub fn prompts(entries: &[QueueEntry]) -> Vec<&QueuePrompt> {
         .collect()
 }
 
+/// `#opdonereply` on a row the operator already closed with `~~done~~`.
+fn prompt_carries_operator_done(prompt: &QueuePrompt) -> bool {
+    let marker = crate::finished_duplicate::OPERATOR_DONE_MARKER;
+    prompt
+        .note
+        .as_deref()
+        .is_some_and(|note| note.contains(marker))
+        || prompt.text.contains(marker)
+}
+
+/// A nested completion reply (`done`, `~~done~~`) directly under an
+/// `[operator-verify]` row. It closes that row; it is not itself a head.
+fn nested_operator_completion_reply(
+    entries: &[QueueEntry],
+    idx: usize,
+    prompt: &QueuePrompt,
+) -> bool {
+    if prompt.indent == 0
+        || prompt.multiline
+        || !crate::finished_duplicate::is_completion_reply(&prompt.text)
+    {
+        return false;
+    }
+    let Some(own) = entries.get(idx).and_then(entry_indent) else {
+        return false;
+    };
+    for earlier in entries[..idx].iter().rev() {
+        if response_metadata_row_indent(earlier).is_some() {
+            continue;
+        }
+        let Some(indent) = entry_indent(earlier) else {
+            continue;
+        };
+        if indent >= own {
+            continue;
+        }
+        let Some(parent) = prompt_of(earlier) else {
+            return false;
+        };
+        return crate::queue_continuation::head_awaits_operator_inline(&parent.text);
+    }
+    false
+}
+
 /// Indexes of live executable rows, in queue order.
 ///
 /// Group labels are omitted. The index stays valid in `entries`, so a nested
@@ -4681,6 +4730,13 @@ pub fn executable_prompt_indexes(entries: &[QueueEntry]) -> Vec<usize> {
                 if prompt
                     .text
                     .contains(crate::queue_consume::WAITING_ON_YOU_ITEM_MARKER) =>
+            {
+                None
+            }
+            // `#opdonereply`: `done` under an `[operator-verify]` row is the
+            // operator closing that row, not a head to dispatch.
+            QueueEntry::Prompt(prompt)
+                if nested_operator_completion_reply(entries, idx, prompt) =>
             {
                 None
             }
@@ -14416,6 +14472,36 @@ mod tests {
             "{closed}"
         );
         assert!(closed.contains("  - ~~child group~~\n"), "{closed}");
+    }
+
+    /// `#opdonereply`: the operator's own `~~done~~` closes the top-level row
+    /// even on a `keep` queue. `#keepunstrike` still reopens every other
+    /// derived strike.
+    #[test]
+    fn keep_does_not_reopen_an_operator_done_strike() {
+        let policy = RuntimeProjectionPolicy {
+            keep_top_level_unstruck: true,
+        };
+        let body = concat!(
+            "- ~~[#q-0d58062d875f] follow-up: operator: remove the duplicate row. [operator-verify] [#q-76f0eded2463] — operator answered “done” (#opdonereply)~~\n",
+            "  - ~~done~~\n",
+        );
+        // A completed parent keeps its strike note. Keep must not reopen it
+        // just to paint a heading, and a second pass stays a no-op.
+        assert!(
+            project_prompt_runtime_projections_with(body, &[], policy)
+                .unwrap()
+                .is_none(),
+            "keep reopened the operator's strike"
+        );
+        assert!(body.contains("(#opdonereply)~~"));
+        let without_note = body.replace(" — operator answered “done” (#opdonereply)", "");
+        let reopened = project_prompt_runtime_projections_with(&without_note, &[], policy)
+            .unwrap()
+            .expect("the same row without the operator strike still reopens")
+            .0;
+        assert!(!reopened.contains("~~[#q-0d58062d875f]"), "{reopened}");
+        assert!(reopened.contains("[operator-verify]"), "{reopened}");
     }
 
     #[test]

@@ -250,6 +250,81 @@ fn an_operator_completion_reply_resolves_its_operator_verify_row() {
 }
 
 #[test]
+fn a_nested_done_under_an_operator_verify_row_is_not_a_head() {
+    let body = format!("{OPERATOR_ROW}\n  - done\n");
+    let entries = crate::document_queue::parse(&body).unwrap();
+    let heads = crate::document_queue::prompts(&entries)
+        .into_iter()
+        .map(|prompt| prompt.text.clone())
+        .collect::<Vec<_>>();
+    assert!(
+        heads.iter().all(|text| !is_completion_reply(text)),
+        "{heads:?}"
+    );
+    // The same word under an ordinary agent row is still work.
+    let agent = "- [from:chat key=x] agent: rebuild the docs site. [#q-0a0a0a0a0a0a]\n  - done\n";
+    let entries = crate::document_queue::parse(agent).unwrap();
+    assert!(
+        crate::document_queue::prompts(&entries)
+            .iter()
+            .any(|prompt| is_completion_reply(&prompt.text)),
+        "a non-operator parent still offers the nested reply"
+    );
+}
+
+#[test]
+fn a_struck_done_reply_strikes_its_operator_verify_parent() {
+    let document = session(&format!("{OPERATOR_ROW}\n  - ~~done~~\n"), "");
+    let resolved = reconcile(&document).expect("~~done~~ strikes the parent");
+    let lines = resolved
+        .lines()
+        .skip_while(|line| !line.contains("q-0d58062d875f"))
+        .take(5)
+        .collect::<Vec<_>>();
+    assert!(
+        lines[0].starts_with("- ~~[#q-0d58062d875f] follow-up: operator:")
+            && lines[0].ends_with("[#q-76f0eded2463] — operator answered “done” (#opdonereply)~~"),
+        "{resolved}"
+    );
+    assert_eq!(lines[1], "  - ~~done~~");
+    assert!(lines[2].starts_with("  - **Response [#r-"), "{resolved}");
+    assert!(
+        lines[3].contains("The operator answered “done” under this row"),
+        "{resolved}"
+    );
+    assert_eq!(lines[4], "    - **State:** Complete.");
+    assert_eq!(reconcile(&resolved), None, "{resolved}");
+}
+
+#[test]
+fn a_struck_done_reply_with_its_response_still_strikes_the_parent() {
+    // The reply was dispatched before it could close the parent. Its response
+    // stays; the parent still strikes.
+    let document = session(
+        &format!(
+            "{OPERATOR_ROW}\n  - ~~done~~\n    - **Response [#r-aaaaaaaaaaaa]**\n      - **Summary:** BLOCKED already merged.\n      - **State:** Waiting on operator input.\n      - **Guidance:** The row stopped.\n"
+        ),
+        "",
+    );
+    let resolved = reconcile(&document).expect("the response does not keep the parent open");
+    let parent = live_line(&resolved, "q-0d58062d875f").unwrap();
+    assert!(
+        parent.contains("operator answered “done” (#opdonereply)~~"),
+        "{resolved}"
+    );
+    assert!(resolved.contains("  - ~~done~~\n"), "{resolved}");
+    assert!(
+        resolved.contains("The operator answered “done” under this row"),
+        "{resolved}"
+    );
+    assert!(
+        resolved.contains("**State:** Waiting on operator input."),
+        "{resolved}"
+    );
+    assert_eq!(reconcile(&resolved), None, "{resolved}");
+}
+
+#[test]
 fn an_operator_row_is_never_struck_without_a_settled_completion_reply() {
     let cases = [
         // Not a completion reply.

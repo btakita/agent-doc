@@ -81,6 +81,18 @@
           }
         ]
       }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "command": "agent-doc hook pre-compact",
+            "statusMessage": "Recording cross-harness handoff",
+            "timeout": 15,
+            "type": "command"
+          }
+        ]
+      }
     ]
   }
 }

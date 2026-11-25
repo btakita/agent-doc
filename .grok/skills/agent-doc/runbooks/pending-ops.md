@@ -121,6 +121,11 @@ request was closed without merging; when that pull request was the item's
 work and nothing else landed it, reopen the item with
 `agent-doc backlog <FILE> reopen <id>`.
 
+A `🙋` `[operator-verify]` row that asks a person to approve or merge a named
+pull request is not that signal (`#prverify`). Admission reconcile strikes it
+from the same cache: merged is done, closed unmerged is moot. Do not spend a
+turn re-checking that pull request, and do not unstrike the row.
+
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 
 **Complete over gate — keep `agent:review` small (target < 10).** The default

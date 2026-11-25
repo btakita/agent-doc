@@ -82,10 +82,16 @@ accretion.
   `[agent-doc] reported queue rows are ready to close now (#reportedmidturn)`,
   complete every listed row in that step. This
   dispatch is automatic on the first admitted cycle; it never waits for a
-  follow-up operator prompt asking Grok to run the workers. After each worker
-  returns, run `queue report-complete` and then the refill it prints (see
-  [Work pool](#work-pool)), then complete any ready reported closeout in the
-  same step.
+  follow-up operator prompt asking Grok to run the workers. Process each later
+  prompt immediately and do not hold it in Grok's prompt queue
+  (`#grokpromptnow`). A message submitted during this turn stays queued until
+  the turn ends, and waiting on `get_command_or_subagent_output` for the
+  current batch is that hold, so steerings that should add workers sit unread
+  until the batch finishes. Spawn and start the heads that prompt names, then
+  end the turn so the next queued prompt runs at once. When a worker
+  completion opens its own turn, run `queue report-complete` and then the
+  refill it prints (see [Work pool](#work-pool)), then complete any ready
+  reported closeout in that same step, before any further wait.
 
 Both `agent_doc_queue_max_iterations` and
 `AGENT_DOC_QUEUE_MAX_ITERATIONS_HARD_CAP` (default `50`) bound the loop.

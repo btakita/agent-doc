@@ -375,6 +375,297 @@ pub fn recovery_from_hand_back(response: &str) -> HandBackLocation {
     location
 }
 
+/// One checkout from `git worktree list --porcelain` (`#autohandoff`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ListedWorktree {
+    pub path: String,
+    pub head: Option<String>,
+    pub branch: Option<String>,
+}
+
+/// Worktree, branch, and head gathered from one source.
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+pub struct LocationParts {
+    pub worktree: Option<String>,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+}
+
+/// Hints used to pick one checkout from a worktree list.
+#[derive(Debug, Clone, Copy)]
+pub struct WorktreeHint<'a> {
+    pub worktree: Option<&'a str>,
+    pub branch: Option<&'a str>,
+    pub owner: &'a str,
+    /// Final path component of the source repo, when one is known.
+    pub source_repo_name: Option<&'a str>,
+}
+
+/// One claim in the generated exchange packet.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PacketClaim {
+    pub owner: String,
+    pub item: String,
+    pub generation: u64,
+    pub worker_id: String,
+    pub worktree: Option<String>,
+    pub branch: Option<String>,
+    pub head: Option<String>,
+    pub resume_command: String,
+    pub missing: Vec<&'static str>,
+}
+
+fn nonempty(value: Option<String>) -> Option<String> {
+    value
+        .map(|text| text.trim().to_string())
+        .filter(|text| !text.is_empty())
+}
+
+/// Keep a filled field. `next` fills only what `base` omitted.
+pub fn fill_location(mut base: LocationParts, next: LocationParts) -> LocationParts {
+    if nonempty(base.worktree.clone()).is_none() {
+        base.worktree = nonempty(next.worktree);
+    }
+    if nonempty(base.branch.clone()).is_none() {
+        base.branch = nonempty(next.branch);
+    }
+    if nonempty(base.head.clone()).is_none() {
+        base.head = nonempty(next.head);
+    }
+    base
+}
+
+/// Parse `git worktree list --porcelain`. A detached checkout has no branch.
+pub fn parse_worktree_porcelain(text: &str) -> Vec<ListedWorktree> {
+    let mut out = Vec::new();
+    let mut current: Option<ListedWorktree> = None;
+    for line in text.lines() {
+        if let Some(path) = line.strip_prefix("worktree ") {
+            if let Some(done) = current.take() {
+                out.push(done);
+            }
+            current = Some(ListedWorktree {
+                path: path.trim().to_string(),
+                head: None,
+                branch: None,
+            });
+        } else if let Some(entry) = current.as_mut() {
+            if let Some(head) = line.strip_prefix("HEAD ") {
+                entry.head = nonempty(Some(head.to_string()));
+            } else if let Some(branch) = line.strip_prefix("branch ") {
+                let branch = branch.trim().trim_start_matches("refs/heads/");
+                entry.branch = nonempty(Some(branch.to_string()));
+            }
+        }
+    }
+    if let Some(done) = current {
+        out.push(done);
+    }
+    out
+}
+
+/// The label in `subagent:<label>`. Other owners yield their trimmed text.
+pub fn owner_label(owner: &str) -> Option<String> {
+    let owner = owner.trim();
+    let label = owner.strip_prefix("subagent:").unwrap_or(owner).trim();
+    if label.is_empty() || label.contains('/') || label.contains(' ') {
+        None
+    } else {
+        Some(label.to_string())
+    }
+}
+
+fn path_component_eq(path: &str, component: &str) -> bool {
+    path.split(['/', '\\'])
+        .any(|part| part == component && !part.is_empty())
+}
+
+fn path_ends_with_component(path: &str, component: &str) -> bool {
+    path.split(['/', '\\']).rfind(|part| !part.is_empty()) == Some(component)
+}
+
+fn paths_match(listed: &str, hint: &str) -> bool {
+    let listed = listed.trim_end_matches('/');
+    let hint = hint.trim().trim_end_matches('/');
+    listed == hint
+}
+
+/// Pick one checkout. A path hint wins, then a unique branch, then a unique
+/// owner-label path component. Several matches are not a guess, except one
+/// checkout whose branch equals that label (the paired tmux-router sibling
+/// is detached and does not).
+pub fn match_listed_worktree<'a>(
+    listed: &'a [ListedWorktree],
+    hint: WorktreeHint<'_>,
+) -> Option<&'a ListedWorktree> {
+    if let Some(path) = hint.worktree.map(str::trim).filter(|path| !path.is_empty())
+        && let Some(found) = listed.iter().find(|entry| paths_match(&entry.path, path))
+    {
+        return Some(found);
+    }
+    if let Some(branch) = hint
+        .branch
+        .map(str::trim)
+        .filter(|branch| !branch.is_empty())
+    {
+        let hits: Vec<_> = listed
+            .iter()
+            .filter(|entry| entry.branch.as_deref() == Some(branch))
+            .collect();
+        if hits.len() == 1 {
+            return Some(hits[0]);
+        }
+    }
+    let label = owner_label(hint.owner)?;
+    let mut hits: Vec<&ListedWorktree> = listed
+        .iter()
+        .filter(|entry| path_component_eq(&entry.path, &label))
+        .collect();
+    if hits.len() > 1
+        && let Some(name) = hint
+            .source_repo_name
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+    {
+        let named: Vec<&ListedWorktree> = hits
+            .iter()
+            .copied()
+            .filter(|entry| path_ends_with_component(&entry.path, name))
+            .collect();
+        if named.len() == 1 {
+            return Some(named[0]);
+        }
+        if !named.is_empty() {
+            hits = named;
+        }
+    }
+    if hits.len() > 1 {
+        let branched: Vec<&ListedWorktree> = hits
+            .iter()
+            .copied()
+            .filter(|entry| entry.branch.as_deref() == Some(label.as_str()))
+            .collect();
+        if branched.len() == 1 {
+            return Some(branched[0]);
+        }
+    }
+    if hits.len() == 1 { Some(hits[0]) } else { None }
+}
+
+/// Harness key for `--to` and a chat handoff phrase. `Grok Build` is `grok`.
+pub fn normalize_handoff_target(raw: &str) -> Option<String> {
+    let key = normalize_harness_phrase(raw);
+    if key.is_empty() { None } else { Some(key) }
+}
+
+fn normalize_harness_phrase(raw: &str) -> String {
+    let hyphenated = raw.split_whitespace().collect::<Vec<_>>().join("-");
+    crate::worker_quota::quota_harness_key(&hyphenated)
+}
+
+/// The harness named by a chat `handoff to <harness>` prompt (`#autohandoff`).
+///
+/// Only the first four lines count, and the phrase has to start the line
+/// (optional `please` / `prepare`, and a quote marker). `Grok Build` is `grok`.
+pub fn handoff_chat_target(prompt: &str) -> Option<String> {
+    const PREFIXES: &[&str] = &[
+        "please prepare handoff to ",
+        "please prepare hand off to ",
+        "prepare handoff to ",
+        "prepare hand off to ",
+        "please handoff to ",
+        "please hand off to ",
+        "handoff to ",
+        "hand off to ",
+    ];
+    for line in prompt.lines().take(4) {
+        let mut raw = line.trim();
+        loop {
+            let before = raw;
+            raw = raw.trim_start_matches(['>', '❯']).trim();
+            if raw == before {
+                break;
+            }
+        }
+        let lower = raw.to_ascii_lowercase();
+        for prefix in PREFIXES {
+            if lower.starts_with(prefix) {
+                let rest = raw[prefix.len()..].trim();
+                let rest = rest.split(['.', '!', '?']).next().unwrap_or(rest).trim();
+                let rest = rest.trim_matches(['"', '\'', '`']).trim();
+                if rest.is_empty() || rest.chars().count() > 40 {
+                    return None;
+                }
+                return normalize_handoff_target(rest);
+            }
+        }
+    }
+    None
+}
+
+/// Shell single quotes. A quote inside the value is the standard `'\''` break.
+pub fn shell_single_quote(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+/// The resume command the next harness runs for one recorded claim.
+pub fn resume_command(
+    file: &str,
+    item: &str,
+    owner: &str,
+    generation: u64,
+    worker: &str,
+) -> String {
+    format!(
+        "agent-doc queue resume {} --item {} --owner {} --generation {generation} --worker {}",
+        shell_single_quote(file),
+        shell_single_quote(item),
+        shell_single_quote(owner),
+        shell_single_quote(worker),
+    )
+}
+
+/// Exchange body for `--all`. Each claim's resume command is listed.
+pub fn render_handoff_packet(to: Option<&str>, claims: &[PacketClaim]) -> String {
+    let dest = to
+        .map(str::trim)
+        .filter(|text| !text.is_empty())
+        .unwrap_or("the next harness");
+    let plural = if claims.len() == 1 { "" } else { "s" };
+    let mut out = format!(
+        "**Handoff** (#autohandoff). {} running claim{plural} recorded for {dest}.\n\n\
+Resume each claim with its command. A conversation id is not a resume key.\n",
+        claims.len()
+    );
+    for claim in claims {
+        out.push_str(&format!(
+            "\n- owner `{}` generation {} worker `{}`\n  - item: {}\n  - resume: `{}`\n",
+            claim.owner, claim.generation, claim.worker_id, claim.item, claim.resume_command
+        ));
+        for (label, value) in [
+            ("worktree", claim.worktree.as_deref()),
+            ("branch", claim.branch.as_deref()),
+            ("head", claim.head.as_deref()),
+        ] {
+            if let Some(value) = value {
+                out.push_str(&format!("  - {label}: {value}\n"));
+            }
+        }
+        if !claim.missing.is_empty() {
+            out.push_str(&format!("  - missing: {}\n", claim.missing.join(", ")));
+        }
+    }
+    out
+}
+
+/// Heading of the exchange response that carries [`render_handoff_packet`].
+pub fn handoff_packet_header(to: Option<&str>) -> String {
+    match to.map(str::trim).filter(|text| !text.is_empty()) {
+        Some(to) => format!("handoff to {to} — agent-doc"),
+        None => "cross-harness handoff — agent-doc".to_string(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -520,5 +811,182 @@ mod tests {
         );
         assert_eq!(location.branch.as_deref(), Some(BRANCH));
         assert_eq!(location.head.as_deref(), Some(HEAD));
+    }
+}
+
+#[cfg(test)]
+mod auto_handoff_tests {
+    use super::*;
+
+    #[test]
+    fn porcelain_and_label_pick_one_checkout() {
+        let listed = parse_worktree_porcelain(
+            "worktree /home/brian/worktrees/patchrun/agent-doc\n\
+HEAD 1b7b7dd572aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\
+branch refs/heads/patchrun\n\
+\n\
+worktree /home/brian/worktrees/patchrun/tmux-router\n\
+HEAD 2a9dfdd00efcab357b91bc525748f58fdb535c2c\n\
+branch refs/heads/main\n\
+\n\
+worktree /tmp/other\n\
+HEAD aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa\n\
+detached\n",
+        );
+        assert_eq!(listed.len(), 3);
+        assert_eq!(listed[0].branch.as_deref(), Some("patchrun"));
+        assert!(listed[2].branch.is_none());
+        let matched = match_listed_worktree(
+            &listed,
+            WorktreeHint {
+                worktree: None,
+                branch: None,
+                owner: "subagent:patchrun",
+                source_repo_name: Some("agent-doc"),
+            },
+        )
+        .expect("label plus repo name");
+        assert_eq!(matched.path, "/home/brian/worktrees/patchrun/agent-doc");
+        assert_eq!(
+            matched.head.as_deref(),
+            Some("1b7b7dd572aaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+        );
+    }
+
+    #[test]
+    fn two_label_matches_are_not_a_guess() {
+        let listed = vec![
+            ListedWorktree {
+                path: "/a/patchrun/agent-doc".to_string(),
+                head: Some("aaa".to_string()),
+                branch: Some("patchrun".to_string()),
+            },
+            ListedWorktree {
+                path: "/b/patchrun/agent-doc".to_string(),
+                head: Some("bbb".to_string()),
+                branch: Some("patchrun".to_string()),
+            },
+        ];
+        assert!(
+            match_listed_worktree(
+                &listed,
+                WorktreeHint {
+                    worktree: None,
+                    branch: None,
+                    owner: "subagent:patchrun",
+                    source_repo_name: Some("agent-doc"),
+                },
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
+    fn start_receipt_keeps_its_head_when_lineage_has_another() {
+        let filled = fill_location(
+            LocationParts {
+                worktree: Some("/wt".to_string()),
+                branch: Some("branch".to_string()),
+                head: Some("abc".to_string()),
+            },
+            LocationParts {
+                worktree: Some("/other".to_string()),
+                branch: Some("other".to_string()),
+                head: Some("def".to_string()),
+            },
+        );
+        assert_eq!(filled.head.as_deref(), Some("abc"));
+        assert_eq!(filled.worktree.as_deref(), Some("/wt"));
+    }
+
+    #[test]
+    fn chat_handoff_names_the_harness() {
+        assert_eq!(
+            handoff_chat_target("handoff to grok").as_deref(),
+            Some("grok")
+        );
+        assert_eq!(
+            handoff_chat_target("prepare handoff to Grok Build. We are almost out of tokens.")
+                .as_deref(),
+            Some("grok")
+        );
+        assert_eq!(
+            handoff_chat_target("> please hand off to Claude Code").as_deref(),
+            Some("claude")
+        );
+        assert_eq!(
+            handoff_chat_target("handoff to opencode").as_deref(),
+            Some("opencode")
+        );
+        assert!(handoff_chat_target("the queue handoff command records a key").is_none());
+        assert!(handoff_chat_target("handoff tomorrow").is_none());
+        assert_eq!(
+            normalize_handoff_target("Grok Build").as_deref(),
+            Some("grok")
+        );
+    }
+
+    #[test]
+    fn owner_label_branch_beats_a_detached_sibling_checkout() {
+        let listed = vec![
+            ListedWorktree {
+                path: "/home/brian/worktrees/patchrun/agent-doc".to_string(),
+                head: Some("abc".to_string()),
+                branch: Some("patchrun".to_string()),
+            },
+            ListedWorktree {
+                path: "/home/brian/worktrees/patchrun/tmux-router".to_string(),
+                head: Some("def".to_string()),
+                branch: None,
+            },
+        ];
+        let matched = match_listed_worktree(
+            &listed,
+            WorktreeHint {
+                worktree: None,
+                branch: None,
+                owner: "subagent:patchrun",
+                source_repo_name: None,
+            },
+        );
+        assert_eq!(
+            matched.map(|entry| entry.path.as_str()),
+            Some("/home/brian/worktrees/patchrun/agent-doc")
+        );
+    }
+
+    #[test]
+    fn packet_lists_each_resume_command() {
+        let command = resume_command(
+            "tasks/agent-doc/agent-doc-bugs.md",
+            "do [#autohandoff]",
+            "subagent:patchrun",
+            1,
+            "worker'id",
+        );
+        assert!(command.contains(" --item 'do [#autohandoff]' "));
+        assert!(command.contains("--worker 'worker'\\''id'"));
+        let packet = render_handoff_packet(
+            Some("grok"),
+            &[PacketClaim {
+                owner: "subagent:patchrun".to_string(),
+                item: "do [#autohandoff]".to_string(),
+                generation: 1,
+                worker_id: "w1".to_string(),
+                worktree: Some("/wt".to_string()),
+                branch: Some("patchrun".to_string()),
+                head: Some("abc".to_string()),
+                resume_command: command,
+                missing: Vec::new(),
+            }],
+        );
+        assert!(packet.contains("(#autohandoff)"));
+        assert!(packet.contains("recorded for grok"));
+        assert!(packet.contains("agent-doc queue resume"));
+        assert!(packet.contains("worktree: /wt"));
+        assert_eq!(
+            handoff_packet_header(Some("grok")),
+            "handoff to grok — agent-doc"
+        );
     }
 }

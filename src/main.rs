@@ -48,6 +48,7 @@ mod agent_dashboard;
 mod annotate;
 mod audit_docs;
 mod auto_dag;
+mod auto_handoff;
 mod autoclaim;
 mod cancelled_trigger;
 mod captured_splice_verify;
@@ -5702,6 +5703,10 @@ enum HookAction {
     /// Hand the running turn any operator steering added to the session
     /// document since the last tool call (`PostToolUse` stdin JSON hook payload)
     SteeringPostToolUse,
+    /// Record in-flight claims before Claude or Grok compacts (`PreCompact`
+    /// stdin JSON). Manual `/compact` and automatic low-context compaction
+    /// both run it. The hook never blocks compaction (`#autohandoff`).
+    PreCompact,
 }
 
 #[derive(Subcommand)]
@@ -6088,38 +6093,60 @@ enum QueueAction {
     /// Record an in-flight claim so another harness can resume it
     /// (`#crossagenthandoff`). The key is the agent-doc session, this document,
     /// the queue item, the owner, the generation, and the worker id.
+    ///
+    /// `--all` records every running claim from its start receipt, lineage,
+    /// and `git worktree list`, then writes the resume commands into
+    /// `agent:exchange` (`#autohandoff`).
     Handoff {
         /// Path to the session document
         file: PathBuf,
+        /// Record every in-flight claim. Derives worker, worktree, branch,
+        /// and head; do not pass the single-claim fields.
+        #[arg(long)]
+        all: bool,
+        /// Destination harness named in the packet. `Grok Build` is `grok`.
+        /// Applies only with `--all`.
+        #[arg(long, value_name = "HARNESS", requires = "all")]
+        to: Option<String>,
         /// The queue item: `#id` / `do [#id]` or the queue line's text
-        #[arg(long, value_name = "ID_OR_TEXT")]
-        item: String,
+        #[arg(
+            long,
+            value_name = "ID_OR_TEXT",
+            required_unless_present = "all",
+            conflicts_with = "all"
+        )]
+        item: Option<String>,
         /// Claim owner, e.g. `subagent:<label>`
-        #[arg(long)]
-        owner: String,
+        #[arg(long, required_unless_present = "all", conflicts_with = "all")]
+        owner: Option<String>,
         /// Exact generation printed by `queue claim`
-        #[arg(long)]
-        generation: u64,
+        #[arg(long, required_unless_present = "all", conflicts_with = "all")]
+        generation: Option<u64>,
         /// Worker id printed by `queue start`
-        #[arg(long)]
-        worker: String,
+        #[arg(long, required_unless_present = "all", conflicts_with = "all")]
+        worker: Option<String>,
         /// Delivery worktree
-        #[arg(long, value_name = "PATH")]
-        worktree: PathBuf,
+        #[arg(
+            long,
+            value_name = "PATH",
+            required_unless_present = "all",
+            conflicts_with = "all"
+        )]
+        worktree: Option<PathBuf>,
         /// Branch of `--worktree`
-        #[arg(long)]
-        branch: String,
+        #[arg(long, required_unless_present = "all", conflicts_with = "all")]
+        branch: Option<String>,
         /// Head commit of `--branch`
-        #[arg(long)]
-        head: String,
+        #[arg(long, required_unless_present = "all", conflicts_with = "all")]
+        head: Option<String>,
         /// Worker harness (`claude`, `codex`, `grok`, `opencode`, `cursor`)
-        #[arg(long)]
+        #[arg(long, conflicts_with = "all")]
         worker_harness: Option<String>,
         /// Owner-session harness. A conversation id is not accepted here.
-        #[arg(long)]
+        #[arg(long, conflicts_with = "all")]
         owner_harness: Option<String>,
         /// Worker conversation id, stored only so it is not used as the key
-        #[arg(long)]
+        #[arg(long, conflicts_with = "all")]
         worker_conversation: Option<String>,
     },
     /// Resume an in-flight claim by its agent-doc key (`#crossagenthandoff`).
@@ -10428,6 +10455,7 @@ fn try_main() -> anyhow::Result<()> {
             HookAction::SteeringPostToolUse => {
                 agent_doc_session_check_io::midturn_steering::handle_post_tool_use()
             }
+            HookAction::PreCompact => auto_handoff::handle_pre_compact(),
         },
         Commands::Cleanup {
             file,
@@ -10927,6 +10955,8 @@ fn try_main() -> anyhow::Result<()> {
             }
             QueueAction::Handoff {
                 file,
+                all,
+                to,
                 item,
                 owner,
                 generation,
@@ -10938,6 +10968,16 @@ fn try_main() -> anyhow::Result<()> {
                 owner_harness,
                 worker_conversation,
             } => {
+                if all {
+                    return auto_handoff::run_cli(&file, to.as_deref());
+                }
+                let item = item.context("queue handoff needs --item")?;
+                let owner = owner.context("queue handoff needs --owner")?;
+                let generation = generation.context("queue handoff needs --generation")?;
+                let worker = worker.context("queue handoff needs --worker")?;
+                let worktree = worktree.context("queue handoff needs --worktree")?;
+                let branch = branch.context("queue handoff needs --branch")?;
+                let head = head.context("queue handoff needs --head")?;
                 let content = agent_doc_document_realtime_io::try_resolve_current_document_content(
                     &file,
                     "queue_handoff",

@@ -637,6 +637,44 @@ fn chat_prompt_hook_context(
     ))
 }
 
+/// `#autohandoff`: a chat `handoff to <harness>` records running claims before
+/// the turn context is emitted. One JSON envelope, and a failure stays on
+/// stderr so an ordinary prompt is never blocked. An admitted trigger already
+/// wrote stdout, so the notice goes to stderr instead of a second document.
+fn emit_not_a_trigger_context(
+    admission: HookAdmission,
+    input: &agent_doc_codex_hook_io::UserPromptSubmitInput,
+    cwd: &Path,
+) {
+    let handoff_notice = handoff_prompt_notice(&input.prompt, cwd);
+    if admission == HookAdmission::NotATrigger {
+        let context = chat_prompt_hook_context(input);
+        if let Some(merged) = merge_hook_context(handoff_notice, context) {
+            emit_user_prompt_submit_context(&merged);
+        }
+    } else if let Some(notice) = handoff_notice {
+        eprintln!("{notice}");
+    }
+}
+
+fn handoff_prompt_notice(prompt: &str, cwd: &Path) -> Option<String> {
+    let to = agent_doc_queue::cross_harness_handoff::handoff_chat_target(prompt)?;
+    match crate::auto_handoff::run_for_pane(cwd, Some(&to)) {
+        Ok(notice) => Some(notice),
+        Err(err) => {
+            eprintln!("[agent-doc] handoff to {to} skipped: {err:#}");
+            None
+        }
+    }
+}
+
+fn merge_hook_context(notice: Option<String>, context: Option<String>) -> Option<String> {
+    match (notice, context) {
+        (Some(notice), Some(context)) => Some(format!("{notice}\n\n{context}")),
+        (notice, context) => notice.or(context),
+    }
+}
+
 /// `#admissiontransportretry` — how much of the admission budget must remain for
 /// a second attempt to be worth starting.
 ///
@@ -1172,11 +1210,7 @@ pub fn handle_user_prompt_submit() -> anyhow::Result<()> {
         agent_doc_preflight_command_io::PreflightInvocation::ClaudeCodeHook,
         Some(&input),
     );
-    if admission == HookAdmission::NotATrigger
-        && let Some(context) = chat_prompt_hook_context(&input)
-    {
-        emit_user_prompt_submit_context(&context);
-    }
+    emit_not_a_trigger_context(admission, &input, &cwd);
     Ok(())
 }
 
@@ -1300,11 +1334,7 @@ pub fn handle_codex_user_prompt_submit() -> anyhow::Result<()> {
     if admission == HookAdmission::Admitted {
         agent_doc_codex_hook_io::record_preflight_admission(&input, true)?;
     }
-    if admission == HookAdmission::NotATrigger
-        && let Some(context) = chat_prompt_hook_context(&input)
-    {
-        emit_user_prompt_submit_context(&context);
-    }
+    emit_not_a_trigger_context(admission, &input, Path::new(&input.cwd));
     Ok(())
 }
 
@@ -1757,12 +1787,13 @@ mod tests {
             .collect();
         expected_keys.push("PostToolUse".to_string());
         expected_keys.push("SubagentStop".to_string());
+        expected_keys.push("PreCompact".to_string());
         expected_keys.sort();
         let mut sorted_after = after_keys.clone();
         sorted_after.sort();
         assert_eq!(
             sorted_after, expected_keys,
-            "PostToolUse and SubagentStop were added"
+            "PostToolUse, SubagentStop, and PreCompact were added"
         );
         assert_eq!(
             std::fs::read_to_string(&super_settings).unwrap(),
@@ -1815,6 +1846,7 @@ mod tests {
             vec![
                 "added Stop `agent-doc hook claude-stop` (timeout 15s)".to_string(),
                 "added SubagentStop `agent-doc hook subagent-stop` (timeout 15s)".to_string(),
+                "added PreCompact `agent-doc hook pre-compact` (timeout 15s)".to_string(),
                 "added PostToolUse `agent-doc hook steering-post-tool-use` (timeout 10s)"
                     .to_string(),
             ]

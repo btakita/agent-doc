@@ -1749,6 +1749,11 @@ const CLAUDE_STOP_COMMAND: &str = "agent-doc hook claude-stop";
 /// the project `SubagentStop` hook (`#workerquotaautodetect`). Grok remaps the
 /// Stop hook as well; the handler is quiet when both fire.
 const SUBAGENT_STOP_COMMAND: &str = "agent-doc hook subagent-stop";
+/// `#autohandoff`. Claude Code and Grok Build both load this project hook file.
+/// `PreCompact` fires for manual `/compact` and for automatic low-context
+/// compaction. The handler records running claims and never blocks compaction.
+const PRECOMPACT_COMMAND: &str = "agent-doc hook pre-compact";
+const PRECOMPACT_HOOK_TIMEOUT_SECS: u64 = 15;
 
 /// `timeout` written onto installed Claude/Codex `UserPromptSubmit` preflight hooks.
 ///
@@ -1854,7 +1859,7 @@ pub(crate) struct RequiredClaudeHook {
 /// `preflight_timeout_secs` is raised to at least [`PREFLIGHT_HOOK_TIMEOUT_SECS`].
 pub(crate) fn required_claude_project_hooks(
     preflight_timeout_secs: u64,
-) -> [RequiredClaudeHook; 8] {
+) -> [RequiredClaudeHook; 9] {
     let hook = |event, command, status_message, timeout_secs| RequiredClaudeHook {
         event,
         command,
@@ -1883,6 +1888,14 @@ pub(crate) fn required_claude_project_hooks(
             Some(CLAUDE_STOP_HOOK_TIMEOUT_SECS),
         ),
         hook("SessionStart", TURN_STATUS_IDLE_COMMAND, None, None),
+        // `#autohandoff`: record running claims before compaction drops them
+        // from the coordinator's context. Both manual and automatic triggers.
+        hook(
+            "PreCompact",
+            PRECOMPACT_COMMAND,
+            Some("Recording cross-harness handoff"),
+            Some(PRECOMPACT_HOOK_TIMEOUT_SECS),
+        ),
         // No matcher: the handler filters by tool name itself and allows
         // everything it does not recognize, so the guard cannot wedge a turn on
         // an unknown tool.
@@ -3256,7 +3269,7 @@ mod tests {
 
         let changes =
             ensure_claude_hooks_in_settings(&settings, PREFLIGHT_HOOK_TIMEOUT_SECS, true).unwrap();
-        assert_eq!(changes.len(), 8, "{changes:?}");
+        assert_eq!(changes.len(), 9, "{changes:?}");
         let after = std::fs::read_to_string(&settings).unwrap();
         let position = |needle: &str| {
             after
@@ -4588,6 +4601,18 @@ mod tests {
             config_mtime,
             "an unchanged config.toml must not be rewritten"
         );
+    }
+
+    #[test]
+    fn precompact_hook_is_wired_once() {
+        let hooks = super::required_claude_project_hooks(super::PREFLIGHT_HOOK_TIMEOUT_SECS);
+        let matches: Vec<_> = hooks
+            .iter()
+            .filter(|hook| hook.event == "PreCompact")
+            .collect();
+        assert_eq!(matches.len(), 1);
+        assert_eq!(matches[0].command, "agent-doc hook pre-compact");
+        assert_eq!(matches[0].timeout_secs, Some(15));
     }
 
     #[test]

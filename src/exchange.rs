@@ -98,8 +98,14 @@ pub fn remove(file: &Path, node_id: &str) -> Result<()> {
 /// (body read from stdin).
 pub fn add_response(file: &Path, header: &str) -> Result<()> {
     let body = read_stdin()?;
+    append_response(file, header, &body)
+}
+
+/// Append one exchange response. `queue handoff --all` writes the resume packet
+/// through this path (`#autohandoff`).
+pub fn append_response(file: &Path, header: &str, body: &str) -> Result<()> {
     mutate(file, |inner| {
-        Ok(exchange_tree::add_response(inner, header, &body))
+        Ok(exchange_tree::add_response(inner, header, body))
     })
 }
 

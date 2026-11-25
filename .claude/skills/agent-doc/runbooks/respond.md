@@ -604,6 +604,11 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      self-repair already did), agent-doc strikes the whole tree from the root
      down on the next sync; it never strikes an open operator row or a row a
      live worker claims, so do not strike such a tree by hand.
+     To change ONE line of a queue tree (a stale `%% … %%` note, one row's
+     text), use `agent-doc queue edit <FILE> --row <ID> --find '<old line>'
+     --text '<new line>'` (or `--line <N> --expect '<old line>'`, `--delete`)
+     instead of hand-editing or superseding rows (`#patchruncomponent`);
+     `agent-doc patch <FILE> run --id <QUEUE_ID>` replaces the whole queue.
      A response tree with work left lists it under `**Remaining:**`, one
      `owner: short imperative` line each, recomputed on every sync; when
      nothing is left its State is `Complete.` and its Guidance says the tree

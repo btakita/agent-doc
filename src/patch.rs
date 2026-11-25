@@ -14,6 +14,13 @@
 //! - `post_patch` shell hook: fire-and-forget after write, receives same env vars. Non-zero exit is logged as a warning only.
 //! - After patching, the document is written through document authority and the typed ledger baseline is checkpointed.
 //! - `run` reads replacement content from the `content` argument or stdin when `None`.
+//! - The component name is matched by its canonical projection
+//!   ([`element::canonical_component_name`]), so every public spelling of one
+//!   component selects it: `run`, `queue`, and `loop` all select an
+//!   `<!-- agent:run ... -->` / `agent:queue` / `agent:loop` block, and
+//!   `open-items` selects `agent:active` (`#patchruncomponent`). Combined with
+//!   `--id`, this is how one queue in a multi-queue document is replaced whole;
+//!   a single row or note inside a queue is edited with `agent-doc queue edit`.
 //! - A non-empty replacement is newline-terminated before the component close marker, including
 //!   after append/prepend composition and hook transformation.
 //! - If the requested component has exactly one `<-- agent:name ... -->` opener (missing only the
@@ -33,6 +40,7 @@
 //! - replace_component: existing component + new content → old content replaced, surroundings preserved
 //! - preserve_surrounding: content before and after component → unchanged after patch
 //! - component_not_found: component name absent from doc → Err containing "not found"
+//! - run_alias_selects_queue_by_id: `patch FILE run --id main` on `<!-- agent:run id="main" -->` → that queue replaced, sibling queue untouched
 //! - file_not_found: missing file path → Err containing "file not found"
 //! - snapshot_updated_after_patch: after replace → snapshot file contains new content, not old
 //! - append_mode_requires_explicit_override: append-mode component + bare patch → old content replaced
@@ -141,10 +149,16 @@ pub fn run_with_id(
         }
     };
 
+    // `#patchruncomponent`: the parser projects the public `agent:run`,
+    // `agent:queue`, and `agent:loop` spellings (and legacy `open-items`) onto
+    // one internal name, so match the requested name the same way. Otherwise
+    // `patch FILE run --id main` misses the `<!-- agent:run id="main" -->` the
+    // document plainly carries.
+    let wanted = element::canonical_component_name(component_name);
     let comp = components
         .iter()
         .find(|c| {
-            c.name == component_name
+            element::canonical_component_name(&c.name) == wanted
                 && component_id.is_none_or(|id| c.attrs.get("id").map(String::as_str) == Some(id))
         })
         .ok_or_else(|| {
@@ -165,7 +179,10 @@ pub fn run_with_id(
         })?;
 
     let configs = load_configs_with_context(file, Some(&rc)).unwrap_or_default();
-    let config = configs.get(component_name);
+    let config = configs
+        .get(component_name)
+        .or_else(|| configs.get(wanted))
+        .or_else(|| configs.get(comp.name.as_str()));
 
     let mut replacement = match content {
         Some(text) => text.to_string(),
@@ -532,6 +549,66 @@ mod tests {
         assert!(result.starts_with("BEFORE\n"));
         assert!(result.ends_with("AFTER\n"));
         assert!(result.contains("replaced"));
+    }
+
+    /// `#patchruncomponent` (agent-doc-bugs.md, 2026-11-25): `agent-doc patch
+    /// FILE run --id main` refused `<!-- agent:run id="main" ... -->` with
+    /// "component 'run' with id 'main' not found", because the parser projects
+    /// `agent:run` onto the internal `queue` name. Every public spelling now
+    /// selects the same block, and the sibling queue stays byte-identical.
+    #[test]
+    fn run_alias_selects_queue_by_id() {
+        let dir = setup_project();
+        let original = concat!(
+            "## Queue: Main <!-- agent:run id=\"main\" subagents -->\n",
+            "- old main row\n",
+            "<!-- /agent:run -->\n\n",
+            "<!-- agent:loop id=\"issues\" interval=1h -->\n",
+            "- issues row\n",
+            "<!-- /agent:loop -->\n",
+        );
+        let doc = write_doc(dir.path(), "test.md", original);
+
+        run_with_id(
+            &doc,
+            "run",
+            Some("main"),
+            PatchMode::Replace,
+            Some("- new main row\n"),
+        )
+        .unwrap();
+        let result = std::fs::read_to_string(&doc).unwrap();
+        assert_eq!(
+            result,
+            original.replace("- old main row", "- new main row"),
+            "only the selected agent:run body changes"
+        );
+
+        for alias in ["queue", "loop"] {
+            run_with_id(
+                &doc,
+                alias,
+                Some("issues"),
+                PatchMode::Replace,
+                Some(&format!("- issues via {alias}\n")),
+            )
+            .unwrap();
+            let result = std::fs::read_to_string(&doc).unwrap();
+            assert!(
+                result.contains(&format!("- issues via {alias}\n")),
+                "{result}"
+            );
+            assert!(result.contains("- new main row\n"), "{result}");
+            assert!(result.contains("<!-- agent:loop id=\"issues\" interval=1h -->"));
+        }
+
+        let error = run_with_id(&doc, "run", Some("missing"), PatchMode::Replace, Some("x"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("component 'run' with id 'missing' not found"),
+            "{error}"
+        );
     }
 
     #[test]

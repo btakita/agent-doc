@@ -791,6 +791,138 @@ fn maybe_pause_report_complete_transaction_after_capture() -> Result<()> {
     Ok(())
 }
 
+/// `#patchruncomponent` part c: make the report's account
+/// of its follow-up rows match the document.
+///
+/// The report's write carries the rows in one successor with the completion
+/// cell, and the realtime write policy keeps an operator's concurrent edit to
+/// the same queue over the agent's (`agent_component_patch_dropped
+/// component=queue operator_changed=true`). The rows then never land, while
+/// the report said `Queued N action item(s)`. This reads the document twice,
+/// the visible authority and the queue writers' view through still-retained
+/// binary writes, and checks each row:
+///
+/// - a row the visible document holds stays in `inserted`;
+/// - a row only a still-retained write holds moves to `pending_projection`
+///   (not landed yet, not lost, and not placed again: that would duplicate it);
+/// - a row neither holds was dropped: it is placed again through `queue
+///   follow-up`'s CAS queue write path, which writes over the operator's edit
+///   as its successor, and counts as `retried` once the document holds it;
+/// - a row still missing after that moves to `refused_items`, so the report
+///   prints the exact `queue follow-up` command instead of claiming it.
+///
+/// Idempotent: a later call re-checks `pending_projection` rows too.
+pub(crate) fn settle_handback_followups(
+    file: &Path,
+    effects: &impl agent_doc_queue_io::queue_cmd::QueueCommandEffects,
+    origin: &str,
+    followups: &mut agent_doc_queue::handback_followups::HandbackFollowups,
+) {
+    use agent_doc_queue::handback_followups::HandbackFollowups;
+
+    let pending = std::mem::take(&mut followups.pending_projection);
+    followups.inserted.extend(pending);
+    if followups.inserted.is_empty() {
+        return;
+    }
+    let Some(queue_id) = followups.queue_id.clone() else {
+        return;
+    };
+    let unreadable = |source: &str, err: anyhow::Error| {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!("report_complete_followup_verify_unreadable source={source} error={err:#}"),
+        );
+    };
+    let visible = match agent_doc_document_realtime_io::try_resolve_current_document_content(
+        file,
+        "report_complete_followup_verify",
+    ) {
+        Ok(content) => content,
+        Err(err) => return unreadable("visible", err),
+    };
+    let not_visible =
+        HandbackFollowups::rows_missing_from(&visible, &queue_id, &followups.inserted);
+    if not_visible.is_empty() {
+        return;
+    }
+    let retained = match effects.current_document_content(file, "report_complete_followup_verify") {
+        Ok(content) => content,
+        Err(err) => return unreadable("retained", err),
+    };
+    let dropped = HandbackFollowups::rows_missing_from(&retained, &queue_id, &not_visible);
+    let pending = not_visible
+        .iter()
+        .filter(|row| !dropped.contains(row))
+        .cloned()
+        .collect::<Vec<_>>();
+    let take = |followups: &mut HandbackFollowups, rows: &[String]| {
+        followups.inserted.retain(|row| !rows.contains(row));
+        followups.recount_operator_owned();
+    };
+    take(followups, &pending);
+    followups.pending_projection = pending;
+    if dropped.is_empty() {
+        return;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "report_complete_followups_dropped queue_id={queue_id} dropped={} pending={} (#patchruncomponent)",
+            dropped.len(),
+            followups.pending_projection.len(),
+        ),
+    );
+    let origin_row = agent_doc_queue::queue_response::queue_row_text_for_head(&retained, origin)
+        .unwrap_or_else(|| origin.to_string());
+    let retry = agent_doc_queue_io::queue_add::add_followups_with_effects(
+        effects,
+        file,
+        &queue_id,
+        &origin_row,
+        &dropped,
+    );
+    let (unplaced, reason) = match retry {
+        Ok(_) => {
+            match effects.current_document_content(file, "report_complete_followup_reverify") {
+                Ok(after) => (
+                    HandbackFollowups::rows_missing_from(&after, &queue_id, &dropped),
+                    "the retry did not land them either".to_string(),
+                ),
+                Err(err) => (
+                    dropped.clone(),
+                    format!("the document could not be re-read after the retry ({err:#})"),
+                ),
+            }
+        }
+        Err(err) => (dropped.clone(), format!("the retry refused: {err:#}")),
+    };
+    let reason = reason.replace('\n', " ");
+    followups.retried += dropped.len() - unplaced.len();
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "report_complete_followups_retried queue_id={queue_id} placed={} unplaced={} (#patchruncomponent)",
+            dropped.len() - unplaced.len(),
+            unplaced.len(),
+        ),
+    );
+    if unplaced.is_empty() {
+        return;
+    }
+    take(followups, &unplaced);
+    let note = format!(
+        "{} follow-up row(s) did not land: a concurrent edit to queue id `{queue_id}` kept the operator's text over the report's write, and {reason}",
+        unplaced.len()
+    );
+    followups.refused = Some(match followups.refused.take() {
+        Some(earlier) => format!("{earlier}; {note}"),
+        None => note,
+    });
+    followups.refused_origin.get_or_insert(origin_row);
+    followups.refused_items.extend(unplaced);
+}
+
 /// `#workerresponsestructure`: the report line's account of the hand-back's
 /// items — action items queued as follow-up rows, already queued, or refused
 /// with the exact `queue follow-up` command the coordinator runs instead, and
@@ -820,6 +952,25 @@ pub(crate) fn describe_handback_followups(
                 followups.operator_owned,
             ));
         }
+    }
+    if followups.retried > 0 {
+        text.push_str(&format!(
+            " {} of them were dropped by a concurrent edit to the queue and placed again by a retry (#patchruncomponent).",
+            followups.retried,
+        ));
+    }
+    if !followups.pending_projection.is_empty() {
+        let command = agent_doc_queue::handback_followups::refused_placement_command(
+            &file.display().to_string(),
+            queue,
+            origin,
+            &followups.pending_projection,
+        );
+        text.push_str(&format!(
+            " {} follow-up row(s) are NOT in the document yet: the editor write that carries them is still awaiting projection (#patchruncomponent), so do not add them again now. Run `agent-doc queue repair-projection {}`; only if the queue still lacks them after that, run this exact command as printed:\n{command}\n",
+            followups.pending_projection.len(),
+            file.display(),
+        ));
     }
     if !followups.self_repair_items.is_empty() {
         text.push_str(&format!(
@@ -5127,6 +5278,224 @@ PR https://github.com/haiven-dev/haiven-sdk/pull/402 is finished, and CI passed 
                 .contains("review #prompt-blocker-widget")
         );
         assert!(!brief.subagent_prompt_preamble.contains("signing key"));
+    }
+
+    /// A detached run session whose queue holds the origin row but none of
+    /// the report's follow-up rows: the state an `agent_component_patch_dropped
+    /// component=queue operator_changed=true` rebase leaves behind.
+    fn dropped_followup_fixture(origin: &str) -> (tempfile::TempDir, PathBuf, Vec<String>) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("bugs.md");
+        fs::write(
+            &doc,
+            format!(
+                concat!(
+                    "<!-- agent:exchange patch=append -->\n",
+                    "<!-- agent:boundary:keep -->\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "## Run <!-- agent:run id=\"main\" subagents -->\n",
+                    "{}",
+                    "- later work\n",
+                    "- operator typed this while the report ran\n",
+                    "<!-- /agent:run -->\n",
+                ),
+                origin,
+            ),
+        )
+        .unwrap();
+        let rows = vec![
+            "[#alpha] follow-up: agent: wire the gutter stamp [#q-1ad2b4cb4637]".to_string(),
+            "[#alpha] follow-up: operator: approve PR 9 [operator-verify] [#q-b857d9fc0fcc]"
+                .to_string(),
+        ];
+        (dir, doc, rows)
+    }
+
+    /// `#patchruncomponent` part c (agent-doc-bugs.md,
+    /// 2026-11-25): `queue report-complete` printed `Queued 2 action item(s)
+    /// as follow-up row(s)` while the write policy dropped its queue patch
+    /// (`agent_component_patch_dropped component=queue operator_changed=true`),
+    /// and neither row (q-1ad2b4cb4637, q-b857d9fc0fcc) reached the document.
+    /// The report now re-reads the document: dropped rows are placed again
+    /// through the CAS queue write path beside the operator's edit, and the
+    /// report line says a retry placed them.
+    #[test]
+    fn settle_places_followup_rows_a_concurrent_queue_edit_dropped() {
+        let (_dir, doc, rows) = dropped_followup_fixture("- do [#alpha]\n");
+        let mut followups = agent_doc_queue::handback_followups::HandbackFollowups {
+            queue_id: Some("main".to_string()),
+            inserted: rows.clone(),
+            operator_owned: 1,
+            ..Default::default()
+        };
+        settle_handback_followups(
+            &doc,
+            &crate::CliQueueCommandEffects,
+            "do [#alpha]",
+            &mut followups,
+        );
+        assert_eq!(followups.inserted, rows);
+        assert_eq!(followups.retried, 2);
+        assert_eq!(followups.operator_owned, 1);
+        assert!(followups.refused.is_none(), "{followups:?}");
+
+        let written = fs::read_to_string(&doc).unwrap();
+        let alpha = written.find("- do [#alpha]").unwrap();
+        let first = written.find(&rows[0]).expect("first row placed");
+        let second = written.find(&rows[1]).expect("second row placed");
+        let later = written.find("- later work").unwrap();
+        assert!(
+            alpha < first && first < second && second < later,
+            "{written}"
+        );
+        assert!(written.contains("- operator typed this while the report ran\n"));
+        assert_eq!(written.matches(&rows[0]).count(), 1);
+
+        let text = describe_handback_followups(&doc, "do [#alpha]", &followups);
+        assert!(text.contains("Queued 2 action item(s)"), "{text}");
+        assert!(
+            text.contains("2 of them were dropped by a concurrent edit"),
+            "{text}"
+        );
+
+        // Idempotent: a second settle finds both rows and writes nothing.
+        let before = fs::read_to_string(&doc).unwrap();
+        settle_handback_followups(
+            &doc,
+            &crate::CliQueueCommandEffects,
+            "do [#alpha]",
+            &mut followups,
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+        assert_eq!(followups.inserted, rows);
+    }
+
+    /// While the attached editor has not projected the retained write that
+    /// carries the rows, they are reported as pending, not as queued, and no
+    /// duplicating retry runs: the queue writers' view (through retained
+    /// writes) still holds them, only the visible document does not.
+    #[test]
+    fn settle_holds_rows_of_a_pending_retained_write_as_pending() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        let doc = dir.path().join("sdk.md");
+        fs::write(
+            &doc,
+            concat!(
+                "---\nagent_doc_session: followup-pending\nagent_doc_format: template\n---\n\n",
+                "<!-- agent:exchange patch=append subagents -->\n",
+                "<!-- agent:boundary:keep -->\n",
+                "<!-- /agent:exchange -->\n\n",
+                "<!-- agent:queue subagents -->\n",
+                "- first worker\n",
+                "<!-- /agent:queue -->\n",
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, "first worker", "subagent:first", 600)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            "first worker",
+            "subagent:first",
+            "worker:first",
+            600,
+            1,
+        )
+        .unwrap();
+        let canonical = doc.canonicalize().unwrap();
+        agent_doc_reliable_sync_io::global_liveness_plane()
+            .lock()
+            .restore_liveness(&[agent_doc_reliable_sync_io::liveness::LivenessOp::Open {
+                document_hash: agent_doc_hash::document_id_for_path(&canonical),
+                pid: std::process::id().into(),
+                tag: "followup-pending-editor".to_string(),
+            }]);
+        agent_doc_crdt_relay_io::register_replica_for_file(&doc, "followup-pending-editor")
+            .unwrap()
+            .expect("editor replica attaches");
+
+        let handback = concat!(
+            "**Summary:** done.\n",
+            "**Action items:**\n",
+            "- agent: wire the gutter stamp\n",
+            "**Next actions:** none",
+        );
+        let mut outcome =
+            report_complete(&doc, "first worker", Some(1), None, None, handback).unwrap();
+        assert!(outcome.projection_pending);
+        assert_eq!(
+            outcome.followups.inserted.len(),
+            1,
+            "{:?}",
+            outcome.followups
+        );
+        let rows = outcome.followups.inserted.clone();
+        let before_disk = fs::read_to_string(&doc).unwrap();
+        settle_handback_followups(
+            &doc,
+            &crate::CliQueueCommandEffects,
+            "first worker",
+            &mut outcome.followups,
+        );
+        assert!(
+            outcome.followups.inserted.is_empty(),
+            "{:?}",
+            outcome.followups
+        );
+        assert_eq!(outcome.followups.pending_projection, rows);
+        assert_eq!(outcome.followups.retried, 0);
+        assert!(
+            outcome.followups.refused.is_none(),
+            "{:?}",
+            outcome.followups
+        );
+        assert_eq!(
+            fs::read_to_string(&doc).unwrap(),
+            before_disk,
+            "no retry write"
+        );
+        let text = describe_handback_followups(&doc, "first worker", &outcome.followups);
+        assert!(!text.contains("Queued"), "{text}");
+        assert!(
+            text.contains("1 follow-up row(s) are NOT in the document yet"),
+            "{text}"
+        );
+        assert!(text.contains("agent-doc queue follow-up"), "{text}");
+        agent_doc_crdt_relay_io::deregister_replica_for_file(&doc, "followup-pending-editor")
+            .unwrap();
+    }
+
+    /// When the retry cannot place the rows either (here the origin row is
+    /// gone), the report counts nothing as queued and prints the exact
+    /// `queue follow-up` command for the rows that did not land.
+    #[test]
+    fn settle_reports_rows_that_did_not_land_instead_of_claiming_them() {
+        let (_dir, doc, rows) = dropped_followup_fixture("");
+        let before = fs::read_to_string(&doc).unwrap();
+        let mut followups = agent_doc_queue::handback_followups::HandbackFollowups {
+            queue_id: Some("main".to_string()),
+            inserted: rows.clone(),
+            operator_owned: 1,
+            ..Default::default()
+        };
+        settle_handback_followups(
+            &doc,
+            &crate::CliQueueCommandEffects,
+            "do [#alpha]",
+            &mut followups,
+        );
+        assert_eq!(fs::read_to_string(&doc).unwrap(), before);
+        assert!(followups.inserted.is_empty(), "{followups:?}");
+        assert_eq!(followups.operator_owned, 0);
+        assert_eq!(followups.retried, 0);
+        assert_eq!(followups.refused_items, rows);
+        let text = describe_handback_followups(&doc, "do [#alpha]", &followups);
+        assert!(!text.contains("Queued"), "{text}");
+        assert!(text.contains("2 follow-up row(s) did not land"), "{text}");
+        assert!(text.contains("agent-doc queue follow-up"), "{text}");
+        assert!(text.contains("q-1ad2b4cb4637"), "{text}");
     }
 
     /// `#humanfollowupowner`: the report line names how many queued rows wait

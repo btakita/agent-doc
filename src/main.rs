@@ -3228,10 +3228,16 @@ enum Commands {
         exact_visible: bool,
     },
     /// Replace content in a named component
+    ///
+    /// Replaces the whole component body. To edit one row or `%%` note inside
+    /// a queue tree, use `agent-doc queue edit` instead.
     Patch {
         /// Path to the document
         file: PathBuf,
-        /// Component name (e.g. "status", "log")
+        /// Component name (e.g. "status", "log"). Every public spelling of a
+        /// component selects it: `run`, `queue`, and `loop` select an
+        /// `agent:run` / `agent:queue` / `agent:loop` block, and `open-items`
+        /// selects `agent:active`.
         component: String,
         /// Select the component occurrence whose opening tag has this id attribute
         #[arg(long)]
@@ -5897,6 +5903,59 @@ enum QueueAction {
         /// Remove an attribute by key; repeatable
         #[arg(long = "remove", value_name = "KEY")]
         remove: Vec<String>,
+    },
+    /// Edit or delete ONE line of a queue tree (`#patchruncomponent`): a stale
+    /// `%%` note under a row, or one row's text, without replacing the whole
+    /// queue body the way `agent-doc patch FILE run --id ID` does.
+    ///
+    /// Select the line with `--line N`, `--row ID` (the row whose own id is
+    /// `ID`: `do [#ID]`, `[#ID]`, or its generated `[#q-…]`), or `--find TEXT`
+    /// (the one line reading TEXT; inside `--row ID`'s subtree when both are
+    /// given). `--id QUEUE` limits the search to one queue. `--expect TEXT`
+    /// refuses unless the selected line still reads TEXT. Text compares
+    /// trimmed, with one leading list marker dropped.
+    ///
+    /// `--text` keeps the line's indentation and list marker and replaces the
+    /// rest; `--delete` removes the line and refuses one with nested children
+    /// (use `queue delete-tree`). An edit that changes the text of a row a
+    /// worker is claimed for refuses. The edit is planned from live document
+    /// authority under the queue-edit lease and committed through the
+    /// editor/CRDT compare-and-swap path; the successor must keep every
+    /// component and the queue graph intact.
+    ///
+    /// Example: `agent-doc queue edit FILE --row q-7174ad2918b2 --find '%% GH
+    /// #435 stays open … %%' --text '%% closed 2026-11-24 %%'`.
+    Edit {
+        /// Path to the session document
+        file: PathBuf,
+        /// Limit the selection to this exact canonical queue id
+        #[arg(long)]
+        id: Option<String>,
+        /// 1-based document line to edit
+        #[arg(long, value_name = "N", conflicts_with_all = ["row", "find"])]
+        line: Option<usize>,
+        /// The row whose own id is ID (`q-…`, `#q-…`, or `[#q-…]`); with
+        /// `--find`, the row whose subtree holds the line
+        #[arg(long, value_name = "ID")]
+        row: Option<String>,
+        /// The one line that reads TEXT
+        #[arg(long, value_name = "TEXT")]
+        find: Option<String>,
+        /// Refuse unless the selected line still reads TEXT
+        #[arg(long, value_name = "TEXT")]
+        expect: Option<String>,
+        /// Replacement text for the line (indentation and list marker kept)
+        #[arg(long, value_name = "TEXT", required_unless_present = "delete")]
+        text: Option<String>,
+        /// Delete the line instead of replacing it
+        #[arg(long, conflicts_with = "text")]
+        delete: bool,
+        /// Print the plan without writing the document
+        #[arg(long)]
+        dry_run: bool,
+        /// Print the plan as JSON
+        #[arg(long)]
+        json: bool,
     },
     /// Disregard agent-invented blockers so the session can continue
     /// (`#blockerdisregard`).
@@ -11152,6 +11211,64 @@ fn try_main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
+            QueueAction::Edit {
+                file,
+                id,
+                line,
+                row,
+                find,
+                expect,
+                text,
+                delete,
+                dry_run,
+                json,
+            } => {
+                use agent_doc_queue::row_edit::{RowEditOp, RowEditSelector};
+                let selector = match (line, row, find) {
+                    (Some(line), _, _) => RowEditSelector::Line(line),
+                    (None, under, Some(text)) => RowEditSelector::Find { text, under },
+                    (None, Some(row), None) => RowEditSelector::Row(row),
+                    (None, None, None) => anyhow::bail!(
+                        "queue edit: select the line with `--line N`, `--row ID`, or `--find TEXT`"
+                    ),
+                };
+                let op = match (delete, text) {
+                    (true, _) => RowEditOp::Delete,
+                    (false, Some(text)) => RowEditOp::Replace(text),
+                    (false, None) => anyhow::bail!("queue edit: give `--text TEXT` or `--delete`"),
+                };
+                let plan = agent_doc_queue_io::queue_row_edit::edit_with_effects(
+                    &CliQueueCommandEffects,
+                    &file,
+                    id.as_deref(),
+                    &selector,
+                    expect.as_deref(),
+                    &op,
+                    dry_run,
+                )?;
+                if json {
+                    let mut value = serde_json::to_value(&plan)?;
+                    value["applied"] = serde_json::Value::Bool(plan.changed && !dry_run);
+                    println!("{}", serde_json::to_string_pretty(&value)?);
+                } else if dry_run && plan.changed {
+                    print!(
+                        "(dry run) {}",
+                        agent_doc_queue::row_edit::render_row_edit_report(
+                            &file.display().to_string(),
+                            &plan
+                        )
+                    );
+                } else {
+                    print!(
+                        "{}",
+                        agent_doc_queue::row_edit::render_row_edit_report(
+                            &file.display().to_string(),
+                            &plan
+                        )
+                    );
+                }
+                Ok(())
+            }
             QueueAction::Disregard {
                 file,
                 item,
@@ -11441,7 +11558,7 @@ fn try_main() -> anyhow::Result<()> {
                     };
                     // `#reportcompletenomatch`: no matching subagent claim is
                     // an error that names the candidate rows and claims.
-                    let outcome = queue_completion_feedback::report_complete(
+                    let mut outcome = queue_completion_feedback::report_complete(
                         &file,
                         &item,
                         generation,
@@ -11481,6 +11598,15 @@ fn try_main() -> anyhow::Result<()> {
                             .map(|intent| format!(" as retained intent {intent}"))
                             .unwrap_or_default(),
                     );
+                    // `#patchruncomponent` part c: say only what landed. A concurrent
+                    // operator edit to the queue can drop the report's rows;
+                    // place them again now, while the origin row is still live.
+                    queue_completion_feedback::settle_handback_followups(
+                        &file,
+                        &CliQueueCommandEffects,
+                        &outcome.claim.item_text,
+                        &mut outcome.followups,
+                    );
                     let mechanical = match queue_completion_feedback::close_mechanical_reported_rows(
                         &file,
                         &CliQueueCommandEffects,
@@ -11516,6 +11642,15 @@ fn try_main() -> anyhow::Result<()> {
                             ),
                             Err(err) => err.to_string(),
                         };
+                    // Again after the closeout: its write, or the retained
+                    // projection it waited on, can drop rows that read as
+                    // landed (or pending) before it ran.
+                    queue_completion_feedback::settle_handback_followups(
+                        &file,
+                        &CliQueueCommandEffects,
+                        &outcome.claim.item_text,
+                        &mut outcome.followups,
+                    );
                     let followups = queue_completion_feedback::describe_handback_followups(
                         &file,
                         &outcome.claim.item_text,
@@ -12789,6 +12924,107 @@ mod recycle_force_tests {
             parse(&["agent-doc", "version", "--json"]),
             Commands::Version { json: true }
         ));
+    }
+
+    #[test]
+    fn queue_edit_parses_selectors_text_and_delete() {
+        match parse(&[
+            "agent-doc",
+            "queue",
+            "edit",
+            "tasks/session.md",
+            "--id",
+            "main",
+            "--row",
+            "q-7174ad2918b2",
+            "--find",
+            "%% stale %%",
+            "--text",
+            "%% fresh %%",
+        ]) {
+            Commands::Queue {
+                action:
+                    QueueAction::Edit {
+                        file,
+                        id,
+                        line,
+                        row,
+                        find,
+                        expect,
+                        text,
+                        delete,
+                        dry_run,
+                        json,
+                    },
+            } => {
+                assert_eq!(file, PathBuf::from("tasks/session.md"));
+                assert_eq!(id.as_deref(), Some("main"));
+                assert_eq!(line, None);
+                assert_eq!(row.as_deref(), Some("q-7174ad2918b2"));
+                assert_eq!(find.as_deref(), Some("%% stale %%"));
+                assert_eq!(expect, None);
+                assert_eq!(text.as_deref(), Some("%% fresh %%"));
+                assert!(!delete && !dry_run && !json);
+            }
+            _ => panic!("expected queue edit"),
+        }
+        assert!(matches!(
+            parse(&[
+                "agent-doc",
+                "queue",
+                "edit",
+                "f.md",
+                "--line",
+                "12",
+                "--expect",
+                "x",
+                "--delete",
+            ]),
+            Commands::Queue {
+                action: QueueAction::Edit {
+                    line: Some(12),
+                    delete: true,
+                    text: None,
+                    ..
+                }
+            }
+        ));
+        let cli = |args: &[&str]| {
+            let owned: Vec<String> = args.iter().map(|s| s.to_string()).collect();
+            std::thread::Builder::new()
+                .stack_size(16 * 1024 * 1024)
+                .spawn(move || Cli::try_parse_from(&owned).is_err())
+                .expect("spawn parse thread")
+                .join()
+                .expect("parse thread")
+        };
+        assert!(
+            cli(&["agent-doc", "queue", "edit", "f.md", "--line", "3"]),
+            "needs --text or --delete"
+        );
+        assert!(cli(&[
+            "agent-doc",
+            "queue",
+            "edit",
+            "f.md",
+            "--line",
+            "3",
+            "--row",
+            "q-1",
+            "--text",
+            "x"
+        ]));
+        assert!(cli(&[
+            "agent-doc",
+            "queue",
+            "edit",
+            "f.md",
+            "--line",
+            "3",
+            "--text",
+            "x",
+            "--delete"
+        ]));
     }
 
     #[test]

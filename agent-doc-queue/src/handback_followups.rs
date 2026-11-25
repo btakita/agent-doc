@@ -67,6 +67,40 @@ pub struct HandbackFollowups {
     /// Follow-up row texts (`--item`) that placement refused, in order.
     /// Marker-bearing action items are omitted (`#handbackrefusedcommandexact`).
     pub refused_items: Vec<String>,
+    /// `#patchruncomponent` part c: rows the report's write carried that the document
+    /// did not hold yet when the report checked, because the retained editor
+    /// write carrying them was still awaiting projection. Not in `inserted`.
+    pub pending_projection: Vec<String>,
+    /// `#patchruncomponent` part c: how many rows of `inserted` the report's first write
+    /// dropped (a concurrent operator edit to the queue kept the operator's
+    /// text) and a retry through the queue write path then placed.
+    pub retried: usize,
+}
+
+impl HandbackFollowups {
+    /// `#patchruncomponent` part c: the rows of `rows` that queue `queue_id` does not
+    /// hold in `content`, in order. A row matches the way a repeated report's
+    /// `already_present` check matches it, so a binary-owned lifecycle prefix
+    /// or a strike on the landed row still counts as landed.
+    pub fn rows_missing_from(content: &str, queue_id: &str, rows: &[String]) -> Vec<String> {
+        let existing = queue_row_lines(content, queue_id);
+        rows.iter()
+            .filter(|row| {
+                let row = row.split_whitespace().collect::<Vec<_>>().join(" ");
+                !existing.iter().any(|line| followup_rows_match(line, &row))
+            })
+            .cloned()
+            .collect()
+    }
+
+    /// Recount [`Self::operator_owned`] from the rows still in `inserted`.
+    pub fn recount_operator_owned(&mut self) {
+        self.operator_owned = self
+            .inserted
+            .iter()
+            .filter(|row| crate::followup_owner::carries_operator_owned_tag(row))
+            .count();
+    }
 }
 
 /// One copy-pasteable `queue follow-up` for a refused placement.
@@ -595,6 +629,42 @@ fn queue_row_lines(content: &str, queue_id: &str) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// `#patchruncomponent` part c: a row counts as
+    /// landed when the queue holds it, decorated or struck; a row the write
+    /// dropped is reported missing, in order.
+    #[test]
+    fn rows_missing_from_reports_only_rows_the_queue_does_not_hold() {
+        let rows = vec![
+            "[#q-origin] follow-up: agent: wire the stamp [#q-aaa]".to_string(),
+            "[#q-origin] follow-up: operator: approve PR 9 [operator-verify] [#q-bbb]".to_string(),
+            "[#q-origin] follow-up: agent: third [#q-ccc]".to_string(),
+        ];
+        let content = concat!(
+            "<!-- agent:run id=\"main\" -->\n",
+            "- ### do [#origin] [#q-origin]\n",
+            "- ### 🚧 [#q-origin] follow-up: agent: wire the stamp [#q-aaa]\n",
+            "- ~~[#q-origin] follow-up: agent: third [#q-ccc]~~\n",
+            "- operator typed this\n",
+            "<!-- /agent:run -->\n",
+        );
+        assert_eq!(
+            HandbackFollowups::rows_missing_from(content, "main", &rows),
+            vec![rows[1].clone()]
+        );
+        assert_eq!(
+            HandbackFollowups::rows_missing_from(content, "missing", &rows),
+            rows,
+            "an unknown queue holds nothing"
+        );
+        let mut followups = HandbackFollowups {
+            inserted: rows.clone(),
+            operator_owned: 3,
+            ..HandbackFollowups::default()
+        };
+        followups.recount_operator_owned();
+        assert_eq!(followups.operator_owned, 1);
+    }
 
     const FOLLOWUP_LEGACY_PREFIX: &str = crate::followup_owner::FOLLOWUP_ROW_PREFIX;
 

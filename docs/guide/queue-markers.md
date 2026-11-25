@@ -474,6 +474,38 @@ A pull-request or issue URL heading whose only children are `%% … %%` notes is
 a navigation heading. The queue never claims or runs it, so tree status does
 not list it as agent work.
 
+### Editing one line
+
+`agent-doc queue edit FILE` changes or deletes one line of a queue tree,
+such as a stale `%%` note under a row, without replacing the whole queue
+the way `agent-doc patch FILE run --id main` does. It writes through the
+editor like every other queue command, so the operator can keep typing.
+
+Select the line in one of three ways:
+
+- `--row ID`: the row whose own id is `ID` (`do [#ID]`, `[#ID]`, or its
+  generated `[#q-…]`). A follow-up that only names `[#ID]` as its origin is
+  not that row.
+- `--find TEXT`: the one line that reads `TEXT`. Add `--row ID` to search
+  only that row's subtree.
+- `--line N`: document line `N`. Add `--expect TEXT` so the edit refuses
+  if rows above moved the line since you read it.
+
+`--id QUEUE` searches one queue only. Text compares trimmed, with one leading
+list marker dropped, so `- %% note %%` and `%% note %%` name the same line.
+
+`--text TEXT` keeps the line's indentation and list marker and replaces the
+rest. `--delete` removes the line; a line with nested children refuses (use
+`queue delete-tree`). The binary refuses an edit that would add or remove a
+component marker, and one that changes the text of a row a worker is claimed
+for. `--dry-run` prints the change without writing it.
+
+```
+agent-doc queue edit FILE --row q-7174ad2918b2 \
+  --find '%% GH #435 stays open until it is verified on the Coder host. %%' \
+  --text '%% closed 2026-11-24; tracked in GH #442 %%'
+```
+
 ### Cleaning up a finished tree
 
 Three commands close or remove rows that an audit found done or moot. Each one

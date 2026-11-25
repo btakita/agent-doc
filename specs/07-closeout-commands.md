@@ -330,9 +330,10 @@ backlog edits continue to reject Review-only targets.
 
 ## patch
 
-`agent-doc patch <FILE> <COMPONENT> [CONTENT] [--mode replace|append|prepend]`
+`agent-doc patch <FILE> <COMPONENT> [CONTENT] [--id ID] [--mode replace|append|prepend]`
 
 - Deterministic named-component patcher for direct component mutation.
+- **Every public spelling of a component selects it (`#patchruncomponent`).** The element parser projects `agent:run`, `agent:queue`, and `agent:loop` onto the internal `queue` name (and legacy `open-items` onto `active`), so `patch` compares the requested name and each parsed component through `canonical_component_name`. `patch FILE run --id main` therefore selects `<!-- agent:run id="main" ... -->`; before this, it refused with `component 'run' with id 'main' not found` although the document carried that exact marker. Component config is looked up by the requested name first, then by the canonical name. `patch` still replaces the whole body; one queue line is edited with `agent-doc queue edit`.
 - Resolved component config may supply timestamps, size trimming, and pre/post hooks, but explicit CLI mode still controls append/prepend behavior.
 
 ## write

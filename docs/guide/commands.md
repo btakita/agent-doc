@@ -263,8 +263,11 @@ Replace content in a named component. Components are bounded regions marked with
 | Argument | Description |
 |----------|-------------|
 | `FILE` | Path to the document |
-| `COMPONENT` | Component name (e.g., `status`, `log`) |
+| `COMPONENT` | Component name (e.g., `status`, `log`). Every spelling of a component selects it: `run`, `queue`, and `loop` select an `agent:run` / `agent:queue` / `agent:loop` block, and `open-items` selects `agent:active`. |
 | `CONTENT` | Replacement content (reads from stdin if omitted) |
+| `--id ID` | Select the occurrence whose opening marker has `id="ID"`, e.g. `agent-doc patch FILE run --id main` |
+
+`patch` replaces the whole component body. To change one row or `%%` note inside a queue, use [`agent-doc queue edit`](queue-markers.md#editing-one-line).
 
 Behavior depends on `.agent-doc/components.toml` config:
 

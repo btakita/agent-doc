@@ -35,6 +35,7 @@ pub mod queue_edit_owner;
 pub mod queue_lineage;
 pub mod queue_maintenance_claim;
 pub mod queue_marker_audit;
+pub mod queue_row_edit;
 pub mod queue_schedule;
 pub mod queue_tombstone;
 pub mod reported_closeout_exec;

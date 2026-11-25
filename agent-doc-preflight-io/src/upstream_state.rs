@@ -15,7 +15,7 @@
 //!   ([`DecisionGraph::work_upstream_set`]) that are due, a bounded number per
 //!   pass, and never writes the document. Terminal states are never refreshed;
 //!   an open state is refreshed after [`OPEN_TTL_SECS`]; a failed lookup is
-//!   retried after [`FAILED_RETRY_SECS`].
+//!   retried after [`FAILED_LOOKUP_TTL_SECS`].
 //! - **Computed**: preflight derives `stale_tracked_item` signals with
 //!   `stale_kind` `upstream_merged` / `upstream_closed` from the cache alone
 //!   ([`DecisionGraph::work_settled_by_upstream`]); admission never runs `gh`.
@@ -38,7 +38,7 @@ pub const CACHE_RELATIVE: &str = ".agent-doc/state/github-upstream-state.json";
 /// An `open` observation older than this is due again.
 pub const OPEN_TTL_SECS: u64 = 30 * 60;
 /// A failed lookup is retried after this long.
-pub const FAILED_RETRY_SECS: u64 = 30 * 60;
+pub const FAILED_LOOKUP_TTL_SECS: u64 = 30 * 60;
 /// Lookups one pass may run.
 pub const LOOKUPS_PER_PASS: usize = 8;
 /// Wall budget of one pass; a lookup is not started after it.
@@ -90,7 +90,7 @@ impl UpstreamStateCache {
         match entry.state {
             Some(state) if state.is_terminal() => false,
             Some(_) => age >= OPEN_TTL_SECS,
-            None => age >= FAILED_RETRY_SECS,
+            None => age >= FAILED_LOOKUP_TTL_SECS,
         }
     }
 
@@ -413,7 +413,7 @@ mod tests {
         cache.record(&pull(1), Some(UpstreamState::Merged), 100);
         cache.record(&pull(2), Some(UpstreamState::Open), 100);
         cache.record(&pull(3), None, 100);
-        let later = 100 + OPEN_TTL_SECS.max(FAILED_RETRY_SECS);
+        let later = 100 + OPEN_TTL_SECS.max(FAILED_LOOKUP_TTL_SECS);
         assert!(!cache.is_due(&pull(1), later * 10));
         assert!(!cache.is_due(&pull(2), 101));
         assert!(cache.is_due(&pull(2), later));

@@ -34,6 +34,9 @@
 use crate::text::strip_decorations;
 use agent_doc_element::decision_stamp::{decision_stamp, strip_decision_stamps};
 
+mod work_trees;
+pub use work_trees::{DoneTreeObs, QueueHeadObs};
+
 pub const WAITING_ITEM_MARKER: &str = "<!-- agent-doc:waiting-item -->";
 const ARCHIVE_MARKER: &str = "<!-- agent-doc:waiting-archive -->";
 pub const REQUEST_ID_PREFIX: &str = "subagent-operator-request-";
@@ -168,6 +171,12 @@ pub struct Observations {
     /// `#firstprinciplesstore`: operator `confirm` / `reject` rows for one
     /// derivation step. Never answers, questions or links.
     pub derivation_reviews: Vec<crate::derivation_review::DerivationReviewObs>,
+    /// `#operatorshouldnneed`: every live (unstruck) top-level row of each
+    /// `agent:run` / `agent:queue` component, with its live tree.
+    pub queue_heads: Vec<QueueHeadObs>,
+    /// `#operatorshouldnneed`: every dated, id-carrying entry of the inline
+    /// `agent:done` component and of its archive files.
+    pub done_trees: Vec<DoneTreeObs>,
 }
 
 /// Whether operator text asks something back instead of answering
@@ -919,6 +928,13 @@ fn scan_queue_rows(content: &str, out: &mut Observations) {
     {
         let body = component.content(content);
         let line_offset = content[..component.open_end].lines().count();
+        let queue = component
+            .attrs
+            .get("id")
+            .map(|id| id.trim_matches('"').to_string())
+            .unwrap_or_else(|| component.name.clone());
+        out.queue_heads
+            .extend(work_trees::queue_heads(body, &queue, line_offset));
         let lines: Vec<&str> = body.lines().collect();
         let ranges = waiting_line_ranges(&lines);
         let orphans = orphan_packet_ranges(&lines, &ranges);
@@ -1234,6 +1250,13 @@ fn scan_open_items(content: &str, out: &mut Observations) {
 }
 
 impl Observations {
+    /// `#operatorshouldnneed`: keep only the done entries archived on or after
+    /// `cutoff` (`YYYY-MM-DD`). The upstream watch covers recent completions,
+    /// not the archive's whole history.
+    pub fn retain_done_trees_since(&mut self, cutoff: &str) {
+        self.done_trees.retain(|tree| tree.date.as_str() >= cutoff);
+    }
+
     /// Every key this document can name (`#decisionprune`): the id key of
     /// every question, reference, answer target and link endpoint, and the
     /// text key of every question and id-less answer head. The index loads
@@ -1279,7 +1302,41 @@ pub fn observe(content: &str, archives: &[&str]) -> Observations {
     // rows, so nothing is double counted.
     infix_links(&mut out);
     scan_open_items(content, &mut out);
+    scan_done_trees(content, archives, &mut out);
     out
+}
+
+/// `#operatorshouldnneed`: dated entries of the inline `agent:done` component
+/// and of the archive files. An id archived more than once (reopened, then
+/// done again) keeps its newest entry.
+fn scan_done_trees(content: &str, archives: &[&str], out: &mut Observations) {
+    let mut newest: std::collections::BTreeMap<String, DoneTreeObs> = Default::default();
+    let inline = agent_doc_element::element::parse(content)
+        .map(|components| {
+            components
+                .iter()
+                .filter(|component| {
+                    agent_doc_element::element::is_backlog_done_component(&component.name)
+                })
+                .map(|component| component.content(content).to_string())
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    for text in inline
+        .iter()
+        .map(String::as_str)
+        .chain(archives.iter().copied())
+    {
+        for tree in work_trees::done_trees(text) {
+            match newest.get(&tree.id) {
+                Some(kept) if kept.date > tree.date => {}
+                _ => {
+                    newest.insert(tree.id.clone(), tree);
+                }
+            }
+        }
+    }
+    out.done_trees.extend(newest.into_values());
 }
 
 /// Observe the questions a closeout is about to add (packets in the response

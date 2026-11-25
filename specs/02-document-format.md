@@ -1033,6 +1033,22 @@ action is finished or moot:
   states from the project cache `.agent-doc/state/github-upstream-state.json`
   and never runs `gh`; the cache is the background observer's output
   (see SPEC.md, `#operatorshouldnneed`).
+- `stale_queue_head` (`#operatorshouldnneed`, flag-only) names a live
+  `agent:run` / `agent:queue` head every GitHub artifact of which is observed
+  terminal: every URL in the head row and its live descendants (rows under a
+  struck row are left out). `stale_kind` is `upstream_merged` or
+  `upstream_closed` as above; `component` is `queue:<id>`; `todo` is the
+  head's work text, the `queue consume --ack-text` selector of a note-only
+  heading; `ids` lists the row's ids then the URLs. A worker attempt handle on
+  the row keeps it unflagged. The action names the head's line for
+  `queue tree-status --line`, and either the `--ack-text … --summary …`
+  strike or, for an id-backed head, the item's closeout flag.
+- `stale_done_item` with `stale_kind` `upstream_unmerged`
+  (`#operatorshouldnneed`, flag-only) names a dated `agent:done` entry
+  (inline or in its archive file, archived in the last 14 days) every pull
+  request of which was closed without merging. The action names
+  `agent-doc backlog <FILE> reopen <id>`; issues in the entry are not
+  considered.
 - **Agent closeout audit** consumes every `todo_sync_required` signal. It
   includes `--todo-done <selector>` for every action current evidence proves
   finished or moot, even when the row has no tracked-work link and the operator

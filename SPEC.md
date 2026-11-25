@@ -90,8 +90,17 @@
     to the todo or backlog item it closes (`upstream_of`, clause `closes`,
     `#prannotate`), from either side and across the cached graph.
     `DecisionGraph::work_upstreams` adds the URLs a review or icebox row's own
-    text cites. The union over open items is the watch set; it shrinks as
-    items close, so nothing outside live tracked work is ever looked up.
+    text cites. Two more sources join the watch set
+    (`DecisionGraph::work_upstream_set`): every URL in the live tree of a
+    live `agent:run` / `agent:queue` head (`queue_head_upstreams`; struck rows
+    and their subtrees excluded), such as a bare pull-request heading with
+    `%% title %%` notes; and the pull requests a dated `agent:done` entry
+    (inline or in its archive file) cites (`done_tree_upstreams`), only for
+    entries archived in the last 14 days. Issues in a done entry are not
+    watched: a closed issue agrees with it, and an open one says nothing
+    about whether the work landed. The set shrinks as items close, heads are
+    struck, and done entries age out, so the archive's history is never
+    looked up.
   - **Source (observation):** `.agent-doc/state/github-upstream-state.json`,
     one `open` / `merged` / `closed` / failed observation per artifact, keyed
     by its graph node id. Terminal states are never refreshed; `open` is due
@@ -106,7 +115,8 @@
     repositories (an aliased `repository(owner:,name:)` per repository, an
     aliased `pullRequest(number:)` or, for an issue URL,
     `issueOrPullRequest(number:)` per artifact), never-observed first, then
-    oldest. At most 8 calls per pass, 10 s each, no call started after
+    oldest, and the live part (`live_work_upstream_set`) before the
+    artifacts only done entries cite. At most 8 calls per pass, 10 s each, no call started after
     30 s; the rest wait for the next pass. A partial answer (`gh` exits 1
     with `data` and `errors`) fails only the artifacts that are `null`: a
     missing or forbidden repository or artifact never poisons its batch,
@@ -119,8 +129,19 @@
     `DecisionGraph::work_settled_by_upstream`): an open item every artifact
     of which is terminal and that no live queue row or busy waiting tree
     names. Flag-only: the agent verifies against the item, then closes it
-    with the named flag or rewrites it. External blocker settlement
-    (`#blockergraph`) reads the same terminal states before its own lookup.
+    with the named flag or rewrites it. The same cache yields
+    `stale_queue_head` signals (`queue_heads_settled_by_upstream`) for a live
+    queue head every artifact of which is terminal and that no worker attempt
+    handle holds: `component` `queue:<id>`, `todo` the head's `--ack-text`
+    selector, and an action naming the head's line for `queue tree-status
+    --line` and its `queue consume --ack-text … --summary …` strike (or, for
+    an id-backed head, the item's closeout flag). And `stale_done_item`
+    signals (`stale_kind` `upstream_unmerged`,
+    `done_trees_unmerged_by_upstream`) for a watched done entry every pull
+    request of which closed without merging, naming `agent-doc backlog
+    <FILE> reopen <id>`. Nothing is struck or reopened automatically.
+    External blocker settlement (`#blockergraph`) reads the same terminal
+    states before its own lookup.
   - **Read (queue tree-status, `#operatorshouldnneed`):** `queue tree-status`, and the
     `status?` Status rows preflight writes, list each live queue URL heading
     (`### https://github.com/<o>/<r>/pull|issues/<n>`, optionally with a
@@ -133,9 +154,7 @@
     flagged without a strike: a merge can mean those rows are unblocked, not
     done. Flag-only: nothing is struck automatically.
   - **Next increments** (not yet built): a controller-scheduled refresh for
-    documents with no admissions; queue (`agent:run`) heads and `agent:done`
-    trees citing artifacts in the watch set (until then a heading is reported
-    only when a tracked item also cites its artifact).
+    documents with no admissions.
   See [Document Format](specs/02-document-format.md#components).
 
 - systemd-backed `tmux-spawn-*.scope` units are stewarded without assuming

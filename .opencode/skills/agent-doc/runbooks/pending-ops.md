@@ -110,7 +110,16 @@ asking for it. Verify against the item text: when the artifact was the item's
 work, close it in this closeout with the flag the action names, citing the
 URL (`upstream_merged` is likely DONE, `upstream_closed` likely MOOT); when it
 only unblocked the item, do the remaining work or rewrite the item. Icebox
-items are only flagged.
+items are only flagged. The same check covers two more places. A
+`stale_queue_head` signal names a live queue head (often a bare pull-request
+heading with `%% title %%` notes) whose cited artifacts are all merged or
+closed; run the `queue tree-status --line` it names, then strike the head
+with the `queue consume --ack-text … --summary …` command it prints (citing
+the URL), or close its item when the head is id-backed. A `stale_done_item`
+signal (`upstream_unmerged`) names a recent done entry whose every pull
+request was closed without merging; when that pull request was the item's
+work and nothing else landed it, reopen the item with
+`agent-doc backlog <FILE> reopen <id>`.
 
 Finalize also auto-dedupes identical same-id review entries during closeout maintenance, so an interleaved-finalize duplicate collapses without an explicit flag; distinct items that merely share an id are preserved so the ambiguity warning still surfaces.
 

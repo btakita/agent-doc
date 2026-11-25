@@ -44,6 +44,7 @@ mod blockers;
 mod registry;
 mod upstream;
 mod upstream_settled;
+mod upstream_watch;
 pub use blockers::{
     BLOCKS_CLAUSE, SETTLEMENT_MARKER_PREFIX, SETTLES_CLAUSE, merge_settlement_marker,
 };
@@ -57,6 +58,9 @@ pub use upstream::{
 };
 pub use upstream_settled::{
     UpstreamSettledItem, UpstreamSettledKind, UpstreamState, WorkUpstreams,
+};
+pub use upstream_watch::{
+    DoneTreeUpstreams, QueueHeadUpstreams, UpstreamSettledQueueHead, UpstreamUnmergedDoneItem,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]

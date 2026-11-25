@@ -11,8 +11,9 @@
 //!
 //! - [`DecisionGraph::work_upstreams`] lists, per open tracked item, the
 //!   artifacts it is waiting on: the graph's `closes` edges for todo and
-//!   backlog rows, and the URLs a review or icebox row's own text cites. The
-//!   flattened set is what the background observer keeps fresh.
+//!   backlog rows, and the URLs a review or icebox row's own text cites.
+//!   [`DecisionGraph::work_upstream_set`] adds the queue heads and done trees
+//!   (`upstream_watch`) and is what the background observer keeps fresh.
 //! - [`DecisionGraph::work_settled_by_upstream`] returns the open items every
 //!   such artifact of which is observed terminal (merged, or closed), so the
 //!   item is very likely done or moot. One still-open or unobserved artifact
@@ -149,13 +150,19 @@ impl DecisionGraph {
         out.into_values().collect()
     }
 
-    /// Every artifact some open tracked item waits on: what the background
-    /// observer keeps fresh.
+    /// Every artifact the document's work cites: what the background
+    /// observer keeps fresh. The artifacts open tracked items wait on, those
+    /// live queue heads cite ([`DecisionGraph::queue_head_upstreams`]), and
+    /// the pull requests the kept done entries cite
+    /// ([`DecisionGraph::done_tree_upstreams`]).
     pub fn work_upstream_set(&self, observations: &Observations) -> BTreeSet<GithubUpstream> {
-        self.work_upstreams(observations)
-            .into_iter()
-            .flat_map(|work| work.upstreams)
-            .collect()
+        let mut set = self.live_work_upstream_set(observations);
+        set.extend(
+            self.done_tree_upstreams(observations)
+                .into_iter()
+                .flat_map(|tree| tree.upstreams),
+        );
+        set
     }
 
     /// Open tracked items whose every artifact `state` reports terminal.

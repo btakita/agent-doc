@@ -110,6 +110,7 @@ impl AnswerLedgerReport {
             .filter(|signal| {
                 let about_todo_row = match signal.kind.as_str() {
                     "tracked_work_missing_todo_backlink" => false,
+                    "stale_queue_head" | "stale_done_item" => false,
                     "stale_tracked_item" | "closing_pull_request" => {
                         signal.component.as_deref() == Some("todo")
                     }
@@ -493,7 +494,11 @@ fn seed_index_from_history_once(
 fn observe_document(file: &Path, content: &str) -> agent_doc_answer_ledger::extract::Observations {
     let archives = archive_texts(file, content);
     let refs: Vec<&str> = archives.iter().map(String::as_str).collect();
-    agent_doc_answer_ledger::extract::observe(content, &refs)
+    let mut observations = agent_doc_answer_ledger::extract::observe(content, &refs);
+    observations.retain_done_trees_since(&crate::upstream_state::done_tree_cutoff(
+        agent_doc_log_time::current_epoch_secs(),
+    ));
+    observations
 }
 
 fn build_with_prior(
@@ -1109,9 +1114,11 @@ pub fn closing_pull_signals(file: &Path, content: &str) -> Vec<crate::TodoSignal
         .collect()
 }
 
-/// `#operatorshouldnneed`: every GitHub artifact an open tracked item waits on (its
-/// own cited URLs, plus the graph's `closes` edges for todo and backlog rows).
-/// What the background observation pass keeps fresh. Read-only.
+/// `#operatorshouldnneed`: every GitHub artifact the document's work cites:
+/// what an open tracked item waits on (its own cited URLs, plus the graph's
+/// `closes` edges for todo and backlog rows), what a live queue head's tree
+/// cites, and the pull requests a recent done entry cites. What the
+/// background observation pass keeps fresh. Read-only.
 pub fn work_upstream_set(
     file: &Path,
     content: &str,
@@ -1120,9 +1127,34 @@ pub fn work_upstream_set(
     graph_of(file, &ledger, &observations, content).work_upstream_set(&observations)
 }
 
+/// [`work_upstream_set`] split for refresh order: the live part (open tracked
+/// items and live queue heads) first, then the artifacts only done entries
+/// cite. Read-only.
+pub fn work_upstream_tiers(
+    file: &Path,
+    content: &str,
+) -> (
+    std::collections::BTreeSet<agent_doc_answer_ledger::graph::GithubUpstream>,
+    std::collections::BTreeSet<agent_doc_answer_ledger::graph::GithubUpstream>,
+) {
+    let (observations, ledger) = build_ledger(file, content);
+    let graph = graph_of(file, &ledger, &observations, content);
+    let live = graph.live_work_upstream_set(&observations);
+    let done_only = graph
+        .work_upstream_set(&observations)
+        .difference(&live)
+        .cloned()
+        .collect();
+    (live, done_only)
+}
+
 /// `#operatorshouldnneed`: open tracked items every artifact of which the project's
 /// observation cache records merged or closed, as `stale_tracked_item`
-/// signals (`stale_kind` `upstream_merged` / `upstream_closed`, no decision).
+/// signals (`stale_kind` `upstream_merged` / `upstream_closed`, no decision);
+/// live queue heads the same holds for, as `stale_queue_head` signals
+/// (`component` `queue:<id>`, `todo` the head's `--ack-text` selector); and
+/// recent done entries whose every pull request closed unmerged, as
+/// `stale_done_item` signals (`stale_kind` `upstream_unmerged`).
 /// Reads the cache only, never `gh`, and skips the graph build when the cache
 /// holds no terminal observation. Read-only.
 pub fn upstream_settled_signals(file: &Path, content: &str) -> Vec<crate::TodoSignal> {
@@ -1148,6 +1180,46 @@ pub fn upstream_settled_signals(file: &Path, content: &str) -> Vec<crate::TodoSi
                 decision: None,
             }
         })
+        .chain(
+            graph
+                .queue_heads_settled_by_upstream(&observations, &|upstream| {
+                    cache.state_of(upstream)
+                })
+                .into_iter()
+                .map(|found| {
+                    let mut ids = found.ids.clone();
+                    ids.extend(found.upstreams.iter().map(|(upstream, _)| upstream.url()));
+                    crate::TodoSignal {
+                        kind: "stale_queue_head".to_string(),
+                        todo: found.text,
+                        ids,
+                        action: found.action,
+                        component: Some(format!("queue:{}", found.queue)),
+                        stale_kind: Some(found.kind.as_str().to_string()),
+                        decision: None,
+                    }
+                }),
+        )
+        .chain(
+            graph
+                .done_trees_unmerged_by_upstream(&observations, &|upstream| {
+                    cache.state_of(upstream)
+                })
+                .into_iter()
+                .map(|found| {
+                    let mut ids = vec![found.item_id.clone()];
+                    ids.extend(found.upstreams.iter().map(|(upstream, _)| upstream.url()));
+                    crate::TodoSignal {
+                        kind: "stale_done_item".to_string(),
+                        todo: found.item_id,
+                        ids,
+                        action: found.action,
+                        component: Some("done".to_string()),
+                        stale_kind: Some("upstream_unmerged".to_string()),
+                        decision: None,
+                    }
+                }),
+        )
         .collect()
 }
 

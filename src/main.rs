@@ -4739,10 +4739,11 @@ enum DecisionAction {
         #[arg(long)]
         json: bool,
     },
-    /// GitHub artifacts the open tracked items wait on (`#operatorshouldnneed`):
-    /// each watched pull request or issue with its cached state, and the
-    /// items every artifact of which is merged or closed (the
-    /// `stale_tracked_item` signals preflight raises). `--refresh` first runs
+    /// GitHub artifacts the document's work cites (`#operatorshouldnneed`):
+    /// each watched pull request or issue (open tracked items, live queue
+    /// heads, recent done entries) with its cached state, and what those
+    /// states flag (the `stale_tracked_item`, `stale_queue_head` and
+    /// `stale_done_item` signals preflight raises). `--refresh` first runs
     /// one bounded observation pass with `gh`, as the background maintenance
     /// does after each admission. Never writes the document.
     Upstreams {
@@ -5108,12 +5109,14 @@ fn run_decision_action(action: DecisionAction) -> anyhow::Result<()> {
                     println!();
                 }
                 for settled in &report.settled {
-                    println!(
-                        "settled: agent:{} [#{}] {}",
-                        settled.component.as_deref().unwrap_or("?"),
-                        settled.todo,
-                        settled.stale_kind.as_deref().unwrap_or("?")
-                    );
+                    let component = settled.component.as_deref().unwrap_or("?");
+                    let kind = settled.stale_kind.as_deref().unwrap_or("?");
+                    match settled.kind.as_str() {
+                        "stale_queue_head" => {
+                            println!("settled: {component} “{}” {kind}", settled.todo);
+                        }
+                        _ => println!("settled: agent:{component} [#{}] {kind}", settled.todo),
+                    }
                 }
             }
             Ok(())

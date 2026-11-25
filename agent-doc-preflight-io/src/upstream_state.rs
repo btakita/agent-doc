@@ -11,18 +11,28 @@
 //! - **Effect**: [`run_upstream_observation_on_admitted_cut`], the last pass of
 //!   the deferred admission reconcile (`#q-e9483473162d`) that the controller's
 //!   per-document maintenance worker runs after every admission. It refreshes
-//!   the artifacts the open tracked items wait on
-//!   ([`DecisionGraph::work_upstream_set`]) that are due, with at most
-//!   [`CALLS_PER_PASS`] batched `gh api graphql` calls per pass of up to
-//!   [`ARTIFACTS_PER_CALL`] artifacts each, and never writes the document. Terminal states are never refreshed;
+//!   the due artifacts of the watch set ([`DecisionGraph::work_upstream_set`]:
+//!   open tracked items, live queue heads, and done entries archived in the
+//!   last [`DONE_TREE_WATCH_DAYS`] days), with at most [`CALLS_PER_PASS`]
+//!   batched `gh api graphql` calls per pass of up to [`ARTIFACTS_PER_CALL`]
+//!   artifacts each, live work before done entries, and never writes the
+//!   document. Terminal states are never refreshed;
 //!   an open state is refreshed after [`OPEN_TTL_SECS`]; a failed lookup is
 //!   retried after [`FAILED_LOOKUP_TTL_SECS`].
 //! - **Computed**: preflight derives `stale_tracked_item` signals with
 //!   `stale_kind` `upstream_merged` / `upstream_closed` from the cache alone
-//!   ([`DecisionGraph::work_settled_by_upstream`]); admission never runs `gh`.
+//!   ([`DecisionGraph::work_settled_by_upstream`]), `stale_queue_head` signals
+//!   for live queue heads the same way
+//!   ([`DecisionGraph::queue_heads_settled_by_upstream`]), and
+//!   `stale_done_item` signals (`upstream_unmerged`) for done entries whose
+//!   every pull request closed unmerged
+//!   ([`DecisionGraph::done_trees_unmerged_by_upstream`]); admission never
+//!   runs `gh`.
 //!
 //! [`DecisionGraph::work_upstream_set`]: agent_doc_answer_ledger::graph::DecisionGraph::work_upstream_set
 //! [`DecisionGraph::work_settled_by_upstream`]: agent_doc_answer_ledger::graph::DecisionGraph::work_settled_by_upstream
+//! [`DecisionGraph::queue_heads_settled_by_upstream`]: agent_doc_answer_ledger::graph::DecisionGraph::queue_heads_settled_by_upstream
+//! [`DecisionGraph::done_trees_unmerged_by_upstream`]: agent_doc_answer_ledger::graph::DecisionGraph::done_trees_unmerged_by_upstream
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -53,6 +63,16 @@ pub const LOOKUP_TIMEOUT: Duration = Duration::from_secs(10);
 pub const DISABLE_ENV: &str = "AGENT_DOC_UPSTREAM_OBSERVATION";
 /// The `gh` program to run (default `gh`).
 pub const GH_ENV: &str = "AGENT_DOC_GH";
+/// Done entries archived within this many days are watched; older ones are
+/// history and never looked up.
+pub const DONE_TREE_WATCH_DAYS: u64 = 14;
+
+/// The oldest archive date (`YYYY-MM-DD`, UTC) a watched done entry may carry
+/// at `now`.
+pub fn done_tree_cutoff(now: u64) -> String {
+    let since = now.saturating_sub(DONE_TREE_WATCH_DAYS * 86_400);
+    agent_doc_log_time::format_log_timestamp(since)[..10].to_string()
+}
 
 /// One cached observation. `state: None` is a failed lookup at `observed_at`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -406,20 +426,38 @@ pub fn observe_document(
     let Some(root) = agent_doc_project_root_io::project_root_containing(file) else {
         return Ok(None);
     };
-    let wanted = crate::answer_ledger::work_upstream_set(file, content);
-    if wanted.is_empty() {
+    let (live, done_only) = crate::answer_ledger::work_upstream_tiers(file, content);
+    if live.is_empty() && done_only.is_empty() {
         return Ok(None);
     }
-    observe(
+    // Live work first; done entries get the calls the pass has left.
+    let started = Instant::now();
+    let mut report = observe(
         &root,
-        &wanted,
+        &live,
         now,
         CALLS_PER_PASS,
         ARTIFACTS_PER_CALL,
         PASS_BUDGET,
         lookup,
-    )
-    .map(Some)
+    )?;
+    if !done_only.is_empty() {
+        let rest = observe(
+            &root,
+            &done_only,
+            now,
+            CALLS_PER_PASS.saturating_sub(report.calls),
+            ARTIFACTS_PER_CALL,
+            PASS_BUDGET.saturating_sub(started.elapsed()),
+            lookup,
+        )?;
+        report.wanted += rest.wanted;
+        report.observed.extend(rest.observed);
+        report.failed.extend(rest.failed);
+        report.deferred += rest.deferred;
+        report.calls += rest.calls;
+    }
+    Ok(Some(report))
 }
 
 /// The deferred admission reconcile's observation pass (`#operatorshouldnneed`).
@@ -858,6 +896,17 @@ mod tests {
             parse_graphql_response(&batch, r#"{"errors":[{"message":"Bad credentials"}]}"#),
             vec![None; 4]
         );
+    }
+
+    #[test]
+    fn done_entries_are_watched_for_fourteen_days() {
+        // 2026-11-25T00:00:00Z
+        let now = 1_795_564_800;
+        assert_eq!(
+            &agent_doc_log_time::format_log_timestamp(now)[..10],
+            "2026-11-25"
+        );
+        assert_eq!(done_tree_cutoff(now), "2026-11-11");
     }
 
     #[test]

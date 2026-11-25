@@ -370,14 +370,17 @@ pub struct TodoSignal {
     /// What the agent does about it.
     pub action: String,
     /// `#decisionstaleaudit`: the component of a `stale_tracked_item`
-    /// (`todo`, `backlog`, `review`, `icebox`).
+    /// (`todo`, `backlog`, `review`, `icebox`); `queue:<id>` for a
+    /// `stale_queue_head` and `done` for a `stale_done_item`
+    /// (`#operatorshouldnneed`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub component: Option<String>,
     /// `#decisionstaleaudit`: why it is stale (`answered_but_open`,
     /// `done_by_evidence`; flag-only `#decisionstalegraph` kinds
     /// `moot_by_decision`, `built_on_superseded`, `contradicts_decision`;
-    /// flag-only `#operatorshouldnneed` kinds `upstream_merged`, `upstream_closed`,
-    /// which carry no `decision`).
+    /// flag-only `#operatorshouldnneed` kinds `upstream_merged`, `upstream_closed`
+    /// and, on `stale_done_item`, `upstream_unmerged`, which carry no
+    /// `decision`).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub stale_kind: Option<String>,
     /// `#decisionstaleaudit`: the cited answer-ledger decision id.
@@ -12921,6 +12924,104 @@ mod tests {
                 .contains(&"https://github.com/o/r/pull/11".to_string()),
             "{ship:?}"
         );
+    }
+
+    /// `#operatorshouldnneed`: the watch set also covers live queue heads (a
+    /// bare pull-request heading with `%% title %%` notes, as in a `-prs`
+    /// queue) and the pull requests a recent done entry cites. A merged
+    /// heading is flagged with its `--ack-text` strike, a struck heading and
+    /// an old done entry are never looked up, and a done entry whose pull
+    /// request closed unmerged is flagged for a reopen.
+    #[test]
+    fn observed_upstream_state_flags_queue_heads_and_unmerged_done_entries() {
+        use agent_doc_answer_ledger::graph::UpstreamState;
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let today =
+            &agent_doc_log_time::format_log_timestamp(agent_doc_log_time::current_epoch_secs())
+                [..10];
+        let content = format!(
+            concat!(
+                "<!-- agent:run id=\"prs\" subagents keep -->\n",
+                "- ### https://github.com/o/r/pull/21\n",
+                "  - %% feat: one %%\n",
+                "- ### https://github.com/o/r/pull/22\n",
+                "  - %% feat: two %%\n",
+                "- ### ~~https://github.com/o/r/pull/23~~\n",
+                "  - %% merged %%\n",
+                "<!-- /agent:run -->\n\n",
+                "<!-- agent:done -->\n",
+                "- {today} [#abandoned] Land https://github.com/o/r/pull/24\n",
+                "- {today} [#landed] Land https://github.com/o/r/pull/25\n",
+                "- 2020-01-01 [#ancient] Land https://github.com/o/r/pull/26\n",
+                "<!-- /agent:done -->\n",
+            ),
+            today = today
+        );
+        std::fs::write(&doc, &content).unwrap();
+
+        let (live, done_only) = answer_ledger::work_upstream_tiers(&doc, &content);
+        let numbers = |set: std::collections::BTreeSet<
+            agent_doc_answer_ledger::graph::GithubUpstream,
+        >|
+         -> Vec<u64> {
+            set.into_iter().map(|upstream| upstream.number).collect()
+        };
+        assert_eq!(numbers(live), vec![21, 22]);
+        assert_eq!(numbers(done_only), vec![24, 25]);
+
+        let batches = std::cell::RefCell::new(Vec::new());
+        let lookup = |batch: &[agent_doc_answer_ledger::graph::GithubUpstream]| {
+            batches.borrow_mut().push(
+                batch
+                    .iter()
+                    .map(|upstream| upstream.number)
+                    .collect::<Vec<_>>(),
+            );
+            batch
+                .iter()
+                .map(|upstream| {
+                    Some(match upstream.number {
+                        22 => UpstreamState::Open,
+                        24 => UpstreamState::Closed,
+                        _ => UpstreamState::Merged,
+                    })
+                })
+                .collect()
+        };
+        let report = upstream_state::observe_document(&doc, &content, 1_000, &lookup)
+            .unwrap()
+            .expect("wanted artifacts");
+        assert_eq!(report.wanted, 4);
+        assert_eq!(report.observed.len(), 4);
+        // Live work is looked up first; done entries get the calls left over.
+        assert_eq!(*batches.borrow(), vec![vec![21, 22], vec![24, 25]]);
+        assert_eq!(report.calls, 2);
+
+        let signals = todo_signals_for_document(&doc, &content);
+        let heads: Vec<&TodoSignal> = signals
+            .iter()
+            .filter(|signal| signal.kind == "stale_queue_head")
+            .collect();
+        assert_eq!(heads.len(), 1, "{signals:?}");
+        assert_eq!(heads[0].todo, "https://github.com/o/r/pull/21");
+        assert_eq!(heads[0].component.as_deref(), Some("queue:prs"));
+        assert_eq!(heads[0].stale_kind.as_deref(), Some("upstream_merged"));
+        assert!(
+            heads[0]
+                .action
+                .contains("--ack-text 'https://github.com/o/r/pull/21'"),
+            "{:?}",
+            heads[0]
+        );
+        let done: Vec<&TodoSignal> = signals
+            .iter()
+            .filter(|signal| signal.kind == "stale_done_item")
+            .collect();
+        assert_eq!(done.len(), 1, "{signals:?}");
+        assert_eq!(done[0].todo, "abandoned");
+        assert_eq!(done[0].stale_kind.as_deref(), Some("upstream_unmerged"));
+        assert!(done[0].action.contains("reopen abandoned"), "{:?}", done[0]);
     }
 
     /// GH #381 repro: `.agent-doc/project.md` declares `'#review'`; the session

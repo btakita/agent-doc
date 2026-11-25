@@ -225,6 +225,7 @@ version = "0.35.591"
 dependencies = [
  "agent-doc-element",
  "agent-doc-element-backlog",
+ "agent-doc-element-queue",
  "agent-doc-hash",
  "agent-doc-principles",
  "agent-doc-queue",

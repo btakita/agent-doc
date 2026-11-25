@@ -432,6 +432,16 @@ class RemoteClientMeasuredLayoutTest {
     }
 
     @Test
+    fun anOpenEditorSessionPathCountsWhenTheFilesystemLookupMissesIt() {
+        val open = listOf("/repo/doc-b.md")
+        assertTrue(pathIsSessionDocument("/repo/doc-b.md", open) { false })
+        assertTrue(pathIsSessionDocument("/repo/./doc-b.md", open) { false })
+        assertFalse(pathIsSessionDocument("/repo/other.md", open) { false })
+        assertFalse(pathIsSessionDocument("", open) { true })
+        assertTrue(pathIsSessionDocument("/repo/a.md", emptyList()) { it == "/repo/a.md" })
+    }
+
+    @Test
     fun anUnreadableOrUnknownNativeAnswerFallsBackToTheFrozenFloor() {
         val split = snapshot(window(0, "/repo/b.md", x = 640), window(1, "/repo/a.md", x = 0))
         val expected = MeasuredMainLayout.Measured(listOf(listOf("/repo/a.md"), listOf("/repo/b.md")), "/repo/b.md")

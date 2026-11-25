@@ -26,7 +26,7 @@
 use super::*;
 use agent_doc_document_realtime::concurrent_row_ops::probe;
 
-fn temp_doc(disk: &str) -> (tempfile::TempDir, std::path::PathBuf) {
+pub(crate) fn temp_doc(disk: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     let dir = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
     let file = dir.path().join("doc.md");
@@ -35,7 +35,7 @@ fn temp_doc(disk: &str) -> (tempfile::TempDir, std::path::PathBuf) {
     (dir, file)
 }
 
-fn doc(exchange: &str, rows: &[&str]) -> String {
+pub(crate) fn doc(exchange: &str, rows: &[&str]) -> String {
     format!(
         concat!(
             "---\nagent_doc_format: template\n---\n\n",
@@ -52,14 +52,15 @@ fn doc(exchange: &str, rows: &[&str]) -> String {
     )
 }
 
-const PR: &str = "- ### https://github.com/acme/api/pull/930\n";
-const NOTE: &str = "  - %% fix(auth): always issue durable credentials %%\n";
-const OTHER: &str = "- ### https://github.com/acme/api/pull/933\n";
-const TYPED_PARTIAL: &str = "- check the deploy log for\n";
-const TYPED_MORE: &str = "- check the deploy log for the stg\n";
-const TYPED: &str = "- check the deploy log for the stg rollout\n";
+pub(crate) const PR: &str = "- ### https://github.com/acme/api/pull/930\n";
+pub(crate) const NOTE: &str = "  - %% fix(auth): always issue durable credentials %%\n";
+pub(crate) const OTHER: &str = "- ### https://github.com/acme/api/pull/933\n";
+pub(crate) const TYPED_PARTIAL: &str = "- check the deploy log for\n";
+pub(crate) const TYPED_MORE: &str = "- check the deploy log for the stg\n";
+pub(crate) const TYPED: &str = "- check the deploy log for the stg rollout\n";
 
-const WORK: &str = "I think we should use stateless JWTs. What is the reason against it?";
+pub(crate) const WORK: &str =
+    "I think we should use stateless JWTs. What is the reason against it?";
 const HANDBACK: &str = concat!(
     "**Summary:** ranked the four credential models.\n",
     "**Action items:**\n",
@@ -74,13 +75,13 @@ const RESPONSE_TREE: &str = concat!(
     "      - **State:** Follow-up work remains.\n",
 );
 
-fn queue_lines(text: &str) -> Vec<&str> {
+pub(crate) fn queue_lines(text: &str) -> Vec<&str> {
     let open = text.find("<!-- agent:queue").expect("queue open");
     let close = text.find("<!-- /agent:queue -->").expect("queue close");
     text[open..close].lines().skip(1).collect()
 }
 
-fn only_line(text: &str, needle: &str) -> usize {
+pub(crate) fn only_line(text: &str, needle: &str) -> usize {
     let hits: Vec<usize> = queue_lines(text)
         .iter()
         .enumerate()
@@ -98,7 +99,7 @@ fn only_line(text: &str, needle: &str) -> usize {
 /// report-complete's successor over `base_rows`: `☑️` on the claim, the
 /// origin's `[#q-…]` admitted, one follow-up row per action item after it, and
 /// the completion cell.
-fn report_complete(base_rows: &[&str]) -> (String, Vec<String>) {
+pub(crate) fn report_complete(base_rows: &[&str]) -> (String, Vec<String>) {
     let claimed = format!("  - 🚧 [#subagent:jwtadopt#1] {WORK}\n");
     let reported = format!("  - ☑️ [#subagent:jwtadopt#1] {WORK}\n");
     let rows: Vec<String> = base_rows
@@ -122,7 +123,7 @@ fn report_complete(base_rows: &[&str]) -> (String, Vec<String>) {
     (with_followups, outcome.inserted)
 }
 
-fn origin_id(followup: &str) -> String {
+pub(crate) fn origin_id(followup: &str) -> String {
     followup
         .strip_prefix("[#")
         .and_then(|rest| rest.split_once("] follow-up:"))
@@ -132,7 +133,7 @@ fn origin_id(followup: &str) -> String {
 
 /// `queue consume --ack-text` over `authority`: the reported row is struck,
 /// keeping its id, and the hand-back's response tree attaches under it.
-fn consume_over(authority: &str, origin_id: &str) -> String {
+pub(crate) fn consume_over(authority: &str, origin_id: &str) -> String {
     let reported = format!("  - ☑️ [#subagent:jwtadopt#1] {WORK} [#{origin_id}]\n");
     assert_eq!(
         authority.matches(&reported).count(),
@@ -147,7 +148,7 @@ fn consume_over(authority: &str, origin_id: &str) -> String {
 }
 
 /// The controller's retained projection of the pending intent over `editor`.
-fn project(file: &std::path::Path, editor: &str) -> String {
+pub(crate) fn project(file: &std::path::Path, editor: &str) -> String {
     let pending = pending_document_write(file).expect("retained");
     agent_doc_document_realtime::write_policy::rebase_retained_target_over_editor_cut(
         pending.expected_content.as_deref().expect("retained base"),
@@ -157,13 +158,19 @@ fn project(file: &std::path::Path, editor: &str) -> String {
     .unwrap()
 }
 
-fn ops_log(dir: &tempfile::TempDir) -> String {
+pub(crate) fn ops_log(dir: &tempfile::TempDir) -> String {
     std::fs::read_to_string(dir.path().join(".agent-doc/logs/ops.log")).unwrap_or_default()
 }
 
 /// The struck origin once with its id, its response tree directly under it,
 /// both follow-ups after that subtree, the operator's row once, the cell once.
-fn assert_struck_with_tree(label: &str, text: &str, id: &str, followups: &[String], typed: &str) {
+pub(crate) fn assert_struck_with_tree(
+    label: &str,
+    text: &str,
+    id: &str,
+    followups: &[String],
+    typed: &str,
+) {
     let origin = only_line(text, WORK);
     let lines = queue_lines(text);
     assert_eq!(

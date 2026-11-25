@@ -1576,8 +1576,12 @@ pub(crate) static CLI_QUEUE_CONSUME_WRITE_EFFECTS: CliQueueConsumeWriteEffects =
     CliQueueConsumeWriteEffects;
 
 impl agent_doc_queue_io::queue_consume::QueueConsumeWriteEffects for CliQueueConsumeWriteEffects {
+    /// `#composefault` root, part 2: a queue writer derives its candidate over
+    /// the document WITH any earlier binary write that is still only retained.
     fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
-        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+        agent_doc_document_realtime_io::try_resolve_current_document_content_through_retained_writes(
+            file, source,
+        )
     }
 
     fn force_disk_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
@@ -1752,8 +1756,15 @@ mod ack_text_selector_tests {
 }
 
 impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for CliQueueCommandEffects {
+    /// `#composefault` root, part 2: a queue writer (claim projection,
+    /// report-complete, mechanical closeout, sync) derives its candidate over
+    /// the document WITH any earlier binary write that is still only retained,
+    /// so the write is that write's successor instead of a branch composed
+    /// against it.
     fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
-        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+        agent_doc_document_realtime_io::try_resolve_current_document_content_through_retained_writes(
+            file, source,
+        )
     }
 
     fn converge_document_or_disk(

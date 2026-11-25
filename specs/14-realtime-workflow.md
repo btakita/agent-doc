@@ -2384,6 +2384,42 @@ The rules:
   and the operator types, correct with `concurrent_row_ops::probe::with_disabled`
   and rewriting nothing with it on) and `promotion_rekey_tests`
   (`agent-doc-merge`, the measured documents byte for byte).
+- **Binary-owned writers read through the binary's pending retained write
+  (`#composefault` root, part 2).** At 2026-11-24T21:45:07Z report-complete was
+  accepted only as a retained intent (`subagent_completion_feedback_accepted
+  delivery=retained_controller_projection`: `publish_exchange_update` retains
+  while an editor is attached and does not write the CP model). Before the
+  controller projected it, `mechanical_reported_closeout` read an authority
+  without it, rebuilt the "missing" response cell over that text, and its
+  retained successor composed the two (`stale_queue_rows_reverted reverted=1`).
+  No cut carried the retained write, so the part-1 succession could not apply.
+  - **Read side.** The CLI queue writers (`QueueCommandEffects`,
+    `QueueConsumeWriteEffects` in `src/main.rs`) and the idle-watch queue
+    lifecycle effects read
+    `try_resolve_current_document_content_through_retained_writes`: while an
+    editor is attached and a retained write is pending with its content-bearing
+    base, the authority is returned with that write projected over it by the
+    controller's own projection (`rebase_retained_target_over_editor_cut`), ops
+    log `{source}_read_through_retained_write`. An authority that already
+    carries the write (`retained_target_carried_by_cut`), a refused projection,
+    or a detached document reads as the authority. Compact, stream and claim
+    keep reading the plain authority (compact compares it with disk).
+  - **Write side.** In `apply_canonical_replace_if_attached`, a base equal to
+    the pending write's projection over the relay text is treated as the relay
+    text: the candidate is not rebased (rebasing it over the relay text would
+    read the retained write's changes as operator deletions), it is retained
+    against that projection so the retention supersedes the retained write
+    (`{source}_deferred_write_superseded_by_derived_cut`), and it is CP-written
+    over the relay text. Ops log `{source}_crdt_base_reads_through_retained_write`.
+    The pre-write barrier's exact-base supersession accepts the same base.
+
+  Regressions: `readthrough_tests` (`agent-doc-document-realtime-io`):
+  report-complete retained while the operator types and the editor never
+  acknowledges; the closeout reads through it, strikes the row and writes. The
+  retained target and the CP model are the write itself, and its projection over
+  the editor's next cut holds one struck row with its tree, then the follow-ups,
+  then the operator's row, with `concurrent_row_ops::probe::with_disabled` and,
+  with the rule on, zero rewrites and no `_deferred_write_composed`.
 
 The regression
 `typingdupe_composed_retained_write_never_reinserts_a_stale_typing_snapshot`

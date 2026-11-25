@@ -4228,6 +4228,26 @@ fn retained_prewrite_base_can_be_superseded(
         )
 }
 
+/// `#composefault` root, part 2: the same supersession when the writer read
+/// through the pending retained write, so its base is that write's projection
+/// over the relay text rather than the relay text itself.
+fn retained_prewrite_base_reads_through_retained_write(
+    file: &Path,
+    error: &anyhow::Error,
+    expected_current: &str,
+    observed: &agent_doc_crdt_relay_io::CurrentText,
+) -> bool {
+    error
+        .downcast_ref::<AwaitEditorReplicaNoDiskWrite>()
+        .is_some()
+        && matches!(
+            observed,
+            agent_doc_crdt_relay_io::CurrentText::Current { text, .. }
+                if retained_write_projection_over(file, text)
+                    .is_some_and(|read| read.projected == expected_current)
+        )
+}
+
 pub fn apply_canonical_replace_if_attached(
     file: &Path,
     expected_current: &str,
@@ -4329,6 +4349,12 @@ pub fn apply_canonical_replace_if_attached(
                     // to derive this canonical successor, the successor may subsume that
                     // pending cut. Any drift fails closed through the original typed error.
                     if retained_prewrite_base_can_be_superseded(&error, expected_current, &observed)
+                        || retained_prewrite_base_reads_through_retained_write(
+                            file,
+                            &error,
+                            expected_current,
+                            &observed,
+                        )
                     {
                         agent_doc_ops_log_io::log_op(
                             file,
@@ -4650,27 +4676,58 @@ pub fn apply_canonical_replace_if_attached(
                                 ));
                             }
                         } else {
-                            let effective_target =
-                                if relay_text == expected_current || relay_text == content {
-                                    content.to_string()
-                                } else {
-                                    let relay_text = if agent_projection_may_be_visible {
-                                        collapse_progressive_queue_projection(
-                                            expected_current,
-                                            content,
-                                            &relay_text,
-                                        )
-                                        .unwrap_or_else(|| relay_text.clone())
-                                    } else {
-                                        relay_text.clone()
-                                    };
-                                    let editor_cut = editor_operator_cut_for_agent_rebase(
-                                        file,
+                            // `#composefault` root, part 2: a writer that read
+                            // through the pending retained write derived
+                            // `content` over that write's projection onto this
+                            // relay text. The projection is the relay text plus
+                            // the retained write, so `content` needs no rebase,
+                            // and retaining it against the projection makes it
+                            // the retained write's successor. Rebasing it over
+                            // the relay text instead would read the retained
+                            // write's changes as the operator deleting them.
+                            let base_reads_through_retained_write = relay_text != expected_current
+                                && relay_text != content
+                                && retained_write_projection_over(file, &relay_text)
+                                    .is_some_and(|read| read.projected == expected_current);
+                            if base_reads_through_retained_write {
+                                agent_doc_ops_log_io::log_op(
+                                    file,
+                                    &format!(
+                                        "{source}_crdt_base_reads_through_retained_write file={} relay_hash={} base_hash={} action=successor_of_retained_write (#composefault)",
+                                        file.display(),
+                                        agent_doc_hash::content_hash(&relay_text),
+                                        agent_doc_hash::content_hash(expected_current),
+                                    ),
+                                );
+                            }
+                            let retention_base: &str = if base_reads_through_retained_write {
+                                expected_current
+                            } else {
+                                &relay_text
+                            };
+                            let effective_target = if relay_text == expected_current
+                                || relay_text == content
+                                || base_reads_through_retained_write
+                            {
+                                content.to_string()
+                            } else {
+                                let relay_text = if agent_projection_may_be_visible {
+                                    collapse_progressive_queue_projection(
                                         expected_current,
+                                        content,
                                         &relay_text,
-                                        source,
-                                    );
-                                    let merged = rebase_agent_candidate_over_editor_cut(
+                                    )
+                                    .unwrap_or_else(|| relay_text.clone())
+                                } else {
+                                    relay_text.clone()
+                                };
+                                let editor_cut = editor_operator_cut_for_agent_rebase(
+                                    file,
+                                    expected_current,
+                                    &relay_text,
+                                    source,
+                                );
+                                let merged = rebase_agent_candidate_over_editor_cut(
     file,
                             expected_current,
                             content,
@@ -4682,10 +4739,10 @@ pub fn apply_canonical_replace_if_attached(
                                             file.display()
                                         )
                                     })?;
-                                    canonicalize_and_validate_agent_rebase(
-                                        &merged, content, file, source,
-                                    )?
-                                };
+                                canonicalize_and_validate_agent_rebase(
+                                    &merged, content, file, source,
+                                )?
+                            };
                             let effective_target = canonicalize_and_validate_agent_rebase(
                                 &effective_target,
                                 content,
@@ -4765,7 +4822,7 @@ pub fn apply_canonical_replace_if_attached(
                                 {
                                     ensure_deferred_document_write_intent(
                                         file,
-                                        &relay_text,
+                                        retention_base,
                                         &effective_target,
                                         source,
                                         DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
@@ -4787,7 +4844,7 @@ pub fn apply_canonical_replace_if_attached(
                                 }
                                 let intent_id = ensure_deferred_document_write_intent(
                                     file,
-                                    &relay_text,
+                                    retention_base,
                                     &effective_target,
                                     source,
                                     DocumentWriteDeferredReason::EditorDeliveryWorkerStale,
@@ -4850,7 +4907,7 @@ pub fn apply_canonical_replace_if_attached(
                                     {
                                         ensure_deferred_document_write_intent(
                                             file,
-                                            &relay_text,
+                                            retention_base,
                                             &effective_target,
                                             source,
                                             DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
@@ -4872,7 +4929,7 @@ pub fn apply_canonical_replace_if_attached(
                                     }
                                     let intent_id = ensure_deferred_document_write_intent(
                                         file,
-                                        &relay_text,
+                                        retention_base,
                                         &effective_target,
                                         source,
                                         DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
@@ -4926,7 +4983,7 @@ pub fn apply_canonical_replace_if_attached(
                             // to reconstruct or duplicate the response.
                             let retained_intent_id = ensure_deferred_document_write_intent(
                                 file,
-                                &relay_text,
+                                retention_base,
                                 &effective_target,
                                 source,
                                 DocumentWriteDeferredReason::EditorProjectionPending,
@@ -10202,6 +10259,86 @@ pub fn try_resolve_current_document_content(
         ),
     );
     Ok(recovered)
+}
+
+/// `#composefault` root, part 2: the current document as a binary-owned writer
+/// must see it, which includes the binary's own write that is still only
+/// retained.
+///
+/// While an editor is attached, a binary write can be accepted as a retained
+/// intent without reaching the CP model (report-complete's
+/// `publish_exchange_update`, or any write whose editor delivery is pending).
+/// The controller projects that intent over the editor's text later
+/// (`retained_transition_projection_effect`). A writer that reads the
+/// authority before then does not see the accepted write: measured
+/// 2026-11-24T21:45:07Z, `mechanical_reported_closeout` read an authority
+/// without report-complete, rebuilt the "missing" response cell over it, and
+/// its retained successor composed the two (`reverted=1`).
+///
+/// This returns the pending target projected over the current text with the
+/// controller's own projection
+/// ([`write_policy::rebase_retained_target_over_editor_cut`]), so the writer's
+/// candidate already carries the retained write. The write path recognizes a
+/// base equal to that projection ([`apply_canonical_replace_if_attached`]) and
+/// the retention replaces the retained write with its successor
+/// (`{source}_deferred_write_superseded_by_derived_cut`). When the authority
+/// already carries the retained write, or the projection is refused, the
+/// authority is returned as it is.
+pub fn try_resolve_current_document_content_through_retained_writes(
+    file: &std::path::Path,
+    source: &str,
+) -> Result<String> {
+    let current = try_resolve_current_document_content(file, source)?;
+    let Some(read_through) = retained_write_projection_over(file, &current) else {
+        return Ok(current);
+    };
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "{source}_read_through_retained_write file={} intent_id={} authority_hash={} projected_hash={} (#composefault)",
+            file.display(),
+            read_through.intent_id,
+            agent_doc_hash::content_hash(&current),
+            agent_doc_hash::content_hash(&read_through.projected),
+        ),
+    );
+    Ok(read_through.projected)
+}
+
+/// The pending retained write projected over an authority cut that does not
+/// carry it yet (`#composefault` root, part 2).
+struct RetainedReadThrough {
+    intent_id: String,
+    projected: String,
+}
+
+/// `Some` when an editor is attached, a retained write is pending with its
+/// content-bearing base, `current` does not already carry it
+/// ([`write_policy::retained_target_carried_by_cut`]), and the controller's
+/// projection of it over `current` is accepted and structurally valid.
+fn retained_write_projection_over(file: &Path, current: &str) -> Option<RetainedReadThrough> {
+    if !agent_doc_crdt_relay_io::crdt_authority_for_file(file).editor_attached() {
+        return None;
+    }
+    let pending = pending_document_write(file)?;
+    let base = pending.expected_content.as_deref().filter(|base| {
+        agent_doc_hash::content_hash(base).eq_ignore_ascii_case(&pending.expected_hash)
+    })?;
+    if write_policy::retained_target_carried_by_cut(base, &pending.target_content, current) {
+        return None;
+    }
+    let projected = write_policy::rebase_retained_target_over_editor_cut(
+        base,
+        &pending.target_content,
+        current,
+    )
+    .ok()?;
+    (projected != current && agent_projection_integrity_valid(&projected)).then_some(
+        RetainedReadThrough {
+            intent_id: pending.intent_id,
+            projected,
+        },
+    )
 }
 
 /// True when durable reliable-sync liveness says an editor currently has `file`
@@ -15498,7 +15635,7 @@ mod tests {
             .restore_liveness(ops);
     }
 
-    fn seed_reliable_sync_open(file: &std::path::Path, tag: &str) {
+    pub(crate) fn seed_reliable_sync_open(file: &std::path::Path, tag: &str) {
         let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         let timestamp_ms = std::time::SystemTime::now()
@@ -15548,7 +15685,7 @@ mod tests {
         );
     }
 
-    fn seed_reliable_sync_close(file: &std::path::Path, tag: &str) {
+    pub(crate) fn seed_reliable_sync_close(file: &std::path::Path, tag: &str) {
         let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
         let document_hash = agent_doc_hash::document_id_for_path(&canonical);
         push_test_liveness(
@@ -22707,3 +22844,7 @@ mod composefault_tests;
 #[cfg(test)]
 #[path = "chainedwrite_tests.rs"]
 mod chainedwrite_tests;
+
+#[cfg(test)]
+#[path = "readthrough_tests.rs"]
+mod readthrough_tests;

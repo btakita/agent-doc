@@ -552,9 +552,13 @@ impl IdleQueueLifecycleEffects {
 impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
     for IdleQueueProjectionSelfHealEffects
 {
+    /// `#composefault` root, part 2: read through any binary write that is
+    /// still only retained, like the CLI queue writers.
     fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
         self.ensure_active()?;
-        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+        agent_doc_document_realtime_io::try_resolve_current_document_content_through_retained_writes(
+            file, source,
+        )
     }
 
     fn converge_document_or_disk(
@@ -604,9 +608,13 @@ impl agent_doc_queue_io::queue_cmd::QueueRuntimeProjectionEffects
 }
 
 impl agent_doc_queue_io::queue_cmd::QueueCommandEffects for IdleQueueLifecycleEffects {
+    /// `#composefault` root, part 2: read through any binary write that is
+    /// still only retained, like the CLI queue writers.
     fn current_document_content(&self, file: &Path, source: &str) -> anyhow::Result<String> {
         self.ensure_active()?;
-        agent_doc_document_realtime_io::try_resolve_current_document_content(file, source)
+        agent_doc_document_realtime_io::try_resolve_current_document_content_through_retained_writes(
+            file, source,
+        )
     }
 
     fn converge_document_or_disk(

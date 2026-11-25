@@ -878,7 +878,7 @@ fn foreign_draft_queued_message(
             queued.prompt_text, queued.appended, queued.already_present, queued.superseded,
         )
     } else {
-        "did not queue the session trigger as work because agent:queue already has other work. The supervisor submits Run Agent Doc for that work after the composer and any turn it starts drain".to_string()
+        "did not record the session trigger in agent:queue. Nothing was typed or submitted, and the supervisor has no queued Run Agent Doc to dispatch after the composer drains".to_string()
     };
     format!(
         "[route] pane {pane} composer holds an unrelated unsubmitted draft; preserved it \
@@ -920,11 +920,11 @@ fn try_pre_dispatch_stranded_draft_submit(
         // appended with no separator, and the harness submitted the single line
         // `agent-doc tasks/api.mdagent-doc /abs/.../tasks/api.md`. Preflight then
         // refused a document path that never existed. The draft is not ours to
-        // clear and appending to it can only produce a wrong path. Preserve it.
-        // The queue keeps this trigger only when it has no other prompt, so the
-        // idle drain can still wake after the draft clears. Other queued work
-        // already submits the trigger; that invocation is not a work head.
-        // Repeated Run Agent Doc actions coalesce instead of growing a retry list.
+        // clear and appending to it can only produce a wrong path. Preserve it
+        // and queue this trigger even when agent:queue already has other work.
+        // The supervisor submits Run Agent Doc for that queued trigger after
+        // the draft (and any turn it starts) drains. Repeated Run Agent Doc
+        // actions coalesce instead of growing a retry list.
         let queued = enqueue_route_dispatch_prompt(
             file,
             &trigger,
@@ -1613,8 +1613,10 @@ mod tests {
         assert!(!message.contains("re-run the trigger"));
     }
 
+    /// Other queue work is not a reason to drop the trigger. An enqueue that
+    /// actually recorded nothing must not claim the trigger was queued.
     #[test]
-    fn foreign_draft_with_other_queue_work_does_not_claim_the_trigger_was_queued() {
+    fn foreign_draft_message_does_not_claim_a_queue_the_enqueue_did_not_record() {
         let message = foreign_draft_queued_message(
             "%10",
             "Build anything",
@@ -1627,7 +1629,8 @@ mod tests {
                 activated: false,
             },
         );
-        assert!(message.contains("did not queue the session trigger as work"));
+        assert!(message.contains("did not record the session trigger"));
+        assert!(!message.contains("did not queue the session trigger as work"));
         assert!(!message.contains("queued pending dispatch"));
         assert!(message.contains("ui_outcome=queued_behind_owner"));
         assert!(message.contains("preserved it without typing or submitting it"));

@@ -709,6 +709,16 @@
         "pane_not_visible_notice": null,
         "queue_paused": null,
         "snapshot_path": "",
+        "summary": "Agent Doc is still running for plan.md.\nThe Claude pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
+      },
+      "frozen_expected": {
+        "agent_switch_deferred": null,
+        "kind": "busy_running",
+        "layout_not_synced_notice": null,
+        "owned_by_other_lane_notice": null,
+        "pane_not_visible_notice": null,
+        "queue_paused": null,
+        "snapshot_path": "",
         "summary": "Agent Doc is still running for plan.md.\nThe Codex pane has an active turn and is not ready for another routed follow-up yet. Wait for the turn to finish, then run Agent Doc again."
       }
     },

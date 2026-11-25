@@ -1123,10 +1123,10 @@ impl HarnessConfig {
     /// the unclassified deferral as a persistent failure. Permission prompts
     /// are not this proof: those can clear inside the wait.
     pub fn active_turn_budget_abort_cue(&self, output: &str) -> Option<String> {
-        if self.binary == "grok" {
-            if let Some(reason) = grok::blocker(output) {
-                return Some(reason);
-            }
+        if self.binary == "grok"
+            && let Some(reason) = grok::blocker(output)
+        {
+            return Some(reason);
         }
         self.busy_proof_line(output)
     }

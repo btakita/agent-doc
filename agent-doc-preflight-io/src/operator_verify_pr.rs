@@ -12,8 +12,10 @@ use std::collections::BTreeSet;
 use std::path::Path;
 use std::time::Duration;
 
+#[cfg(test)]
+use agent_doc_answer_ledger::graph::UpstreamState;
 use agent_doc_answer_ledger::graph::{
-    GithubUpstream, OperatorVerifyPrStrike, UpstreamState, operator_verify_pr_watches,
+    GithubUpstream, OperatorVerifyPrStrike, operator_verify_pr_watches,
     reevaluate_operator_verify_prs,
 };
 use anyhow::Result;

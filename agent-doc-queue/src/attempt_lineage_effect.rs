@@ -91,6 +91,12 @@ impl PullRequestLifecycle {
             _ => None,
         }
     }
+
+    /// A merged or closed pull request ends a goal loop on that pull request
+    /// (`#mergedprgoal`). Another address or review generation cannot land.
+    pub fn ends_goal_loop(self) -> bool {
+        matches!(self, Self::Merged | Self::Closed)
+    }
 }
 
 /// Why a cited pull request counts as the row lineage's effect.
@@ -130,6 +136,30 @@ impl LineageEffectProof {
             Self::RecordedReceipt { .. } => "recorded_receipt",
             Self::Provenance { .. } => "provenance",
         }
+    }
+}
+
+/// The one pull request a goal row is about (`#mergedprgoal`).
+///
+/// The claim text wins when it cites exactly one pull request, which is how a
+/// pipe stage keeps its parent after agent-doc nests the later stage:
+/// `https://github.com/…/pull/102: #address: #adversarial-pr`. A bare stage
+/// such as `#adversarial-pr` uses `ancestor_pull_url`, the single pull-request
+/// heading above that row. Zero or several citations is `None`.
+pub fn goal_subject_pull_request(
+    item_text: &str,
+    ancestor_pull_url: Option<&str>,
+) -> Option<CitedPullRequest> {
+    let cited = cited_pull_requests(item_text);
+    match cited.len() {
+        1 => cited.into_iter().next(),
+        0 => ancestor_pull_url.and_then(|url| {
+            let cited = cited_pull_requests(url);
+            (cited.len() == 1)
+                .then(|| cited.into_iter().next())
+                .flatten()
+        }),
+        _ => None,
     }
 }
 
@@ -313,6 +343,31 @@ mod tests {
             head_sha: "7913f3cb7190a2bca86b1fc6f4bcd505c91c2a51".to_string(),
             state,
         }
+    }
+
+    #[test]
+    fn mergedprgoal_a_pipe_claim_names_one_pull_request_and_a_merged_one_ends_the_loop() {
+        let pipe = "https://github.com/haiven-dev/haiven-docs/pull/102: #address: #adversarial-pr";
+        let subject = goal_subject_pull_request(pipe, None).unwrap();
+        assert_eq!(subject.number, 102);
+        assert_eq!(subject.repo, "haiven-docs");
+        assert!(PullRequestLifecycle::Merged.ends_goal_loop());
+        assert!(PullRequestLifecycle::Closed.ends_goal_loop());
+        assert!(!PullRequestLifecycle::Open.ends_goal_loop());
+        let bare = goal_subject_pull_request(
+            "#adversarial-pr",
+            Some("https://github.com/haiven-dev/haiven-docs/pull/102"),
+        )
+        .unwrap();
+        assert_eq!(bare.url(), subject.url());
+        assert!(goal_subject_pull_request("#adversarial-pr", None).is_none());
+        assert!(
+            goal_subject_pull_request(
+                "https://github.com/acme/a/pull/1 and https://github.com/acme/b/pull/2",
+                Some("https://github.com/acme/a/pull/1"),
+            )
+            .is_none()
+        );
     }
 
     /// The `stgsdkmod` sequence: generation 1 opened #402 at 22:14Z and was

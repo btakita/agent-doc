@@ -5366,6 +5366,58 @@ pub fn bare_github_artifact_url(text: &str) -> Option<String> {
     })
 }
 
+/// The one pull-request heading above the row `item` names (`#mergedprgoal`).
+///
+/// A pipe stage that agent-doc nested under a finished `✅ … |>` row is only
+/// the later preset (`#adversarial-pr`). The pull request is the heading
+/// above it. Several ancestor pull requests, or none, is `None`.
+pub fn sole_ancestor_pull_request_url(content: &str, item: &str) -> Option<String> {
+    let components = agent_doc_element::element::parse(content).ok()?;
+    let mut found = Vec::new();
+    for component in components
+        .iter()
+        .filter(|component| matches!(component.name.as_str(), "queue" | "run" | "loop"))
+    {
+        let Ok(entries) = parse(component.content(content)) else {
+            continue;
+        };
+        let Some(index) = (0..entries.len()).find(|&index| {
+            matches!(entries[index], QueueEntry::Prompt(_))
+                && row_matches_head_text(&entries, index, item)
+        }) else {
+            continue;
+        };
+        let Some(prompt) = prompt_of(&entries[index]) else {
+            continue;
+        };
+        let mut indent = prompt.indent;
+        let mut urls = Vec::new();
+        for prior in (0..index).rev() {
+            let Some(parent) = prompt_of(&entries[prior]) else {
+                continue;
+            };
+            if parent.indent >= indent {
+                continue;
+            }
+            indent = parent.indent;
+            if let Some(url) = bare_github_artifact_url(&parent.text)
+                && url.contains("/pull/")
+            {
+                urls.push(url);
+            }
+            if indent == 0 {
+                break;
+            }
+        }
+        match urls.len() {
+            1 => found.push(urls.remove(0)),
+            0 => {}
+            _ => return None,
+        }
+    }
+    (found.len() == 1).then(|| found.remove(0))
+}
+
 /// A heading row's work text with its presentation wrappers removed.
 fn bare_heading_work(text: &str) -> String {
     let mut work = text.trim().to_string();
@@ -6231,6 +6283,21 @@ mod unique_child_vector_regression_tests {
             Some(
                 "https://github.com/haiven-dev/haiven-api/pull/823: #adversarial-pr ⟦effect:2⟧ [#q-222222222222]"
             )
+        );
+    }
+
+    #[test]
+    fn mergedprgoal_a_nested_adversarial_stage_uses_the_pull_request_heading() {
+        let content = concat!(
+            "<!-- agent:run id=haiven-docs-prs subagents -->\n",
+            "- ### https://github.com/haiven-dev/haiven-docs/pull/102\n",
+            "  - ✅ #address |>\n",
+            "    - #adversarial-pr\n",
+            "<!-- /agent:run -->\n",
+        );
+        assert_eq!(
+            sole_ancestor_pull_request_url(content, "#adversarial-pr").as_deref(),
+            Some("https://github.com/haiven-dev/haiven-docs/pull/102")
         );
     }
 }

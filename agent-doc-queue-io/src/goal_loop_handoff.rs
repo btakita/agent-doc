@@ -21,6 +21,10 @@
 //! retires the row's recorded hand-off. Closeout of the row is still gated by
 //! the coordinator response carrying a final-state line
 //! ([`agent_doc_queue::goal_preset_terminal`]).
+//!
+//! `#mergedprgoal`: a merged or closed subject pull request also takes that
+//! report path. A pipe that nested `#adversarial-pr` under a finished address
+//! stage is still that pull request, so it does not gain another generation.
 
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -30,6 +34,26 @@ use agent_doc_queue::goal_preset_terminal::{
 };
 use agent_doc_queue::queue_claim::QueueClaim;
 use anyhow::{Context, Result};
+
+/// `#mergedprgoal`: GitHub says the row's one subject pull request is merged
+/// or closed. `None` when the row names no single pull request or GitHub was
+/// not read.
+pub fn settled_subject_state(
+    content: &str,
+    item_text: &str,
+    observe: &mut impl FnMut(
+        &agent_doc_queue::attempt_lineage_effect::CitedPullRequest,
+    ) -> Option<agent_doc_queue::attempt_lineage_effect::PullRequestFacts>,
+) -> Option<agent_doc_queue::attempt_lineage_effect::PullRequestLifecycle> {
+    let ancestor =
+        agent_doc_queue::document_queue::sole_ancestor_pull_request_url(content, item_text);
+    let subject = agent_doc_queue::attempt_lineage_effect::goal_subject_pull_request(
+        item_text,
+        ancestor.as_deref(),
+    )?;
+    let facts = observe(&subject)?;
+    facts.state.ends_goal_loop().then_some(facts.state)
+}
 
 fn now_secs() -> u64 {
     SystemTime::now()
@@ -173,6 +197,28 @@ pub fn requeue_nonterminal_hand_back(
     generation: Option<u64>,
     response: &str,
 ) -> Result<Option<GoalLoopRequeue>> {
+    requeue_nonterminal_hand_back_with(
+        file,
+        content,
+        item,
+        generation,
+        response,
+        crate::attempt_lineage_effect::github_pull_request_facts,
+    )
+}
+
+/// [`requeue_nonterminal_hand_back`] reading the subject pull request with
+/// `observe` (`#mergedprgoal`).
+pub fn requeue_nonterminal_hand_back_with(
+    file: &Path,
+    content: &str,
+    item: &str,
+    generation: Option<u64>,
+    response: &str,
+    mut observe: impl FnMut(
+        &agent_doc_queue::attempt_lineage_effect::CitedPullRequest,
+    ) -> Option<agent_doc_queue::attempt_lineage_effect::PullRequestFacts>,
+) -> Result<Option<GoalLoopRequeue>> {
     let ledger = crate::queue_claim::load_ledger_following(file, content)?;
     // `#reportcompleteselector`: the same selector resolution as the report.
     let Some(claim) = ledger.resolve_selector(item)?.cloned() else {
@@ -181,6 +227,34 @@ pub fn requeue_nonterminal_hand_back(
     if !claim.owner.starts_with("subagent:")
         || crate::queue_claim::bound_attempt_is_structural_context(content, &claim)
     {
+        return Ok(None);
+    }
+    // `#mergedprgoal`: the subject pull request already merged or closed.
+    // Report this hand-back instead of requeuing another generation. A stale
+    // generation still falls through to the existing generation guard.
+    if generation.is_none_or(|generation| generation == claim.generation)
+        && let Some(state) = settled_subject_state(content, &claim.item_text, &mut observe)
+    {
+        let reportable = reopen_if_reportable_lost(file, &claim, generation, response)?;
+        if reportable {
+            let identity = claim.identity.clone();
+            let live = agent_doc_queue::queue_continuation::live_queue_head_identities(content);
+            mutate(file, |ledger| {
+                ledger.forget(&identity);
+                if let Some(live) = live.as_ref() {
+                    ledger.retain_live(live);
+                }
+            })?;
+        }
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "queue_goal_loop_settled_pull_request owner={} generation={} state={state:?} item_bytes={} (#mergedprgoal)",
+                claim.owner,
+                claim.generation,
+                claim.item_text.trim().len(),
+            ),
+        );
         return Ok(None);
     }
     let presets =

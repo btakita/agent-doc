@@ -152,7 +152,7 @@ fn requeue_prompt_pressure_hand_back_with(
     generation: Option<u64>,
     response: &str,
     delivered: bool,
-    observe: impl FnMut(
+    mut observe: impl FnMut(
         &agent_doc_queue::attempt_lineage_effect::CitedPullRequest,
     ) -> Option<agent_doc_queue::attempt_lineage_effect::PullRequestFacts>,
 ) -> Result<Option<PromptPressureRequeue>> {
@@ -189,6 +189,18 @@ fn requeue_prompt_pressure_hand_back_with(
             "stale queue claim generation {generation}; current generation is {}",
             claim.generation
         );
+    }
+    // `#mergedprgoal`: a merged or closed subject pull request is a report,
+    // not another prompt-pressure generation. The nested `#adversarial-pr`
+    // stage is still that pull request.
+    if agent_doc_queue_io::goal_loop_handoff::settled_subject_state(
+        &current,
+        &claim.item_text,
+        &mut observe,
+    )
+    .is_some()
+    {
+        return Ok(None);
     }
     let presets =
         agent_doc_frontmatter_io::session::effective_prompt_presets_for_drain(&current, file);
@@ -2484,6 +2496,101 @@ mod tests {
         let reported = report_complete(&doc, ROW, Some(generation), None, None, clean)
             .expect("the final-state hand-back is reported normally");
         assert!(reported.appended);
+    }
+
+    /// `#mergedprgoal`: `#address |> #adversarial-pr` nested the review stage
+    /// and kept requeuing it after the pull request merged. A merged subject
+    /// takes the report path. An open one still requeues.
+    #[test]
+    fn merged_subject_pull_request_does_not_requeue_the_nested_stage() {
+        fn session(
+            state: agent_doc_queue::attempt_lineage_effect::PullRequestLifecycle,
+        ) -> tempfile::TempDir {
+            let dir = tempfile::tempdir().unwrap();
+            fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+            fs::write(
+                dir.path().join(".agent-doc/project.md"),
+                concat!(
+                    "---\npresets:\n",
+                    "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                    "  '#adversarial-pr': >-\n",
+                    "    /goal Bring the pull request to an independently review-clean exact\n",
+                    "    remote head.\n\n",
+                    "    Final states. Your final message must begin with exactly one of these\n",
+                    "    lines:\n",
+                    "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                    "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                    "---\n",
+                ),
+            )
+            .unwrap();
+            let doc = dir.path().join("prs.md");
+            fs::write(
+                &doc,
+                concat!(
+                    "---\nagent_doc_session: sample-prs\nagent_doc_format: template\n---\n\n",
+                    "<!-- agent:exchange patch=append -->\n",
+                    "### Re: prior — gpt-5\n\nDone.\n",
+                    "<!-- agent:boundary:keep -->\n",
+                    "<!-- /agent:exchange -->\n\n",
+                    "<!-- agent:run id=haiven-docs-prs subagents -->\n",
+                    "- https://github.com/haiven-dev/haiven-docs/pull/102: #address: #adversarial-pr\n",
+                    "<!-- /agent:run -->\n",
+                ),
+            )
+            .unwrap();
+            const ROW: &str =
+                "https://github.com/haiven-dev/haiven-docs/pull/102: #address: #adversarial-pr";
+            agent_doc_queue_io::queue_claim::claim(&doc, ROW, "subagent:pr102", 600).unwrap();
+            agent_doc_queue_io::queue_claim::start_attempt(
+                &doc,
+                ROW,
+                "subagent:pr102",
+                "worker:pr102",
+                600,
+                1,
+            )
+            .unwrap();
+            let hand_back = "Posted one review. The nested stage is still open.\n";
+            let content = fs::read_to_string(&doc).unwrap();
+            let facts = agent_doc_queue::attempt_lineage_effect::PullRequestFacts {
+                created_at_secs: 1,
+                head_ref: "docs".to_string(),
+                head_sha: "abc".to_string(),
+                state,
+            };
+            let requeue =
+                agent_doc_queue_io::goal_loop_handoff::requeue_nonterminal_hand_back_with(
+                    &doc,
+                    &content,
+                    ROW,
+                    Some(1),
+                    hand_back,
+                    |_| Some(facts.clone()),
+                )
+                .unwrap();
+            let ledger = agent_doc_queue_io::queue_claim::load_ledger(&doc).unwrap();
+            let claim = ledger
+                .claims
+                .iter()
+                .find(|claim| claim.owner == "subagent:pr102")
+                .unwrap();
+            if state.ends_goal_loop() {
+                assert!(requeue.is_none(), "{requeue:?}");
+                assert!(
+                    claim.blocks_dispatch(claim.claimed_at_secs),
+                    "a settled pull request must not release the attempt"
+                );
+            } else {
+                assert!(requeue.is_some(), "an open pull request still requeues");
+                assert!(!claim.blocks_dispatch(claim.claimed_at_secs));
+            }
+            dir
+        }
+
+        let _open = session(agent_doc_queue::attempt_lineage_effect::PullRequestLifecycle::Open);
+        let _merged =
+            session(agent_doc_queue::attempt_lineage_effect::PullRequestLifecycle::Merged);
     }
 
     /// `#crossagenthandoff`: `#address then #adversarial-pr` with a landed

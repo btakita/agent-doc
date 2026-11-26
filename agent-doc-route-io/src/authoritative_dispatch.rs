@@ -574,12 +574,33 @@ fn running_turn_submission_observation(
     capture: &str,
 ) -> RunningTurnSubmissionObservation {
     let harness_cfg = HarnessConfig::from_agent_name(harness);
+    let composer =
+        agent_doc_harness::steering_delivery::running_turn_follow_up_composer(harness, capture);
+    let injected = composer_still_holds_injected_text(&harness_cfg, capture);
+    // `#groksteerdeliver`: send-now ends the busy cue, and the interrupt hint
+    // can outlive the Enter that already cleared the composer. An empty box
+    // is the delivery. A draft still fails closed.
+    if harness_cfg.binary == "grok" && !injected {
+        match &composer {
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
+                return RunningTurnSubmissionObservation::Delivered;
+            }
+            agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {
+                reason,
+            } if reason
+                == agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason() =>
+            {
+                return RunningTurnSubmissionObservation::Delivered;
+            }
+            _ => {}
+        }
+    }
     if !harness_cfg.has_busy_cue(capture) {
         return RunningTurnSubmissionObservation::Unreadable;
     }
-    match agent_doc_harness::steering_delivery::running_turn_follow_up_composer(harness, capture) {
+    match composer {
         agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Empty => {
-            if composer_still_holds_injected_text(&harness_cfg, capture) {
+            if injected {
                 RunningTurnSubmissionObservation::Draft
             } else {
                 RunningTurnSubmissionObservation::Delivered
@@ -1106,6 +1127,7 @@ fn retain_unreadable_operator_draft(
     ))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn submit_prepared_running_turn_steering(
     tmux: &(impl agent_doc_tmux_io::TmuxCommandRunner + ?Sized),
     file: &Path,
@@ -1114,6 +1136,7 @@ fn submit_prepared_running_turn_steering(
     harness_cfg: &HarnessConfig,
     prepared: &agent_doc_session_check_io::midturn_steering::RouteSyncSteering,
     poll_interval: Duration,
+    send_now: bool,
 ) -> RunningTurnSteeringClaim {
     if let Err(err) = agent_doc_tmux_io::paste_bracketed_text_and_submit(
         tmux,
@@ -1153,6 +1176,26 @@ fn submit_prepared_running_turn_steering(
             ));
         }
     };
+    // `#groksteerdeliver`: plain Enter only queues while Grok is generating.
+    // A second Enter on the emptied composer is send-now (Ctrl+Enter does not
+    // survive tmux). The interrupt hint already ran the first Enter, so it
+    // does not get this one. Pool refills never reach here.
+    if send_now {
+        if let Err(err) = agent_doc_tmux_io::send_key(tmux, pane, "Enter") {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "route_sync_steering_not_delivered file={} pane={pane} harness={harness} error={} (#groksteerdeliver)",
+                    file.display(),
+                    one_line_error(&err)
+                ),
+            );
+            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+                file,
+                &format!("tmux did not accept send-now ({})", one_line_error(&err)),
+            ));
+        }
+    }
     if let Err(err) = agent_doc_controller_io::live_turn_follow_up::mark_live_turn_follow_up_queued(
         file,
         &prepared.cycle_id,
@@ -1265,9 +1308,17 @@ fn running_turn_steering_claim_polled(
             agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Blocked {
                 reason,
             } => {
-                return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
-                    file, &reason,
-                ));
+                // `#groksteerdeliver`: an empty composer on the interrupt hint
+                // takes one Enter. Grok runs that message now. Any other block
+                // still sends nothing. A draft returned above and is not
+                // submitted. Pool refills do not use this path.
+                if reason != agent_doc_harness::steering_delivery::grok_blocked_wait_enter_reason()
+                {
+                    return RunningTurnSteeringClaim::NotDelivered(
+                        route_sync_steering_not_delivered(file, &reason),
+                    );
+                }
+                None
             }
             agent_doc_harness::steering_delivery::RunningTurnFollowUpComposer::Unreadable => {
                 return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
@@ -1335,6 +1386,8 @@ fn running_turn_steering_claim_polled(
             ));
         }
     }
+    let send_now = harness_cfg.binary == "grok"
+        && !agent_doc_harness::grok_enter_cancels_blocked_wait(&capture);
     match submit_prepared_running_turn_steering(
         tmux,
         file,
@@ -1343,6 +1396,7 @@ fn running_turn_steering_claim_polled(
         &harness_cfg,
         &prepared,
         poll_interval,
+        send_now,
     ) {
         RunningTurnSteeringClaim::Count(count) => {
             if let Some((stash, preview)) = stashed.as_ref() {
@@ -1369,7 +1423,10 @@ fn running_turn_steering_claim_polled(
 
 /// `#steercoalesce`: the controller accepted this Run Agent Doc as steering
 /// for the turn already running. Deliver the pending diff once. A coalesced
-/// reopen does not paste again and does not fail the route.
+/// reopen does not paste again once that delivery is proven. It still submits
+/// when the pending request never reached the composer (`#groksteerdeliver`):
+/// skipping that call reported `steering_delivered=0` for a fold the live
+/// turn cannot see.
 pub fn finish_operator_live_turn_steering(
     tmux: &Tmux,
     file: &Path,
@@ -1378,22 +1435,16 @@ pub fn finish_operator_live_turn_steering(
     generation: u64,
     coalesced: bool,
 ) -> Result<String> {
-    let delivered = if coalesced {
-        None
-    } else {
-        claimed_running_turn_steering(
-            tmux,
-            file,
-            dispatch_pane,
-            &harness.binary,
-            true,
-            "route_live_turn_steering_target_not_visible",
-        )
-    };
-    if !coalesced && delivered.is_none() {
+    let Some(delivered) = claimed_running_turn_steering(
+        tmux,
+        file,
+        dispatch_pane,
+        &harness.binary,
+        true,
+        "route_live_turn_steering_target_not_visible",
+    ) else {
         return Ok(dispatch_pane.to_string());
-    }
-    let delivered = delivered.unwrap_or(0);
+    };
     let fields = agent_doc_flow::outcome::user_outcome_fields(
         agent_doc_flow::outcome::UserFacingOutcomeKind::SteeringDeliveredToOwner,
     );
@@ -3390,6 +3441,25 @@ mod tests {
         )
     }
 
+    fn grok_live_frame(draft: &str) -> String {
+        format!(
+            "Waiting for response… 1.0s [stop]\n\
+             ╭────────────────────────╮\n\
+             │ ❯ {draft} │\n\
+             ╰──── Grok 4.7 (high) ───╯\n\
+             Ctrl+c:cancel │ Ctrl+x:shortcuts\n"
+        )
+    }
+
+    fn grok_idle_frame(draft: &str) -> String {
+        format!(
+            "╭────────────────────────╮\n\
+             │ ❯ {draft} │\n\
+             ╰──── Grok 4.7 (high) ───╯\n\
+             Shift+Tab:mode  │  Ctrl+x:shortcuts\n"
+        )
+    }
+
     fn grok_unreadable_frame(_draft: &str) -> String {
         "Waiting for response… 1.0s [stop]\nno composer box\n".to_string()
     }
@@ -3628,6 +3698,124 @@ mod tests {
             runner.mutating_keys().is_empty(),
             "{:?}",
             runner.mutating_keys()
+        );
+    }
+
+    /// `#groksteerdeliver`: the interrupt hint with an empty composer is the
+    /// explicit send. One Enter runs the message. A second claim does not.
+    #[test]
+    fn grok_blocked_wait_with_an_empty_composer_submits_once() {
+        let (_dir, file) = settled_explicit_send();
+        let runner = DraftComposer::new("", "3", grok_blocked_frame);
+        let claim = claim_polled(&runner, &file, "grok");
+        let RunningTurnSteeringClaim::Count(delivered) = claim else {
+            panic!("an empty blocked-wait composer submits the explicit send: {claim:?}");
+        };
+        assert!(delivered >= 1, "{delivered}");
+        assert_eq!(runner.submitted().len(), 1, "{:?}", runner.submitted());
+        assert!(
+            runner.submitted()[0].contains("agent-doc steering"),
+            "{:?}",
+            runner.submitted()
+        );
+        assert_eq!(
+            runner
+                .mutating_keys()
+                .iter()
+                .filter(|key| key.as_str() == "Enter")
+                .count(),
+            1,
+            "{:?}",
+            runner.mutating_keys()
+        );
+
+        let again = claim_polled(&runner, &file, "grok");
+        assert_eq!(
+            again,
+            RunningTurnSteeringClaim::Count(0),
+            "the delivered diff is not sent again"
+        );
+        assert_eq!(
+            runner.submitted().len(),
+            1,
+            "a coalesced send does not paste again"
+        );
+        assert_eq!(
+            runner
+                .mutating_keys()
+                .iter()
+                .filter(|key| key.as_str() == "Enter")
+                .count(),
+            1,
+            "a coalesced send does not press Enter again: {:?}",
+            runner.mutating_keys()
+        );
+    }
+
+    /// `#groksteerdeliver`: a live Grok turn that is not on the interrupt hint
+    /// queues a plain Enter. The second Enter is send-now, once.
+    #[test]
+    fn grok_explicit_send_on_a_live_turn_sends_now_once() {
+        let (_dir, file) = settled_explicit_send();
+        let runner = DraftComposer::new("", "3", grok_live_frame);
+        let claim = claim_polled(&runner, &file, "grok");
+        let RunningTurnSteeringClaim::Count(delivered) = claim else {
+            panic!("a live empty composer sends the explicit follow-up now: {claim:?}");
+        };
+        assert!(delivered >= 1, "{delivered}");
+        assert_eq!(runner.submitted().len(), 1, "{:?}", runner.submitted());
+        assert_eq!(
+            runner
+                .mutating_keys()
+                .iter()
+                .filter(|key| key.as_str() == "Enter")
+                .count(),
+            2,
+            "{:?}",
+            runner.mutating_keys()
+        );
+
+        let before = runner.mutating_keys().len();
+        let again = claim_polled(&runner, &file, "grok");
+        assert_eq!(
+            again,
+            RunningTurnSteeringClaim::Count(0),
+            "the delivered diff is not sent again"
+        );
+        assert_eq!(runner.submitted().len(), 1);
+        assert_eq!(
+            runner.mutating_keys().len(),
+            before,
+            "the queued reference is not submitted again: {:?}",
+            runner.mutating_keys()
+        );
+    }
+
+    #[test]
+    fn grok_send_now_that_drops_the_busy_cue_still_counts_as_delivered() {
+        let idle = grok_idle_frame("");
+        assert!(
+            matches!(
+                running_turn_submission_observation("grok", &idle),
+                RunningTurnSubmissionObservation::Delivered
+            ),
+            "an empty composer after send-now is the delivery"
+        );
+        let blocked = grok_blocked_frame("");
+        assert!(
+            matches!(
+                running_turn_submission_observation("grok", &blocked),
+                RunningTurnSubmissionObservation::Delivered
+            ),
+            "the interrupt hint can outlive the Enter that cleared the composer"
+        );
+        let draft = grok_blocked_frame("keep this draft");
+        assert!(
+            matches!(
+                running_turn_submission_observation("grok", &draft),
+                RunningTurnSubmissionObservation::Draft
+            ),
+            "a draft under the interrupt hint is not a delivery"
         );
     }
 

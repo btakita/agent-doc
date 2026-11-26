@@ -191,8 +191,9 @@ pub fn follow_up_composer(output: &str) -> FollowUpComposer {
         };
     }
     // Checked after a real draft so an unsent note stays protected, and
-    // before Empty: this status is not a composer that can take Enter.
-    // The pool refill uses the same predicate (`#blockedwaitentercancels`).
+    // before Empty. The pool refill treats this as not a composer that can
+    // take Enter (`#blockedwaitentercancels`). An explicit Run Agent Doc is
+    // the exception (`#groksteerdeliver`): one Enter runs that message now.
     if enter_cancels_blocked_wait(output) {
         return FollowUpComposer::EnterCancels;
     }

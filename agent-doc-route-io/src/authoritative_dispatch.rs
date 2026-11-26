@@ -1180,21 +1180,19 @@ fn submit_prepared_running_turn_steering(
     // A second Enter on the emptied composer is send-now (Ctrl+Enter does not
     // survive tmux). The interrupt hint already ran the first Enter, so it
     // does not get this one. Pool refills never reach here.
-    if send_now {
-        if let Err(err) = agent_doc_tmux_io::send_key(tmux, pane, "Enter") {
-            agent_doc_ops_log_io::log_op(
-                file,
-                &format!(
-                    "route_sync_steering_not_delivered file={} pane={pane} harness={harness} error={} (#groksteerdeliver)",
-                    file.display(),
-                    one_line_error(&err)
-                ),
-            );
-            return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
-                file,
-                &format!("tmux did not accept send-now ({})", one_line_error(&err)),
-            ));
-        }
+    if send_now && let Err(err) = agent_doc_tmux_io::send_key(tmux, pane, "Enter") {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "route_sync_steering_not_delivered file={} pane={pane} harness={harness} error={} (#groksteerdeliver)",
+                file.display(),
+                one_line_error(&err)
+            ),
+        );
+        return RunningTurnSteeringClaim::NotDelivered(route_sync_steering_not_delivered(
+            file,
+            &format!("tmux did not accept send-now ({})", one_line_error(&err)),
+        ));
     }
     if let Err(err) = agent_doc_controller_io::live_turn_follow_up::mark_live_turn_follow_up_queued(
         file,

@@ -2257,7 +2257,7 @@ mod pane_count_drift_model {
 /// `#ideriderindependentnav` / `#idefocusowner` reference model: two JetBrains
 /// installations (IntelliJ IDEA and Rider) plus an unscoped editor publish
 /// focus claims, passive layout heartbeats, and explicit claims (`Sync Tmux
-/// Layout`, the sync after `Claim Session File`) into one project. Layout
+/// Layout`, the sync after `Claim Control Session`) into one project. Layout
 /// ownership is keyed by [`agent_doc_editor_surface::LayoutOwnerKey`] (root +
 /// navigation lane) and decided by the production
 /// [`agent_doc_editor_surface::InstallationFocus`] fold; a driving layout
@@ -2422,7 +2422,7 @@ mod two_ide_navigation_model {
     enum Event {
         Focus(usize),
         Layout(usize),
-        /// An explicit claim: `Sync Tmux Layout` or `Claim Session File`.
+        /// An explicit claim: `Sync Tmux Layout` or `Claim Control Session`.
         Claim(usize),
         Retire(usize),
         /// The project switches `editor_navigation` (P5).

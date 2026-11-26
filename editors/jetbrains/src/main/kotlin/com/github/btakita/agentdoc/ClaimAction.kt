@@ -119,6 +119,25 @@ class ClaimAction : ImplAction {
 
         internal fun shouldSyncLayoutAfterClaim(exitCode: Int): Boolean = exitCode == 0
 
+        internal const val CONTROL_SESSION_DIALOG_TITLE = "Claim Control Session — Cross-Session"
+
+        /** Column hint for `claim --position`, from the focused editor split. */
+        internal fun editorPosition(project: Project, file: VirtualFile): String? {
+            val layoutRelPath = TerminalUtil.relativePath(project, file)
+            val managerEx = FileEditorManagerEx.getInstanceEx(project)
+            val editorLayout = if (managerEx.windows.size > 1)
+                LayoutDetector.detectEditorLayout(project) else null
+            return editorLayout?.let { layout ->
+                val colIdx = layout.columns.indexOfFirst { col -> layoutRelPath in col.files }
+                when {
+                    colIdx < 0 -> null
+                    colIdx == 0 -> "left"
+                    colIdx == layout.columns.size - 1 -> "right"
+                    else -> null
+                }
+            }
+        }
+
         /**
          * `clientId` (`#ideriderindependentnav` P6) names this IDE's navigation lane: with
          * `editor_navigation = "per_installation"` a pane the claim provisions lives in this
@@ -148,24 +167,8 @@ class ClaimAction : ImplAction {
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
 
         val (cwd, relativePath) = TerminalUtil.resolveProject(project, file)
-
-        // Determine position from editor layout so claim targets the correct tmux pane.
         // Without --position, claim falls back to the last active tmux pane (wrong).
-        // LayoutDetector maps horizontal splits to left/right columns, vertical to same column.
-        // LayoutDetector still uses workspace-relative paths, so compare against those.
-        val layoutRelPath = TerminalUtil.relativePath(project, file)
-        val managerEx = FileEditorManagerEx.getInstanceEx(project)
-        val editorLayout = if (managerEx.windows.size > 1)
-            LayoutDetector.detectEditorLayout(project) else null
-        val position = editorLayout?.let { layout ->
-            val colIdx = layout.columns.indexOfFirst { col -> layoutRelPath in col.files }
-            when {
-                colIdx < 0 -> null                         // file not found in layout
-                colIdx == 0 -> "left"
-                colIdx == layout.columns.size - 1 -> "right"
-                else -> null                               // middle column — skip for now
-            }
-        }
+        val position = editorPosition(project, file)
 
         launchClaim(
             project,
@@ -179,7 +182,7 @@ class ClaimAction : ImplAction {
         )
     }
 
-    private fun launchClaim(
+    internal fun launchClaim(
         project: Project,
         file: VirtualFile,
         cwd: String,
@@ -188,6 +191,7 @@ class ClaimAction : ImplAction {
         force: Boolean,
         newPane: Boolean,
         allowCrossSessionPrompt: Boolean,
+        dialogTitle: String = CONTROL_SESSION_DIALOG_TITLE,
     ) {
         val fence = try {
             ClaimDocumentFence.acquire(project, file)
@@ -233,6 +237,7 @@ class ClaimAction : ImplAction {
                             relativePath,
                             position,
                             reject,
+                            dialogTitle,
                         )
                     }
                 }
@@ -288,13 +293,14 @@ class ClaimAction : ImplAction {
         relativePath: String,
         position: String?,
         reject: CrossSessionReject,
+        dialogTitle: String,
     ) {
         GenerationWork.invokeLater {
             val choice = Messages.showDialog(
                 project,
                 "Pane ${reject.paneId} is in tmux session '${reject.paneSession}', but this project's " +
                     "configured session is '${reject.configured}'.\n\nHow do you want to claim it?",
-                "Claim Session File — Cross-Session",
+                dialogTitle,
                 arrayOf("New Pane in This Session", "Force Claim", "Switch Project Session", "Cancel"),
                 0,
                 Messages.getQuestionIcon(),
@@ -302,15 +308,16 @@ class ClaimAction : ImplAction {
             when (choice) {
                 0 -> runClaimChoice(
                     project, file, cwd, agentDoc, relativePath, position,
-                    switchTo = null, force = false, newPane = true,
+                    switchTo = null, force = false, newPane = true, dialogTitle = dialogTitle,
                 )
                 1 -> runClaimChoice(
                     project, file, cwd, agentDoc, relativePath, position,
-                    switchTo = null, force = true, newPane = false,
+                    switchTo = null, force = true, newPane = false, dialogTitle = dialogTitle,
                 )
                 2 -> runClaimChoice(
                     project, file, cwd, agentDoc, relativePath, position,
                     switchTo = reject.paneSession, force = false, newPane = false,
+                    dialogTitle = dialogTitle,
                 )
                 else -> { /* Cancel — leave the file unclaimed, no mutation */ }
             }
@@ -332,6 +339,7 @@ class ClaimAction : ImplAction {
         switchTo: String?,
         force: Boolean,
         newPane: Boolean,
+        dialogTitle: String,
     ) {
         if (switchTo != null) {
             GenerationWork.executeOnPooledThread {
@@ -352,6 +360,7 @@ class ClaimAction : ImplAction {
                             force,
                             newPane,
                             allowCrossSessionPrompt = false,
+                            dialogTitle,
                         )
                     }
                 }
@@ -367,6 +376,7 @@ class ClaimAction : ImplAction {
             force,
             newPane,
             allowCrossSessionPrompt = false,
+            dialogTitle,
         )
     }
 

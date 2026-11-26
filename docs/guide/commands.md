@@ -46,7 +46,7 @@ agent-doc init <FILE> [TITLE] --artifact <ARTIFACT.md>
 
 Scaffold a new session document with YAML frontmatter and a `## User` block. Fails if the file already exists.
 
-`--artifact` writes an artifact session instead: `<FILE>` is a template control session whose queue names only `<ARTIFACT.md>`, and `<ARTIFACT.md>` is ordinary markdown with no agent markers and no `## Draft`. The worker edits that whole file. The binary keeps writing inside the session elements.
+`--artifact` writes an artifact session instead: `<FILE>` is a template control session whose queue names only `<ARTIFACT.md>`, and `<ARTIFACT.md>` is ordinary markdown with no agent markers and no `## Draft`. A missing artifact is created. An existing ordinary markdown artifact is left unchanged. An artifact that is already an agent-doc session is refused. The worker edits that whole file. The binary keeps writing inside the session elements.
 
 ## diff
 

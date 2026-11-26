@@ -31743,14 +31743,67 @@ fn test_agent_doc_document_owns_claim_scaffold_policy() {
     .unwrap();
     assert!(
         jetbrains_claim.contains("mutableListOf(agentDoc, \"claim\", relativePath)"),
-        "JetBrains Claim Session File must delegate template generation to agent-doc claim"
+        "JetBrains Claim Control Session must delegate template generation to agent-doc claim"
     );
 
     let vscode_claim =
         fs::read_to_string(manifest_dir.join("editors/vscode/src/extension.ts")).unwrap();
     assert!(
         vscode_claim.contains("const args = ['claim', rel];"),
-        "VS Code Claim Session File must delegate template generation to agent-doc claim"
+        "VS Code Claim Control Session must delegate template generation to agent-doc claim"
+    );
+
+    let plugin_xml = fs::read_to_string(
+        manifest_dir.join("editors/jetbrains/src/main/resources/META-INF/plugin.xml"),
+    )
+    .unwrap();
+    assert!(
+        plugin_xml.contains("id=\"AgentDoc.Claim\"")
+            && plugin_xml.contains("text=\"Claim Control Session\"")
+            && plugin_xml.contains("text=\"Force Claim Control Session\"")
+            && plugin_xml.contains("id=\"AgentDoc.ClaimArtifact\"")
+            && plugin_xml.contains("text=\"Claim Artifact Session\"")
+            && !plugin_xml.contains("Claim Session File")
+            && !plugin_xml.contains("agent:artifact"),
+        "JetBrains command ids stay stable while the visible titles name control and artifact sessions"
+    );
+    let package_json =
+        fs::read_to_string(manifest_dir.join("editors/vscode/package.json")).unwrap();
+    assert!(
+        package_json.contains("\"command\": \"agentDoc.claim\"")
+            && package_json.contains("\"title\": \"Agent Doc: Claim Control Session\"")
+            && package_json.contains("\"command\": \"agentDoc.forceClaim\"")
+            && package_json.contains("\"title\": \"Agent Doc: Force Claim Control Session\"")
+            && package_json.contains("\"command\": \"agentDoc.claimArtifact\"")
+            && package_json.contains("\"title\": \"Agent Doc: Claim Artifact Session\"")
+            && !package_json.contains("Claim Session File"),
+        "VS Code command ids stay stable while the visible titles name control and artifact sessions"
+    );
+    let popup = fs::read_to_string(manifest_dir.join("editors/vscode/src/popupMenu.ts")).unwrap();
+    assert!(
+        popup.contains("id: 'claim'")
+            && popup.contains("Claim Control Session")
+            && popup.contains("id: 'claimArtifact'")
+            && popup.contains("Claim Artifact Session")
+            && popup.contains("id: 'forceClaim'"),
+        "VS Code popup keeps claim ids and publishes Claim Artifact Session"
+    );
+    let artifact_action = fs::read_to_string(manifest_dir.join(
+        "editors/jetbrains/src/main/kotlin/com/github/btakita/agentdoc/ClaimArtifactAction.kt",
+    ))
+    .unwrap();
+    assert!(
+        artifact_action.contains("\"init\"")
+            && artifact_action.contains("\"--artifact\"")
+            && !artifact_action.contains("agent:artifact"),
+        "JetBrains Claim Artifact Session must delegate to agent-doc init --artifact"
+    );
+    let artifact_helper =
+        fs::read_to_string(manifest_dir.join("editors/vscode/src/claimArtifact.ts")).unwrap();
+    assert!(
+        artifact_helper.contains("return ['init', controlRel, '--artifact', artifactRel];")
+            && vscode_claim.contains("buildArtifactInitArgs"),
+        "VS Code Claim Artifact Session must delegate to agent-doc init --artifact"
     );
 }
 

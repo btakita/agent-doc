@@ -84,7 +84,7 @@ spec. `agent-doc init <SESSION.md> --artifact <ARTIFACT.md>` writes both files.
 The session keeps `agent_doc_format: template`, `agent:run`, and
 `agent:exchange`, and its queue names only the artifact path. The artifact is
 ordinary markdown: no `agent:*` marker, no `agent_doc_format`, and no
-`## Draft`. There is no `agent:artifact` element.
+`## Draft`. There is no `agent:artifact` element. An existing ordinary markdown artifact is left unchanged; init still refuses an artifact that is already an agent-doc session.
 Structured presets may also declare `model` and `effort` for queue-dispatched
 subagents. Queue-marker overrides win, then item-specific and queue presets,
 then the session's `subagent_model` / `subagent_effort` defaults. Omitted policy

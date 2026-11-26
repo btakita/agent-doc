@@ -24,7 +24,8 @@ Interactive document sessions with AI agents. Edit markdown documents in your ed
 | Command | Keybinding | Description |
 |---------|-----------|-------------|
 | Agent Doc: Run (Submit) | `Ctrl+Shift+Alt+A` | Route `/agent-doc` command to the correct Claude session |
-| Agent Doc: Claim Session File | `Ctrl+Shift+Alt+C` | Claim the current document for this tmux pane |
+| Agent Doc: Claim Control Session | `Ctrl+Shift+Alt+C` | Claim the current document for this tmux pane |
+| Agent Doc: Claim Artifact Session | | Create a control session aimed at the open markdown file and claim that control session |
 | Agent Doc: Sync Layout | `Ctrl+Shift+Alt+L` | Sync tmux panes to match editor tab layout |
 | Agent Doc: Show Session Status | none | Show binary-owned session status for the current document |
 | Agent Doc: Recycle Supervisor | none | Recycle the binary supervisor for the current document |

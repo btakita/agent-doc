@@ -125,9 +125,17 @@
         </action>
         <action id="AgentDoc.Claim"
                 class="com.github.btakita.agentdoc.shell.ClaimForwarder"
-                text="Claim Session File"
+                text="Claim Control Session"
                 description="Claim this document for the currently active tmux pane">
             <keyboard-shortcut first-keystroke="ctrl shift alt C" keymap="$default"/>
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+            <add-to-group group-id="EditorPopupMenu" anchor="last"/>
+            <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
+        </action>
+        <action id="AgentDoc.ClaimArtifact"
+                class="com.github.btakita.agentdoc.shell.ClaimArtifactForwarder"
+                text="Claim Artifact Session"
+                description="Create a control session aimed at this ordinary markdown file and claim that control session">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
             <add-to-group group-id="ProjectViewPopupMenu" anchor="last"/>
@@ -142,7 +150,7 @@
         </action>
         <action id="AgentDoc.ForceClaim"
                 class="com.github.btakita.agentdoc.shell.ForceClaimForwarder"
-                text="Force Claim Session File"
+                text="Force Claim Control Session"
                 description="Force-claim this document, overriding existing pane bindings">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>

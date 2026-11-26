@@ -42,6 +42,7 @@ describe('popupMenu', () => {
                 'startAgentDoc',
                 'runWithJunie',
                 'forceClaim',
+                'claimArtifact',
                 'stopAgent',
                 'cancelTurn',
                 'killSupervisor',

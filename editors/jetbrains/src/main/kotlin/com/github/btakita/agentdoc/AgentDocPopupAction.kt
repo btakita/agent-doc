@@ -54,6 +54,7 @@ class AgentDocPopupAction : ImplAction {
             "AgentDoc.UpdateChannel",
             "AgentDoc.RunWithJunie",
             "AgentDoc.ForceClaim",
+            "AgentDoc.ClaimArtifact",
             // The explicit interrupting clear remains behind More Actions.
             "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.ResyncFixSessions",

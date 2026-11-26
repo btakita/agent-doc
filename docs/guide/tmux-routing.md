@@ -62,7 +62,7 @@ Each installation then gets its own lane session `<tmux_session>-<installation>`
 with `agent-doc` and `stash` windows. A document's pane stays in the lane that
 started it: another IDE's layout heartbeats drop it (`cross_lane_layout_dropped` in
 `ops.log`) and its focus is refused (`owned_by_other_lane`) instead of moving the
-pane. To move it, run **Sync Tmux Layout** or **Claim Session File** in the other
+pane. To move it, run **Sync Tmux Layout** or **Claim Control Session** in the other
 IDE: that explicit request hands the pane over to the requesting IDE's lane
 (`navigation_lane_handoff`) and the IDE that lost it re-arranges without it. VS Code and older JetBrains plugins stay on the shared session. The mode is
 read when the project controller starts; an unknown value logs a warning and
@@ -76,7 +76,7 @@ pass the IDE's client id (`agent-doc claim --client-id <id>`; `agent-doc route` 
 lives; only an explicit Claim or Sync Tmux Layout moves it. **Run Agent Doc** on a
 document whose pane lives in another IDE's lane runs it in that pane, leaves this
 IDE's tmux layout as it was, and shows a notice naming the lane the pane is in
-(`owned_by_other_lane`); use Claim Session File to bring it over. When a supervisor
+(`owned_by_other_lane`); use Claim Control Session to bring it over. When a supervisor
 that a layout pass left out restarts, each IDE's lane that left it out re-applies
 its own last layout in its own session; that re-arrangement never takes a pane
 from another IDE's lane.

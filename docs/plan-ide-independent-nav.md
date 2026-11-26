@@ -269,7 +269,7 @@ What landed (the original scope follows below):
 - Sync body: the lane guard is re-applied after a passive focus-only expansion, which restores
   columns from the project-wide remembered layout and could otherwise join another lane's pane
   (found by the end-to-end handoff test).
-- Editors: no plugin change. Sync Tmux Layout, and the sync Claim Session File / Force Claim /
+- Editors: no plugin change. Sync Tmux Layout, and the sync Claim Control Session / Force Claim /
   Load Tmux Window run after `agent-doc claim`, already publish `caller_kind = manual` with
   `client_id` (P3), which is the explicit claim. Every passive kind never moves a pane.
 - Shared mode: no lane sessions are resolved, so no handoff; behavior is unchanged.
@@ -295,7 +295,7 @@ What landed (the original scope follows below):
 Original scope:
 
 - Default rule from P2: the pane stays in the lane that owns it.
-- Explicit handoff: `Claim Session File` or manual `Sync Tmux Layout` in the other
+- Explicit handoff: `Claim Control Session` or manual `Sync Tmux Layout` in the other
   IDE moves the pane (`join-pane` across sessions). It records the ownership
   transfer in the actor store and publishes a fresh epoch to both lanes, so the old
   lane drops the column.
@@ -514,7 +514,7 @@ Landed on branch `ridernavp6route` (`#ridernavp6route`, open item (a) of P5).
   without `--force`.
 - JetBrains: the `editor_route` payload (classic and command-plane) carries `client_id`
   (`CpRouteClient.navigationClientId`); `ClaimAction.buildClaimCommand` appends `--client-id`
-  for Claim Session File, its New Pane recovery, and Force Claim. Plugin and binary ship together.
+  for Claim Control Session, its New Pane recovery, and Force Claim. Plugin and binary ship together.
 - Verification: unit tests and a proptest of the placement; controller tests (a lane client's
   editor route publishes only into its lane graph and hands the route its client; no client, an
   unscoped client, and shared mode publish into the shared lane; payload parsing); start-io

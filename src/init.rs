@@ -11,7 +11,9 @@
 //!     scaffolds a new session document.  Fails if the file already exists.
 //!   - With `--artifact PLAN.md`: the session is a template control document whose `agent:run`
 //!     names only that path. `PLAN.md` is ordinary markdown (no `agent:*` marker, no
-//!     `agent_doc_format`, no `## Draft`). `--mode append` is refused.
+//!     `agent_doc_format`, no `## Draft`). A missing artifact is created. An existing ordinary
+//!     markdown artifact is left unchanged. An artifact that is already an agent-doc session is
+//!     refused. `--mode append` is refused.
 //! - `init_file` scaffolds two document formats depending on `mode`:
 //!   - `"template"` or `"stream"`: frontmatter with `agent_doc_format: template` and
 //!     `agent_doc_write: crdt`; body contains a single `<!-- agent:exchange -->` component.
@@ -38,6 +40,8 @@
 //! - init_file_already_exists: target file exists → returns Err
 //! - artifact_session_is_template_aimed_at_one_plain_markdown_file: `--artifact` writes a template
 //!   session whose queue names only that file, and the artifact has no agent markers.
+//! - artifact_session_keeps_an_existing_ordinary_markdown_file: an existing ordinary artifact is
+//!   not rewritten, and a file that is already a session is refused.
 
 use anyhow::Result;
 use std::path::{Component, Path, PathBuf};
@@ -208,9 +212,6 @@ fn write_new_session(
         anyhow::bail!("file already exists: {}", file.display());
     }
     if let Some(artifact) = artifact {
-        if artifact.exists() {
-            anyhow::bail!("file already exists: {}", artifact.display());
-        }
         if paths_name_the_same_file(file, artifact) {
             anyhow::bail!(
                 "artifact path must be a different file from the session: {}",
@@ -221,6 +222,14 @@ fn write_new_session(
     }
 
     let label = artifact.map(artifact_queue_label).transpose()?;
+    let created_artifact = match artifact {
+        Some(path) if path.exists() => {
+            ensure_existing_artifact_stays_ordinary(path)?;
+            false
+        }
+        Some(_) => true,
+        None => false,
+    };
     let title = match (title, artifact) {
         (Some(title), _) => title.to_string(),
         (None, Some(artifact)) => title_from_path(artifact),
@@ -252,19 +261,35 @@ fn write_new_session(
         )
     };
 
-    if let Some(artifact) = artifact {
+    if let Some(artifact) = artifact
+        && created_artifact
+    {
         write_artifact_file(artifact)?;
     }
     if let Err(error) = write_session_file(file, &content) {
-        if let Some(artifact) = artifact {
+        if created_artifact && let Some(artifact) = artifact {
             let _ = std::fs::remove_file(artifact);
         }
         return Err(error);
     }
-    if let Some(artifact) = artifact {
+    if created_artifact && let Some(artifact) = artifact {
         eprintln!("Created artifact {}", artifact.display());
     }
     eprintln!("Created {}", file.display());
+    Ok(())
+}
+
+fn ensure_existing_artifact_stays_ordinary(artifact: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(artifact)?;
+    if text.contains("agent_doc_session:")
+        || text.contains("agent_doc_format:")
+        || text.contains("<!-- agent:")
+    {
+        anyhow::bail!(
+            "artifact is already an agent-doc session: {}",
+            artifact.display()
+        );
+    }
     Ok(())
 }
 
@@ -567,12 +592,12 @@ mod tests {
     }
 
     #[test]
-    fn artifact_session_refuses_an_existing_or_non_markdown_artifact() {
+    fn artifact_session_keeps_an_existing_ordinary_markdown_file() {
         let dir = tempfile::tempdir().unwrap();
         let session = dir.path().join("session.md");
         let artifact = dir.path().join("plan.md");
         std::fs::write(&artifact, "already\n").unwrap();
-        let error = write_new_session(
+        write_new_session(
             &session,
             None,
             None,
@@ -580,11 +605,40 @@ mod tests {
             Some(&artifact),
             &Config::default(),
         )
-        .unwrap_err();
-        assert!(error.to_string().contains("already exists"), "{error}");
-        assert!(!session.exists());
+        .unwrap();
         assert_eq!(std::fs::read_to_string(&artifact).unwrap(), "already\n");
+        let session_text = std::fs::read_to_string(&session).unwrap();
+        assert!(session_text.contains("agent_doc_format: template"));
+        assert!(session_text.contains(&artifact.display().to_string()));
+        assert!(!session_text.contains("agent:artifact"));
 
+        let session_file = dir.path().join("taken.md");
+        std::fs::write(&artifact, "<!-- agent:run -->\nalready\n").unwrap();
+        let error = write_new_session(
+            &session_file,
+            None,
+            None,
+            Some("template"),
+            Some(&artifact),
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert!(
+            error.to_string().contains("already an agent-doc session"),
+            "{error}"
+        );
+        assert!(!session_file.exists());
+        assert!(
+            std::fs::read_to_string(&artifact)
+                .unwrap()
+                .contains("already\n")
+        );
+    }
+
+    #[test]
+    fn artifact_session_refuses_a_non_markdown_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
         let notes = dir.path().join("notes.txt");
         let error = write_new_session(&session, None, None, None, Some(&notes), &Config::default())
             .unwrap_err();

@@ -65,7 +65,7 @@ pub fn cross_session_decision_with_lease(
 }
 
 /// Cross-session claim gate that treats the operator's current tmux session as
-/// authoritative for manual pane claiming. This lets `Claim Session File`
+/// authoritative for manual pane claiming. This lets `Claim Control Session`
 /// follow the live `agent-doc` window without rewriting the configured project
 /// `tmux_session`.
 pub fn cross_session_decision_with_current(

@@ -38688,7 +38688,7 @@ struct LaneRoutedLayout {
 /// columns (`cross_lane_layout_dropped`), so the structural effect can never
 /// `join-pane` it across sessions; a focus target among them is dropped too.
 /// An explicit claim (`manual`: `Sync Tmux Layout`, the sync that follows
-/// `Claim Session File`) keeps those documents and lists their panes as
+/// `Claim Control Session`) keeps those documents and lists their panes as
 /// handoffs for the worker to move into this lane first (P4). An installation
 /// lane targets its own session's `agent-doc` window explicitly. Without lane
 /// sessions (shared navigation mode) this is identity.

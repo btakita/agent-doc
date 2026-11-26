@@ -35,6 +35,12 @@ import {
     CrossSessionReject,
 } from './crossSession.js';
 import {
+    acceptableControlPath,
+    buildArtifactInitArgs,
+    defaultControlSessionPath,
+    normalizeSessionPath,
+} from './claimArtifact.js';
+import {
     buildEditorRoutePayload,
     buildEditorRouteCommandMessage,
     buildEditorRouteSuccessHint,
@@ -2276,6 +2282,66 @@ async function forceClaimAction(): Promise<void> {
     await claimActionInternal(true);
 }
 
+async function claimArtifactAction(): Promise<void> {
+    const editor = vscode.window.activeTextEditor;
+    if (!editor || !isMarkdown(editor)) return;
+
+    const root = getWorkspaceRoot(editor.document.uri);
+    if (!root) {
+        showError('File is not in a workspace');
+        return;
+    }
+    if (editor.document.isDirty && !(await editor.document.save())) {
+        showError('Save the document before claiming an artifact session');
+        return;
+    }
+    if (commandRunning) {
+        showHint('Command already in progress');
+        return;
+    }
+
+    const { cwd, relativePath: artifactRel } = resolveProject(root, editor.document.uri.fsPath);
+    const entered = await vscode.window.showInputBox({
+        title: 'Claim Artifact Session',
+        prompt: 'Control session path. This file is claimed. The open markdown file stays an ordinary artifact.',
+        value: defaultControlSessionPath(artifactRel),
+        ignoreFocusOut: true,
+    });
+    if (entered === undefined) return;
+    const controlRel = normalizeSessionPath(entered);
+    if (!acceptableControlPath(controlRel, artifactRel)) {
+        showError('Control session must be a different .md file');
+        return;
+    }
+
+    commandRunning = true;
+    let crossSession: CrossSessionReject | undefined;
+    let recoveryPosition: string | undefined;
+    try {
+        const controlAbs = path.resolve(cwd, controlRel);
+        if (!fs.existsSync(controlAbs)) {
+            await runCli(buildArtifactInitArgs(controlRel, artifactRel), cwd);
+        }
+        recoveryPosition = (await captureGroupLayout(root, editor.document.uri)).position ?? undefined;
+        const output = await runCli(buildCrossSessionClaimArgs(controlRel, recoveryPosition, {}), cwd);
+        showHint(output || `Claimed artifact session ${controlRel} for ${artifactRel}`);
+        await syncLayoutInternal(cwd, false, true);
+    } catch (err: any) {
+        const reject = parseCrossSessionReject(err?.message ?? '');
+        if (reject) {
+            crossSession = reject;
+        } else {
+            showError(`claim artifact session failed: ${err.message}`);
+        }
+    } finally {
+        commandRunning = false;
+    }
+
+    if (crossSession) {
+        await handleCrossSessionReject(cwd, controlRel, recoveryPosition, crossSession);
+    }
+}
+
 async function claimActionInternal(force: boolean): Promise<void> {
     const editor = vscode.window.activeTextEditor;
     if (!editor || !isMarkdown(editor)) return;
@@ -2745,6 +2811,9 @@ async function popupMenuAction(): Promise<void> {
                     break;
                 case 'forceClaim':
                     await forceClaimAction();
+                    break;
+                case 'claimArtifact':
+                    await claimArtifactAction();
                     break;
                 case 'stopAgent':
                     await stopAgentAction();
@@ -4033,6 +4102,10 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     // Feature 2: Claim
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.claim', claimAction)
+    );
+
+    context.subscriptions.push(
+        vscode.commands.registerCommand('agentDoc.claimArtifact', claimArtifactAction)
     );
 
     context.subscriptions.push(

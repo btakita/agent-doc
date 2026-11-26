@@ -881,7 +881,7 @@ lives in another lane of the project (`cross_lane_layout_dropped`), both in the
 controller before the effect and in the sync body after column memory and after
 a passive focus-only expansion, so a pane never changes session through a
 passive layout sync. The one exception is an explicit claim (P4): a `manual`
-layout publication (`Sync Tmux Layout`, the sync after `Claim Session File`)
+layout publication (`Sync Tmux Layout`, the sync after `Claim Control Session`)
 hands a contended document's pane over to the requesting lane, only between
 lane sessions agent-doc owns (the pin or a lane session marked
 `@agent_doc_navigation_lane` for this root), and republishes the lane it left

@@ -113,6 +113,7 @@ class AgentDocImplGeneration : ImplGeneration {
             "AgentDoc.LintDocument" to ::LintDocumentAction,
             "AgentDoc.RunWithJunie" to ::RunWithJunieAction,
             "AgentDoc.Claim" to ::ClaimAction,
+            "AgentDoc.ClaimArtifact" to ::ClaimArtifactAction,
             "AgentDoc.CompactExchange" to ::CompactExchangeAction,
             "AgentDoc.ForceClaim" to ::ForceClaimAction,
             "AgentDoc.SyncLayout" to ::SyncLayoutAction,

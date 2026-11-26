@@ -51,6 +51,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.UpdateChannel",
                 "AgentDoc.RunWithJunie",
                 "AgentDoc.ForceClaim",
+                "AgentDoc.ClaimArtifact",
                 "AgentDoc.InterruptClearSessionContext",
                 // #plugin-cleanup-menu-command: operator session-hygiene commands
                 // live in the overflow group (occasional, project-scoped cleanup).

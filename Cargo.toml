@@ -224,6 +224,7 @@ agent-doc-element-backlog-runtime-io = { path = "agent-doc-element-backlog-runti
 agent-doc-element-boundary = { path = "agent-doc-element-boundary", version = "0.35.594" }
 agent-doc-element-exchange = { path = "agent-doc-element-exchange", version = "0.35.594" }
 agent-doc-element-exchange-io = { path = "agent-doc-element-exchange-io", version = "0.35.594" }
+agent-doc-element-queue = { path = "agent-doc-element-queue", version = "0.35.594" }
 agent-doc-element-review = { path = "agent-doc-element-review", version = "0.35.594" }
 agent-doc-ffi = { path = "agent-doc-ffi", version = "0.35.594" }
 agent-doc-effect-cas = { path = "agent-doc-effect-cas", version = "0.35.594" }

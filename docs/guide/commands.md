@@ -41,12 +41,16 @@ Flow:
 
 ```
 agent-doc init <FILE> [TITLE] [--agent NAME]
-agent-doc init <FILE> [TITLE] --artifact <ARTIFACT.md>
+agent-doc init <FILE> [TITLE] --artifact <ARTIFACT.md> [--artifact <ARTIFACT.md> ...]
+agent-doc artifact bind <SESSION.md> <ARTIFACT.md>...
+agent-doc artifact unbind <SESSION.md> <ARTIFACT.md>...
 ```
 
 Scaffold a new session document with YAML frontmatter and a `## User` block. Fails if the file already exists.
 
-`--artifact` writes an artifact session instead: `<FILE>` is a template control session whose queue names only `<ARTIFACT.md>`, and `<ARTIFACT.md>` is ordinary markdown with no agent markers and no `## Draft`. A missing artifact is created. An existing ordinary markdown artifact is left unchanged. An artifact that is already an agent-doc session is refused. The worker edits that whole file. The binary keeps writing inside the session elements.
+`--artifact` writes an artifact session instead: `<FILE>` is a template control session whose queue names each `<ARTIFACT.md>`, and each artifact is ordinary markdown with no agent markers and no `## Draft`. Repeat `--artifact` to keep more than one artifact on that one control session. A missing artifact is created. An existing ordinary markdown artifact is left unchanged. An artifact that is already an agent-doc session is refused. The worker edits each whole file. The binary keeps writing inside the session elements.
+
+`artifact bind` appends a queue row for an existing template session and creates the markdown file when it is missing. `artifact unbind` removes that row and leaves the file on disk. Neither command commits. Closeout still commits the control file only.
 
 ## diff
 

@@ -79,12 +79,18 @@ an associated runbook is loaded only when that preset is invoked.
 Doc preserves their spelling, while new documents and generated components use
 `agent:run`.
 
-An artifact session is one of those template sessions aimed at a single plan or
-spec. `agent-doc init <SESSION.md> --artifact <ARTIFACT.md>` writes both files.
-The session keeps `agent_doc_format: template`, `agent:run`, and
-`agent:exchange`, and its queue names only the artifact path. The artifact is
-ordinary markdown: no `agent:*` marker, no `agent_doc_format`, and no
-`## Draft`. There is no `agent:artifact` element. An existing ordinary markdown artifact is left unchanged; init still refuses an artifact that is already an agent-doc session.
+An artifact session is one of those template sessions aimed at one or more
+plans or specs. `agent-doc init <SESSION.md> --artifact <ARTIFACT.md>` writes
+the files; repeat `--artifact` for more than one. The session keeps
+`agent_doc_format: template`, `agent:run`, and `agent:exchange`, and its queue
+names each artifact path. `agent-doc artifact bind` and
+`agent-doc artifact unbind` attach and detach a path after init. The artifact
+is ordinary markdown: no `agent:*` marker, no `agent_doc_format`, and no
+`## Draft`. There is no `agent:artifact` element. An existing ordinary markdown
+artifact is left unchanged; init still refuses an artifact that is already an
+agent-doc session. Closeout commits the control file. An artifact is not
+committed merely because the turn ended.
+
 Structured presets may also declare `model` and `effort` for queue-dispatched
 subagents. Queue-marker overrides win, then item-specific and queue presets,
 then the session's `subagent_model` / `subagent_effort` defaults. Omitted policy

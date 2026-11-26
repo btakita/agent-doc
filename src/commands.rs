@@ -66,8 +66,18 @@ fn all_commands() -> Vec<CommandInfo> {
     ));
     cmds.push(cmd(
         "/agent-doc init",
-        "<FILE> [--artifact <ARTIFACT.md>]",
+        "<FILE> [--artifact <ARTIFACT.md> ...]",
         "Scaffold a new session document",
+    ));
+    cmds.push(cmd(
+        "/agent-doc artifact bind",
+        "<SESSION.md> <ARTIFACT.md>...",
+        "Bind ordinary markdown artifacts to a control session",
+    ));
+    cmds.push(cmd(
+        "/agent-doc artifact unbind",
+        "<SESSION.md> <ARTIFACT.md>...",
+        "Unbind artifacts from a control session without deleting them",
     ));
     cmds.push(cmd(
         "/agent-doc init-session",

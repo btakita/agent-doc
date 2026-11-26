@@ -2,6 +2,10 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## Unreleased
+
+- **One control session can hold more than one artifact.** Repeat `--artifact` on `agent-doc init`. `agent-doc artifact bind` and `agent-doc artifact unbind` attach and detach ordinary markdown files after init. A missing artifact is created. An existing ordinary markdown artifact is left unchanged. An artifact that is already an agent-doc session is refused. The control file stays `agent_doc_format: template`. There is no `agent:artifact` element. Closeout still commits the control file. An artifact is not committed merely because the turn ended.
+
 ## 0.35.594
 
 - **An artifact session aims at one markdown file** (`8ea8b18ab5`). `agent-doc init <SESSION.md> [TITLE] --artifact <ARTIFACT.md>` creates one normal control session whose subject is one ordinary markdown file. The control file stays in an agent-doc project so closeout can commit it. The artifact stays ordinary markdown.

@@ -2779,6 +2779,26 @@ enum McpAction {
 }
 
 #[derive(Subcommand)]
+enum ArtifactAction {
+    /// Add artifact paths to agent:run. Creates a missing markdown file and does not commit it.
+    Bind {
+        /// Template control session
+        session: PathBuf,
+        /// Ordinary markdown files to bind
+        #[arg(required = true)]
+        artifacts: Vec<PathBuf>,
+    },
+    /// Remove artifact paths from agent:run. Leaves each markdown file in place.
+    Unbind {
+        /// Template control session
+        session: PathBuf,
+        /// Artifact paths to unbind
+        #[arg(required = true)]
+        artifacts: Vec<PathBuf>,
+    },
+}
+
+#[derive(Subcommand)]
 enum Commands {
     /// Diagnose terminal-host capabilities and resolution
     Env {
@@ -2892,9 +2912,15 @@ enum Commands {
         /// Document mode: append (default) or template
         #[arg(long)]
         mode: Option<String>,
-        /// Plain markdown plan or spec. Writes that file with no agent markers and names only its path in agent:run.
-        #[arg(long)]
-        artifact: Option<PathBuf>,
+        /// Plain markdown plan or spec. Repeat to aim one control session at more than one file.
+        /// Each file is ordinary markdown. agent:run names those paths and no other work.
+        #[arg(long, value_name = "ARTIFACT.md")]
+        artifact: Vec<PathBuf>,
+    },
+    /// Bind or unbind ordinary markdown artifacts on a template control session.
+    Artifact {
+        #[command(subcommand)]
+        action: ArtifactAction,
     },
     /// Initialize an existing markdown file as a template session, then start it
     #[command(name = "init-session")]
@@ -8159,9 +8185,17 @@ fn try_main() -> anyhow::Result<()> {
             title.as_deref(),
             agent.as_deref(),
             mode.as_deref(),
-            artifact.as_deref(),
+            &artifact,
             &config,
         ),
+        Commands::Artifact { action } => match action {
+            ArtifactAction::Bind { session, artifacts } => {
+                init::bind_artifacts_live(&session, &artifacts)
+            }
+            ArtifactAction::Unbind { session, artifacts } => {
+                init::unbind_artifacts_live(&session, &artifacts)
+            }
+        },
         Commands::InitSession {
             file,
             title,
@@ -13567,9 +13601,34 @@ mod recycle_force_tests {
                 assert_eq!(title.as_deref(), Some("Plan session"));
                 assert!(agent.is_none());
                 assert!(mode.is_none());
-                assert_eq!(artifact.as_deref(), Some(Path::new("plans/my-plan.md")));
+                assert_eq!(artifact, vec![PathBuf::from("plans/my-plan.md")]);
             }
             _ => panic!("expected init subcommand"),
+        }
+    }
+
+    #[test]
+    fn artifact_bind_parses_repeated_paths() {
+        let cmd = parse(&[
+            "agent-doc",
+            "artifact",
+            "bind",
+            "sessions/plan-session.md",
+            "plans/one.md",
+            "plans/two.md",
+        ]);
+        match cmd {
+            Commands::Artifact { action } => match action {
+                ArtifactAction::Bind { session, artifacts } => {
+                    assert_eq!(session, PathBuf::from("sessions/plan-session.md"));
+                    assert_eq!(
+                        artifacts,
+                        vec![PathBuf::from("plans/one.md"), PathBuf::from("plans/two.md")]
+                    );
+                }
+                _ => panic!("expected artifact bind"),
+            },
+            _ => panic!("expected artifact subcommand"),
         }
     }
 

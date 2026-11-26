@@ -503,6 +503,7 @@ fn outstanding_install_fanout_resolve_error(file: &Path, reason: &str) -> anyhow
 /// The witness wait is injected so tests drive the retry gate without a live
 /// reliable-sync plane. Sender-recycle observations are absent here; production
 /// resolution uses [`resolve_route_queue_document_content`].
+#[cfg(test)]
 fn resolve_route_queue_document_content_awaiting(
     file: &Path,
     reason: &str,

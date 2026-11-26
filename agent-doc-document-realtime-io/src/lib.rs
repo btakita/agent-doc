@@ -1653,6 +1653,18 @@ fn atomic_write_rebased_through_authority_body(
                     Err(err) => return Err(err),
                 };
             let Some(relay_write) = relay_write else {
+                // `Ok(None)` is the detached receipt. A controller recycle can
+                // produce that receipt while the editor plane is still the
+                // authority. Disk projection stays retained until an explicit
+                // close.
+                if editor_authority_outlives_unproven_detach(path) {
+                    return Err(refuse_disk_write_while_editor_authority_outlives(
+                        path,
+                        projection_base,
+                        content,
+                        source,
+                    ));
+                }
                 break;
             };
             if dropped_replica_disk_projection_is_authoritative(path, &relay_write) {
@@ -4398,6 +4410,21 @@ pub fn apply_canonical_replace_if_attached(
                         return Ok(canonical_replace_detached_step());
                     }
                     agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
+                        // A live editor still waits for its replica. A cold
+                        // liveness miss with a retained editor plane is not
+                        // that wait: membership lapsed, and polling cannot
+                        // prove a close. Return the retained write now.
+                        if !agent_doc_controller_io::project_controller::reliable_sync_editor_live_for_file(
+                            file,
+                        ) && editor_authority_outlives_unproven_detach(file)
+                        {
+                            return Err(refuse_disk_write_while_editor_authority_outlives(
+                                file,
+                                expected_current,
+                                content,
+                                source,
+                            ));
+                        }
                         wait_state = CrdtConvergenceState::EditorAttachedModelMissing;
                     }
                     agent_doc_crdt_relay_io::CurrentText::EditorSyncPending => {
@@ -8144,6 +8171,219 @@ fn projected_active_editor_authority(
     authority.filter(|authority| authority.authority.editor_active())
 }
 
+/// How many recent `document_authority_observed` facts to fold when deciding
+/// whether an editor plane still outranks disk.
+///
+/// The cycle projection omits this fact, and the newest global winner hides
+/// the editor plane once a read path stamps disk. Both planes live in the
+/// fact itself. A short window covers the editor observation plus the
+/// following disk stamps; older history cannot change the newest plane.
+const AUTHORITY_PLANE_REPLAY_LIMIT: usize = 256;
+
+fn explicit_last_editor_close_source(source: &str) -> bool {
+    source.contains("last_editor_close")
+}
+
+/// Editor authority still outranks disk until an explicit close.
+///
+/// Proven close is `plane_editor_live_for_path == Some(false)`, or a newer
+/// disk authority whose source is an explicit last-editor-close. A read-path
+/// `DiskReplica` stamp (`commit_initial_current`, reason `editor_detached`)
+/// is not a close. No editor plane, or a projection load error, returns
+/// false so a document that never had an editor still writes disk.
+fn editor_authority_outlives_unproven_detach(file: &Path) -> bool {
+    if agent_doc_reliable_sync_io::plane_editor_live_for_path(&file.to_string_lossy())
+        == Some(false)
+    {
+        return false;
+    }
+    match durable_editor_and_disk_authority(file) {
+        Ok(planes) => editor_plane_outlives_disk(planes),
+        Err(err) => {
+            agent_doc_ops_log_io::log_op(
+                file,
+                &format!(
+                    "document_authority_planes_unavailable file={} error={}",
+                    file.display(),
+                    format!("{err:#}").replace('\n', " "),
+                ),
+            );
+            false
+        }
+    }
+}
+
+fn editor_plane_outlives_disk(
+    planes: Option<(
+        agent_doc_state_backbone::DocumentAuthorityProjection,
+        Option<agent_doc_state_backbone::DocumentAuthorityProjection>,
+    )>,
+) -> bool {
+    let Some((editor, disk)) = planes else {
+        return false;
+    };
+    if !editor.authority.editor_active() {
+        return false;
+    }
+    let Some(disk) = disk else {
+        return true;
+    };
+    if disk.authority_epoch < editor.authority_epoch {
+        return true;
+    }
+    !explicit_last_editor_close_source(&disk.source)
+}
+
+/// Fold the newest authority facts, including a pending handoff, into the
+/// two planes. Cycle replay cannot answer this: it drops
+/// `document_authority_observed`.
+fn durable_editor_and_disk_authority(
+    file: &Path,
+) -> Result<
+    Option<(
+        agent_doc_state_backbone::DocumentAuthorityProjection,
+        Option<agent_doc_state_backbone::DocumentAuthorityProjection>,
+    )>,
+> {
+    if agent_doc_sqlite::state_store::state_db_connections_forbidden_for_process() {
+        return Ok(None);
+    }
+    let canonical = match file.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return Ok(None),
+    };
+    let project_root = agent_doc_project_root_io::project_root_or_file_parent(&canonical)?;
+    let document_hash = agent_doc_hash::document_id_for_path(&canonical);
+    let handoff = agent_doc_sqlite::state_store::load_document_authority_handoff(
+        &project_root,
+        &document_hash,
+    )?;
+    let mut events = Vec::new();
+    if agent_doc_sqlite::state_store::state_db_path(&project_root).exists() {
+        let conn = agent_doc_sqlite::state_store::open_state_db(&project_root)?;
+        let rows = agent_doc_sqlite::state_store::load_recent_state_events_by_fact_type_from_db(
+            &conn,
+            &document_hash,
+            "document_authority_observed",
+            AUTHORITY_PLANE_REPLAY_LIMIT,
+        )?;
+        for row in rows.into_iter().rev() {
+            match serde_json::from_str::<agent_doc_state_backbone::StateEvent>(&row.payload_json) {
+                Ok(event) => events.push(event),
+                Err(err) => {
+                    agent_doc_ops_log_io::log_op(
+                        file,
+                        &format!(
+                            "document_authority_plane_event_skipped file={} event_id={} error={}",
+                            file.display(),
+                            row.event_id,
+                            err,
+                        ),
+                    );
+                }
+            }
+        }
+    }
+    if let Some(handoff) = handoff {
+        match serde_json::from_str::<agent_doc_state_backbone::StateEvent>(&handoff.payload_json) {
+            Ok(event) => events.push(event),
+            Err(err) => {
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "document_authority_plane_handoff_skipped file={} document_hash={} error={}",
+                        file.display(),
+                        handoff.document_hash,
+                        err,
+                    ),
+                );
+            }
+        }
+    }
+    if events.is_empty() {
+        return Ok(None);
+    }
+    let mut ledger = agent_doc_state_backbone::EventLedger::new();
+    for event in events {
+        ledger.append(event);
+    }
+    let Some(projection) = ledger.project_document(&document_hash) else {
+        return Ok(None);
+    };
+    let Some(editor) = projection.document.latest_editor_authority else {
+        return Ok(None);
+    };
+    Ok(Some((editor, projection.document.latest_disk_authority)))
+}
+
+/// A cold `Detached` observation is missing membership when the editor plane
+/// still outranks disk. Headless documents stay `Detached`.
+fn unproven_detach_as_missing_replica(
+    file: &Path,
+    current: agent_doc_crdt_relay_io::CurrentText,
+    source: &str,
+) -> agent_doc_crdt_relay_io::CurrentText {
+    if !matches!(current, agent_doc_crdt_relay_io::CurrentText::Detached)
+        || !editor_authority_outlives_unproven_detach(file)
+    {
+        return current;
+    }
+    agent_doc_ops_log_io::log_op(
+        file,
+        &format!(
+            "document_disk_authority_retained file={} source={} reason=controller_handoff_without_detach",
+            file.display(),
+            source,
+        ),
+    );
+    agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica
+}
+
+fn refuse_disk_write_while_editor_authority_outlives(
+    file: &Path,
+    expected_current: &str,
+    content: &str,
+    source: &str,
+) -> anyhow::Error {
+    match ensure_deferred_document_write_intent(
+        file,
+        expected_current,
+        content,
+        source,
+        DocumentWriteDeferredReason::EditorOwnerWithoutRegisteredReplica,
+    ) {
+        Ok(intent_id) => retained_refusal(
+            file,
+            format!(
+                "{source}: controller membership for {} lapsed without an explicit last-editor-close (intent_id={intent_id}, content_hash={}); disk was not written; recovery=await_editor_replica",
+                file.display(),
+                agent_doc_hash::content_hash(content),
+            ),
+        ),
+        Err(err) => err,
+    }
+}
+
+/// Record disk authority for a resolve only after detach is proven.
+///
+/// A read may still return disk bytes. It must not stamp `DiskReplica` over
+/// an editor plane that a controller handoff has not closed, or the next
+/// disk write treats that stamp as permission to replace the open buffer.
+fn record_disk_replica_authority_for_resolve(file: &Path, source: &str, disk: &str) {
+    if editor_authority_outlives_unproven_detach(file) {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "document_disk_authority_retained file={} source={} reason=controller_handoff_without_detach",
+                file.display(),
+                source,
+            ),
+        );
+        return;
+    }
+    record_disk_replica_authority(file, source, disk);
+}
+
 fn query_live_editor_authority(
     file: &std::path::Path,
     source: &str,
@@ -8179,8 +8419,9 @@ fn query_live_editor_authority_with_typing(
                 source,
             ),
         );
+        let observed = embedded.unwrap_or(agent_doc_crdt_relay_io::CurrentText::Detached);
         return Ok((
-            embedded.unwrap_or(agent_doc_crdt_relay_io::CurrentText::Detached),
+            unproven_detach_as_missing_replica(file, observed, source),
             None,
         ));
     }
@@ -8383,7 +8624,7 @@ fn resolve_closed_editor_disk_fallback_current_doc(
             )
         })?,
     };
-    record_disk_replica_authority(file, source, &disk);
+    record_disk_replica_authority_for_resolve(file, source, &disk);
     agent_doc_ops_log_io::log_op(
         file,
         &format!(
@@ -8993,8 +9234,9 @@ fn editor_attach_hold_describes(
 /// when a save is applied or a different content is refused. This read adds
 /// the two observations a reader can make without the controller: disk has not
 /// reached the refused content, and the live canonical is still that content.
-/// A detached editor holds no visible buffer, so the record does not describe
-/// it; an authority that cannot be read keeps the durable fact (fail closed).
+/// A proven detach holds no visible buffer, so the record does not describe
+/// it. A controller handoff that has not closed the editor still does. An
+/// authority that cannot be read keeps the durable fact (fail closed).
 /// Only consulted when a record exists, so the common path makes no authority
 /// query.
 pub fn editor_holds_unmerged_visible_text(
@@ -9004,7 +9246,13 @@ pub fn editor_holds_unmerged_visible_text(
 > {
     let exhausted = agent_doc_controller_io::retained_persistence_exhaustion::observe(file)?;
     match query_live_editor_authority(file, "editor_holds_unmerged_visible_text_probe") {
-        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => None,
+        Ok(agent_doc_crdt_relay_io::CurrentText::Detached) => {
+            if editor_authority_outlives_unproven_detach(file) {
+                Some(exhausted)
+            } else {
+                None
+            }
+        }
         Ok(agent_doc_crdt_relay_io::CurrentText::Current { text, .. })
             if !exhausted.matches_authority(&text) =>
         {
@@ -9933,7 +10181,7 @@ pub fn guard_visible_write_reconcile_with_target(
             file.display()
         )
     })?;
-    record_disk_replica_authority(file, source, &actual_current);
+    record_disk_replica_authority_for_resolve(file, source, &actual_current);
     if actual_current == expected_current {
         return Ok(VisibleWriteReconcile::Clean);
     }
@@ -11267,7 +11515,7 @@ fn try_resolve_current_doc_with_disk_inner(
                         )
                     })?,
                 };
-                record_disk_replica_authority(file, source, &disk);
+                record_disk_replica_authority_for_resolve(file, source, &disk);
                 agent_doc_ops_log_io::log_op(
                     file,
                     &format!(
@@ -11321,7 +11569,7 @@ fn try_resolve_current_doc_with_disk_inner(
                     )
                 })?,
             };
-            record_disk_replica_authority(file, source, &disk);
+            record_disk_replica_authority_for_resolve(file, source, &disk);
             Ok(resolve_detached_current_doc(file, &disk, source))
         }
         // Read-path precedence is **editor buffer, then disk** — and only those
@@ -11341,8 +11589,9 @@ fn try_resolve_current_doc_with_disk_inner(
         // destroys operator edits — the `content_ours` clobber class the write
         // path exists to refuse. So a read may descend to disk; a write may not.
         //
-        // Disk is still marked a replica (`record_disk_replica_authority`), so
-        // nothing downstream mistakes this for editor-authoritative text.
+        // A proven detach still marks disk a replica. An unproven controller
+        // handoff skips that stamp so a later write cannot treat the read as
+        // permission to replace the open buffer.
         agent_doc_crdt_relay_io::CurrentText::EditorAttachedMissingReplica => {
             resolve_editor_unavailable_disk_read_fallback(file, disk, source, "missing_replica")
         }
@@ -11890,7 +12139,7 @@ fn resolve_editor_unavailable_disk_read_fallback(
             disk.len(),
         ),
     );
-    record_disk_replica_authority(file, source, &disk);
+    record_disk_replica_authority_for_resolve(file, source, &disk);
     Ok(resolve_detached_current_doc(file, &disk, source))
 }
 
@@ -13225,6 +13474,81 @@ mod tests {
             agent_doc_crdt_relay_io::CurrentText::Detached,
             "a newer explicit disk projection proves the last editor closed"
         );
+    }
+
+    /// A controller recycle reports the open editor as detached. The read path
+    /// then stamps disk. That stamp is not a close, and the following write
+    /// must not replace the buffer the editor still holds.
+    #[test]
+    fn controller_membership_lapse_does_not_overwrite_open_editor_disk() {
+        let baseline = "# Session\n\nbody\n\nunmarked operator prompt\n";
+        let target = "# Session\n\nbody\n\n<!-- agent:boundary:deferred -->\n";
+        let (_dir, file, _canonical) = temp_git_doc(&[baseline]);
+        record_document_authority(
+            &file,
+            "live_editor_before_recycle",
+            agent_doc_state_backbone::DocumentAuthority::EditorRelay,
+            "relay_current",
+            Some(agent_doc_hash::content_hash(baseline)),
+            Some("jetbrains-uiir".to_string()),
+        );
+        let await_until = |pred: &dyn Fn() -> bool, what: &str| {
+            let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+            loop {
+                if pred() {
+                    return;
+                }
+                assert!(
+                    std::time::Instant::now() < deadline,
+                    "timed out waiting for {what}"
+                );
+                std::thread::sleep(std::time::Duration::from_millis(10));
+            }
+        };
+        await_until(
+            &|| editor_authority_outlives_unproven_detach(&file),
+            "editor authority to outlive an unproven detach",
+        );
+        record_disk_replica_authority(&file, "commit_initial_current", baseline);
+        await_until(
+            &|| {
+                agent_doc_cycle_state_io::load_latest_document_authority(&file)
+                    .ok()
+                    .flatten()
+                    .is_some_and(|authority| {
+                        authority.authority
+                            == agent_doc_state_backbone::DocumentAuthority::DiskReplica
+                            && authority.source == "commit_initial_current"
+                    })
+            },
+            "commit_initial_current disk stamp",
+        );
+        assert!(
+            editor_authority_outlives_unproven_detach(&file),
+            "a read-path disk stamp is not an explicit last-editor-close"
+        );
+        let err = atomic_write_through_authority(&file, target).unwrap_err();
+        assert_eq!(
+            editor_delivery_waits_entered(&file),
+            0,
+            "an unproven detach must return promptly instead of waiting for a replica"
+        );
+        let message = format!("{err:#}");
+        assert!(message.contains("disk was not written"), "{message}");
+        assert!(
+            message.contains(AWAIT_EDITOR_REPLICA_NO_DISK_WRITE_TOKEN)
+                || message.contains("await_editor_replica"),
+            "{message}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), baseline);
+        record_disk_replica_authority(&file, "last_editor_close", baseline);
+        await_until(
+            &|| !editor_authority_outlives_unproven_detach(&file),
+            "explicit last-editor-close to release the editor plane",
+        );
+        atomic_write_through_authority(&file, target)
+            .expect("a proven last-editor-close may project disk");
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), target);
     }
 
     #[test]

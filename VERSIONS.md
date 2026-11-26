@@ -2,6 +2,12 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.594
+
+- **An artifact session aims at one markdown file** (`8ea8b18ab5`). `agent-doc init <SESSION.md> [TITLE] --artifact <ARTIFACT.md>` creates one normal control session whose subject is one ordinary markdown file. The control file stays in an agent-doc project so closeout can commit it. The artifact stays ordinary markdown.
+- **Route waits out an outstanding install_fanout recycle** (`51f0ebdb50`, `0a315fec22`). A route no longer refuses while that recycle is still outstanding. The witness retry helper stays test-only.
+- JetBrains classic `0.2.1050` and the modular 262–263.* ZIP `0.2.1062`; `pluginReleaseVersion` moves to `0.35.594`. VS Code stays `0.2.106`. Zed stays `0.1.8`.
+
 ## 0.35.593
 
 - **A settled pipe stage carries into the next hand-back (`#pipestagereceipt`)** (`3434520fa8`). `#reviewfixonhead` and `#presetorder` each ask for a different receipt, so `#address |> #adversarial-pr` alternated `FIX-ON-HEAD` and `REVIEW-CLEAN` and never closed. The next hand-back now keeps the previous half when both name the same head.

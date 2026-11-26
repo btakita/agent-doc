@@ -1235,6 +1235,8 @@ later status write keeps as its last paragraph, exactly once; see
 `#queuemarkerlegend` in `07-orchestration-commands.md`. Opt out with
 `queue-legend=off` on the status marker.
 
+**Artifact session.** An artifact session is that same template control session aimed at one plan or one spec. It is not a new element, not a new format name, and not a wrapper around the artifact. `agent-doc init <SESSION.md> --artifact <ARTIFACT.md>` writes the pair. The session keeps `agent_doc_format: template`, `<!-- agent:run -->`, and `<!-- agent:exchange -->`. Its queue is one `- [ ]` row whose text is the artifact path and no other work. The artifact is ordinary markdown with no `agent:*` marker, no `agent_doc_format`, and no `## Draft`. The worker edits the whole artifact. The binary keeps writing inside the session elements. A patch that names no component still lands in `agent:exchange`.
+
 **Managed List completion intent (`#managedlistcompletionintent`).** Every
 unfinished row in `agent:run`, `agent:todo`, `agent:backlog`,
 `agent:review`, or `agent:icebox` represents a durable objective whose

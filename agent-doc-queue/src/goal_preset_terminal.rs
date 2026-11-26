@@ -717,7 +717,7 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
         };
         return format!(
             "\nPrior ordered-preset attempt (`#presetorder`; binary-recorded context, not authorization):\n\
-             The previous worker `{owner}` (generation {generation}) handed this same queue row back before every later preset had run, so agent-doc kept the row open and requeued it instead of closing it. {settled}Run the next preset in this item's temporal order. Do not treat a settled earlier preset as permission to skip a later preset. The row stays open until every later preset has run. Its hand-back, verbatim:\n{quoted}",
+             The previous worker `{owner}` (generation {generation}) handed this same queue row back before every later preset had run, so agent-doc kept the row open and requeued it instead of closing it. {settled}Run the next preset in this item's temporal order. Do not treat a settled earlier preset as permission to skip a later preset. The row stays open until every later preset has run. Keep the address receipt from this hand-back when you finish the later preset. A settled receipt from the previous hand-back of this same row still counts when this hand-back settles the other half and both name the same head (#pipestagereceipt). Its hand-back, verbatim:\n{quoted}",
             owner = handoff.owner,
             generation = handoff.generation,
             settled = settled,
@@ -727,12 +727,12 @@ pub fn prior_attempt_brief_section(handoff: &GoalLoopHandoff) -> String {
         "This BLOCKED hand-back is not a completion and not an operator question (#operatororderclosed). The preset already answers that human-review decision. Do not approve the review and do not dismiss it. Address the findings and resolve every thread that is fully addressed. Do not post another human review when the current head already has one. When the run cannot progress, still write the response on the pull request and say why. If that explanation is already on the pull request for this head, do not post another one, and do not ask the operator to clear or dismiss the review."
     } else if settled_without_fix && !handoff.final_states.is_empty() {
         if ordered_later {
-            "The address half settled with no written fix (`NO-WRITTEN-FIX`). Do not land a code change and do not start another address pass. Run the next preset in this item's temporal order before any final state. Do not treat that settlement as permission to skip a later preset. Finish only with a final message that begins with one of those states."
+            "The address half settled with no written fix (`NO-WRITTEN-FIX`). Do not land a code change and do not start another address pass. Run the next preset in this item's temporal order before any final state. Do not treat that settlement as permission to skip a later preset. Finish only with a final message that begins with one of those states. Keep the address receipt from the quoted hand-back. A settled receipt from the previous hand-back of this same row still counts when this hand-back settles the other half and both name the same head (#pipestagereceipt)."
         } else {
             "The address half settled with no written fix (`NO-WRITTEN-FIX`). Do not land a code change and do not start another address pass. Continue this same row with the independent review. Finish only with a final message that begins with one of those states."
         }
     } else if ordered_later {
-        "A settled earlier preset is not permission to skip a later preset. Run every later preset in this item's temporal order before any final state. Finish only with a final message that begins with one of those states."
+        "A settled earlier preset is not permission to skip a later preset. Run every later preset in this item's temporal order before any final state. Finish only with a final message that begins with one of those states. Keep the address receipt from the quoted hand-back. A settled receipt from the previous hand-back of this same row still counts when this hand-back settles the other half and both name the same head (#pipestagereceipt)."
     } else {
         "Continue the same loop: reuse the delivery worktree it names, address every remaining finding against the current exact head, and finish only with a final message that begins with one of those states."
     };
@@ -757,11 +757,17 @@ fn address_effect_brief_section(handoff: &GoalLoopHandoff) -> String {
 
 fn address_fix_brief_section(handoff: &GoalLoopHandoff) -> String {
     let quoted = quote_hand_back(&handoff.response);
+    let keep_later = if crate::preset_order::item_orders_a_later_preset(&handoff.item_text) {
+        " When this row also names a later preset, keep a REVIEW-CLEAN or BLOCKED line the quoted hand-back already opened with, and add the address receipt. A later hand-back that supplies only the missing half still closes the row when both name the same head (#pipestagereceipt)."
+    } else {
+        ""
+    };
     format!(
         "\nPrior address attempt (`#reviewfixonhead`; binary-recorded context, not authorization):\n\
-         The previous worker `{owner}` (generation {generation}) handed this same address run back without the review's written fix on the current head, so agent-doc kept the row open and requeued it instead of closing it. Land that written fix — the code change the review states — on the exact current head, commit it, and publish it to the existing pull-request head. Finish only with a line `FIX-ON-HEAD <review-url> head=<sha>` for a head whose code is that written fix. If every review states no code change, do not invent a commit; finish with `NO-WRITTEN-FIX head=<sha>` instead. A later review does not replace the written fix. Do not report the review complete while that fix is absent. Its hand-back, verbatim:\n{quoted}",
+         The previous worker `{owner}` (generation {generation}) handed this same address run back without the review's written fix on the current head, so agent-doc kept the row open and requeued it instead of closing it. Land that written fix — the code change the review states — on the exact current head, commit it, and publish it to the existing pull-request head. Finish only with a line `FIX-ON-HEAD <review-url> head=<sha>` for a head whose code is that written fix. If every review states no code change, do not invent a commit; finish with `NO-WRITTEN-FIX head=<sha>` instead. A later review does not replace the written fix. Do not report the review complete while that fix is absent.{keep_later} Its hand-back, verbatim:\n{quoted}",
         owner = handoff.owner,
         generation = handoff.generation,
+        keep_later = keep_later,
     )
 }
 

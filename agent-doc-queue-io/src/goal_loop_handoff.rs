@@ -222,9 +222,8 @@ pub fn requeue_nonterminal_hand_back(
     );
     let address_run =
         agent_doc_queue::address_fix_on_head::head_is_address_run(&claim.item_text, &preset_pairs);
-    let address_lands = address_run
+    let current_address_lands = address_run
         && agent_doc_queue::address_fix_on_head::address_run_lands_written_fix(response);
-    let address_pending = address_run && !address_lands;
     // Reject a stale hand-back before it can publish an observation on the
     // current generation.
     if address_run && let Some(generation) = generation {
@@ -270,34 +269,90 @@ pub fn requeue_nonterminal_hand_back(
     // stays open until the written fix is on the current head.
     // `#addressinline`: an inline goal stays open until every root thread's
     // written fix is on that head.
-    let completes_order = !answered_blocked_review
-        && !address_pending
-        && !effect_unproven
-        && !inline_pending
-        && !final_states.is_empty()
+    // `#presetorder`: a settled address half, including `NO-WRITTEN-FIX`, does
+    // not finish a row that still has a later preset. The first preset keeps
+    // its own receipt, so `#rebase then #adversarial-pr` still completes on
+    // REVIEW-CLEAN.
+    //
+    // `#pipestagereceipt`: the two briefs each demand one receipt, so a pipe
+    // `#address |> #adversarial-pr` alternates `FIX-ON-HEAD` and `REVIEW-CLEAN`.
+    // The immediately previous hand-back of this row supplies the missing half
+    // when both name the same head. A withheld review, a contradicted address
+    // receipt, or a different head does not carry.
+    let order =
+        agent_doc_queue::preset_order::temporal_preset_order(&claim.item_text, &preset_pairs);
+    let prior_record = load(file).ok().and_then(|ledger| {
+        ledger.latest_for(&claim.identity).and_then(|prior| {
+            if prior.generation >= claim.generation
+                || prior.quota_block.is_some()
+                || prior.prompt_pressure.is_some()
+                || prior.address_effect_unknown
+                || prior.item_text != claim.item_text
+            {
+                return None;
+            }
+            Some(prior.clone())
+        })
+    });
+    let prior_view = prior_record
+        .as_ref()
+        .filter(|_| order.len() >= 2)
+        .map(|prior| agent_doc_queue::preset_order::PriorOrderedHandoff {
+            response: prior.response.as_str(),
+            address_fix_pending: prior.address_fix_pending,
+            address_effect_unproven: prior.address_effect_unproven,
+            address_effect_unknown: prior.address_effect_unknown,
+        });
+    let carried_address = order.len() >= 2
+        && !current_address_lands
+        && prior_view.as_ref().is_some_and(|prior| {
+            agent_doc_queue::preset_order::preset_phase_settled_with_prior(
+                "#address",
+                response,
+                Some(prior),
+                &preset_pairs,
+            )
+        });
+    let address_lands = current_address_lands || carried_address;
+    let address_pending = address_run && !address_lands;
+    let next_ordered_preset = agent_doc_queue::preset_order::first_unmet_later_preset_with_prior(
+        &order,
+        response,
+        prior_view.as_ref(),
+        &preset_pairs,
+    );
+    let later_unmet = next_ordered_preset.is_some();
+    let current_goal_completes = !final_states.is_empty()
         && agent_doc_queue::goal_preset_terminal::hand_back_completes_goal_loop(
             response,
             &final_states,
             &bodies,
         );
+    let carried_goal = prior_record.as_ref().is_some_and(|prior| {
+        order.len() >= 2
+            && agent_doc_queue::preset_order::prior_goal_completion_carries(
+                response,
+                &prior.response,
+                &final_states,
+                &bodies,
+                current_address_lands,
+            )
+    });
+    let completes_order = !answered_blocked_review
+        && !address_pending
+        && !effect_unproven
+        && !inline_pending
+        && (current_goal_completes || carried_goal);
     let ordinary_empty = !address_run && !inline_goal && final_states.is_empty();
     let settled_inline_without_states = inline_goal
         && !inline_pending
         && !address_pending
         && !effect_unproven
         && final_states.is_empty();
-    // `#presetorder`: a settled address half, including `NO-WRITTEN-FIX`, does
-    // not finish a row that still has a later preset. The first preset keeps
-    // its own receipt, so `#rebase then #adversarial-pr` still completes on
-    // REVIEW-CLEAN.
-    let order =
-        agent_doc_queue::preset_order::temporal_preset_order(&claim.item_text, &preset_pairs);
-    let next_ordered_preset =
-        agent_doc_queue::preset_order::first_unmet_later_preset(&order, response, &preset_pairs);
-    let later_unmet = next_ordered_preset.is_some();
     // A landed `#address` receipt completes only a pure address run. A row
-    // that also declares goal final states stays open until the hand-back
-    // opens on REVIEW-CLEAN or BLOCKED (`#crossagenthandoff`).
+    // that also declares goal final states stays open until REVIEW-CLEAN or
+    // BLOCKED is settled on this hand-back or the previous one
+    // (`#crossagenthandoff`, `#pipestagereceipt`).
     let address_completes =
         address_lands && !effect_unproven && final_states.is_empty() && !later_unmet;
     if !address_pending

@@ -3417,6 +3417,140 @@ mod tests {
         );
     }
 
+    /// `#pipestagereceipt`: `#address |> #adversarial-pr` briefs each attempt
+    /// for one receipt. The half already stored on the previous hand-back
+    /// closes the row when the next hand-back brings the other half on the
+    /// same head. A withheld review, or a review on a different head, does not.
+    #[test]
+    fn split_receipts_close_an_address_pipe_when_the_heads_match() {
+        const HEAD: &str = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        const OTHER: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let fix = format!(
+            "FIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-6049018911 head={HEAD}\n\
+             INLINE-THREADS-LOADED 0 head={HEAD}\n"
+        );
+        let clean = format!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-6049555956 \
+             base={OTHER} head={HEAD} cycles=1\n\
+             The plain commented review is already on the exact head.\n\
+             INLINE-THREADS-LOADED 0 head={HEAD}\n"
+        );
+        let withheld = format!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-6049555956 \
+             base={OTHER} head={HEAD} cycles=1\n\
+             posted nothing\n\
+             INLINE-THREADS-LOADED 0 head={HEAD}\n"
+        );
+        let clean_other = format!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-6049555956 \
+             base={HEAD} head={OTHER} cycles=1\n\
+             The plain commented review is already on the exact head.\n\
+             INLINE-THREADS-LOADED 0 head={OTHER}\n"
+        );
+        for row in [
+            "https://github.com/sample-org/sample-repo/pull/12: #address |> #adversarial-pr",
+            "https://github.com/sample-org/sample-repo/pull/12: #address then #adversarial-pr",
+        ] {
+            split_ordered_hand_backs(row, &fix, &clean, true);
+            split_ordered_hand_backs(row, &clean, &fix, true);
+            split_ordered_hand_backs(row, &fix, &withheld, false);
+            split_ordered_hand_backs(row, &fix, &clean_other, false);
+        }
+    }
+
+    fn split_ordered_hand_backs(row: &str, first: &str, second: &str, completes: bool) {
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir_all(dir.path().join(".agent-doc")).unwrap();
+        fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            concat!(
+                "---\npresets:\n",
+                "  '#address': 'Address every actionable review item on the exact current head.'\n",
+                "  '#adversarial-pr': >-\n",
+                "    /goal Post exactly one plain COMMENTED review on the exact current\n",
+                "    remote head.\n\n",
+                "    Final states. Your final message must begin with exactly one of these\n",
+                "    lines:\n",
+                "    - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>`.\n",
+                "    - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`.\n",
+                "---\n",
+            ),
+        )
+        .unwrap();
+        let doc = dir.path().join("sdk-dev.md");
+        fs::write(
+            &doc,
+            format!(
+                "---\nagent_doc_session: sample-sdk\nagent_doc_format: template\n---\n\n\
+                 <!-- agent:exchange patch=append -->\n\
+                 ### Re: prior — gpt-5\n\nDone.\n\
+                 <!-- agent:boundary:keep -->\n\
+                 <!-- /agent:exchange -->\n\n\
+                 <!-- agent:queue subagents -->\n\
+                 - {row}\n\
+                 <!-- /agent:queue -->\n"
+            ),
+        )
+        .unwrap();
+        agent_doc_queue_io::queue_claim::claim(&doc, row, "subagent:pr12-address", 600).unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            row,
+            "subagent:pr12-address",
+            "worker:pr12-address",
+            600,
+            1,
+        )
+        .unwrap();
+        let _proof = proved_address_reply();
+        let opened = requeue_nonterminal_goal_hand_back(&doc, row, Some(1), first)
+            .unwrap()
+            .expect("one half does not finish the ordered row");
+        assert!(
+            opened.address_fix_pending
+                || opened.next_ordered_preset.as_deref() == Some("#adversarial-pr")
+                || !opened.final_states.is_empty(),
+            "the first half stays open: {opened:?}"
+        );
+        let (outcome, _) =
+            agent_doc_queue_io::queue_claim::claim(&doc, row, "subagent:pr12-review", 600)
+                .expect("the requeued row is dispatchable");
+        assert_eq!(
+            outcome,
+            agent_doc_queue::queue_claim::ClaimOutcome::Reassigned
+        );
+        let generation = agent_doc_queue_io::queue_claim::load_ledger(&doc)
+            .unwrap()
+            .claims
+            .iter()
+            .find(|claim| claim.owner == "subagent:pr12-review")
+            .map(|claim| claim.generation)
+            .unwrap();
+        agent_doc_queue_io::queue_claim::start_attempt(
+            &doc,
+            row,
+            "subagent:pr12-review",
+            "worker:pr12-review",
+            600,
+            generation,
+        )
+        .unwrap();
+        let second_result =
+            requeue_nonterminal_goal_hand_back(&doc, row, Some(generation), second).unwrap();
+        if completes {
+            assert!(
+                second_result.is_none(),
+                "the missing half on the same head closes {row}"
+            );
+        } else {
+            let requeue = second_result.expect("a withheld or other-head review stays open");
+            assert!(
+                requeue.address_fix_pending || requeue.next_ordered_preset.is_some(),
+                "the row stays open for a real same-head review: {requeue:?}"
+            );
+        }
+    }
+
     /// `#addressproof`: `NO-WRITTEN-FIX` does not complete a pure address run.
     /// An observed head change or review reply does.
     #[test]

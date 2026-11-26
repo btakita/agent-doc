@@ -180,7 +180,10 @@ pub fn ordered_preset_rule(order: &[String], presets: &[(String, String)]) -> St
          A settled earlier preset is not permission to skip a later preset. \
          `NO-WRITTEN-FIX head=<sha>` settles only `#address` and does not finish the row. \
          After that receipt, run the next preset in this same row. \
-         Do not start another address pass when the address half already settled. Order:",
+         Do not start another address pass when the address half already settled. \
+         A receipt from the previous hand-back of this same row still counts when \
+         this hand-back settles the other half and both name the same head \
+         (`#pipestagereceipt`). Order:",
     );
     for (index, name) in order.iter().enumerate() {
         out.push_str(&format!(" {}. {name}", index + 1));
@@ -266,6 +269,151 @@ fn preset_body<'a>(name: &str, presets: &'a [(String, String)]) -> Option<&'a st
         .iter()
         .find(|(preset, _)| preset.eq_ignore_ascii_case(name))
         .map(|(_, body)| body.as_str())
+}
+
+/// The previous hand-back of an ordered row (`#pipestagereceipt`).
+///
+/// Exclusive briefs ask one attempt for `FIX-ON-HEAD` and the next for
+/// `REVIEW-CLEAN`. Each half stays settled when the other arrives later.
+pub struct PriorOrderedHandoff<'a> {
+    pub response: &'a str,
+    pub address_fix_pending: bool,
+    pub address_effect_unproven: bool,
+    pub address_effect_unknown: bool,
+}
+
+impl PriorOrderedHandoff<'_> {
+    fn carries_address(&self) -> bool {
+        !self.address_fix_pending
+            && !self.address_effect_unproven
+            && !self.address_effect_unknown
+            && crate::address_fix_on_head::address_run_lands_written_fix(self.response)
+    }
+}
+
+/// True when `name` is settled by `response`, or by `prior` when this
+/// hand-back does not unsay that settlement and both name the same `head=`.
+pub fn preset_phase_settled_with_prior(
+    name: &str,
+    response: &str,
+    prior: Option<&PriorOrderedHandoff<'_>>,
+    presets: &[(String, String)],
+) -> bool {
+    if preset_phase_settled(name, response, presets) {
+        return true;
+    }
+    let Some(prior) = prior else {
+        return false;
+    };
+    if !ordered_heads_agree(response, prior.response) {
+        return false;
+    }
+    if name.eq_ignore_ascii_case("#address") {
+        return prior.carries_address() && !address_receipt_unsays(response);
+    }
+    if !preset_phase_settled(name, prior.response, presets) {
+        return false;
+    }
+    !goal_phase_unsays(name, response, presets)
+}
+
+/// The first preset after the first in `order` that neither `response` nor
+/// `prior` settles.
+pub fn first_unmet_later_preset_with_prior(
+    order: &[String],
+    response: &str,
+    prior: Option<&PriorOrderedHandoff<'_>>,
+    presets: &[(String, String)],
+) -> Option<String> {
+    if order.len() < 2 {
+        return None;
+    }
+    order
+        .iter()
+        .skip(1)
+        .find(|name| !preset_phase_settled_with_prior(name, response, prior, presets))
+        .cloned()
+}
+
+/// True when `prior_response` already completed the goal and `response` landed
+/// the address half on that same head.
+///
+/// A `REVIEW-CLEAN` that this hand-back opens but does not complete (a withheld
+/// independent review) does not keep the prior completion.
+pub fn prior_goal_completion_carries(
+    response: &str,
+    prior_response: &str,
+    states: &[String],
+    bodies: &[String],
+    current_settles_address: bool,
+) -> bool {
+    if !current_settles_address || states.is_empty() {
+        return false;
+    }
+    if !ordered_heads_agree(response, prior_response) {
+        return false;
+    }
+    if crate::goal_preset_terminal::hand_back_begins_with_final_state(response, states)
+        && !crate::goal_preset_terminal::hand_back_completes_goal_loop(response, states, bodies)
+    {
+        return false;
+    }
+    crate::goal_preset_terminal::hand_back_completes_goal_loop(prior_response, states, bodies)
+}
+
+/// True when both hand-backs name at least one `head=<sha>` in common.
+pub fn ordered_heads_agree(current: &str, prior: &str) -> bool {
+    let current = named_head_shas(current);
+    let prior = named_head_shas(prior);
+    if current.is_empty() || prior.is_empty() {
+        return false;
+    }
+    current
+        .iter()
+        .any(|sha| prior.iter().any(|other| other.eq_ignore_ascii_case(sha)))
+}
+
+fn named_head_shas(response: &str) -> Vec<String> {
+    let mut shas: Vec<String> = Vec::new();
+    let mut rest = response;
+    while let Some(at) = rest.find("head=") {
+        rest = &rest[at + "head=".len()..];
+        let sha: String = rest
+            .chars()
+            .take_while(|ch| ch.is_ascii_hexdigit())
+            .collect();
+        if (7..=40).contains(&sha.len()) && !shas.iter().any(|seen| seen.eq_ignore_ascii_case(&sha))
+        {
+            shas.push(sha);
+        }
+    }
+    shas
+}
+
+fn address_receipt_unsays(response: &str) -> bool {
+    if crate::address_fix_on_head::address_response_admits_fix_absent(response) {
+        return true;
+    }
+    let fixes = !crate::address_fix_on_head::address_fix_receipts(response).is_empty();
+    let none = !crate::address_fix_on_head::no_written_fix_receipts(response).is_empty();
+    fixes && none
+}
+
+fn goal_phase_unsays(name: &str, response: &str, presets: &[(String, String)]) -> bool {
+    let Some(body) = preset_body(name, presets) else {
+        return false;
+    };
+    let states = crate::goal_preset_terminal::preset_final_states(body);
+    if states.is_empty() {
+        return false;
+    }
+    let bodies = if states.iter().any(|state| state == "BLOCKED") {
+        vec![body.to_string()]
+    } else {
+        Vec::new()
+    };
+    crate::goal_preset_terminal::hand_back_begins_with_final_state(response, &states)
+        && !crate::goal_preset_terminal::hand_back_completes_goal_loop(response, &states, &bodies)
 }
 
 fn line_preset_done(line: &str, name: &str) -> bool {
@@ -544,5 +692,123 @@ mod tests {
             first_unmet_later_preset(&address_tail, &both, &presets).as_deref(),
             Some("#address")
         );
+    }
+
+    fn goal_presets() -> Vec<(String, String)> {
+        vec![
+            (
+                "#address".to_string(),
+                "Address every actionable review item on the exact current head.".to_string(),
+            ),
+            (
+                "#adversarial-pr".to_string(),
+                "/goal Post exactly one plain COMMENTED review on the exact current remote head. \
+                 Your final message must begin with exactly one of these lines: \
+                 - `REVIEW-CLEAN <final review URL> base=<sha> head=<sha> cycles=<n>` \
+                 - `BLOCKED <single operator action> base=<sha> head=<sha> cycles=<n>`."
+                    .to_string(),
+            ),
+        ]
+    }
+
+    /// `#pipestagereceipt`: each attempt emits one half. The previous hand-back
+    /// supplies the other when both name the same head.
+    #[test]
+    fn a_prior_half_settles_the_other_stage_on_the_same_head() {
+        let presets = goal_presets();
+        let head = "fa3a3f449986d565f21aeb6e0f792323bc8d1d58";
+        let other = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let fix = format!(
+            "FIX-ON-HEAD https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-1 head={head}\n\
+             INLINE-THREADS-LOADED 0 head={head}\n"
+        );
+        let clean = format!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-2 \
+             base={other} head={head} cycles=1\n\
+             The plain commented review is already on the exact head.\n\
+             INLINE-THREADS-LOADED 0 head={head}\n"
+        );
+        let prior_fix = PriorOrderedHandoff {
+            response: &fix,
+            address_fix_pending: false,
+            address_effect_unproven: false,
+            address_effect_unknown: false,
+        };
+        assert!(preset_phase_settled_with_prior(
+            "#address",
+            &clean,
+            Some(&prior_fix),
+            &presets
+        ));
+        assert!(preset_phase_settled_with_prior(
+            "#adversarial-pr",
+            &clean,
+            Some(&prior_fix),
+            &presets
+        ));
+        let prior_clean = PriorOrderedHandoff {
+            response: &clean,
+            address_fix_pending: true,
+            address_effect_unproven: false,
+            address_effect_unknown: false,
+        };
+        assert!(preset_phase_settled_with_prior(
+            "#adversarial-pr",
+            &fix,
+            Some(&prior_clean),
+            &presets
+        ));
+        assert!(prior_goal_completion_carries(
+            &fix,
+            &clean,
+            &["REVIEW-CLEAN".to_string(), "BLOCKED".to_string()],
+            &[presets[1].1.clone()],
+            true
+        ));
+        let withheld = format!(
+            "REVIEW-CLEAN https://github.com/sample-org/sample-repo/pull/12#pullrequestreview-2 \
+             head={head} cycles=1\n\
+             posted nothing\n\
+             INLINE-THREADS-LOADED 0 head={head}\n"
+        );
+        assert!(!preset_phase_settled_with_prior(
+            "#adversarial-pr",
+            &withheld,
+            Some(&prior_fix),
+            &presets
+        ));
+        assert!(!prior_goal_completion_carries(
+            &withheld,
+            &clean,
+            &["REVIEW-CLEAN".to_string(), "BLOCKED".to_string()],
+            &[presets[1].1.clone()],
+            true
+        ));
+        let clean_other = clean.replace(head, other);
+        assert!(!preset_phase_settled_with_prior(
+            "#address",
+            &clean_other,
+            Some(&prior_fix),
+            &presets
+        ));
+        let unproven = PriorOrderedHandoff {
+            response: &fix,
+            address_fix_pending: false,
+            address_effect_unproven: true,
+            address_effect_unknown: false,
+        };
+        assert!(!preset_phase_settled_with_prior(
+            "#address",
+            &clean,
+            Some(&unproven),
+            &presets
+        ));
+        let both = format!("{fix}NO-WRITTEN-FIX head={head}\n");
+        assert!(!preset_phase_settled_with_prior(
+            "#address",
+            &both,
+            Some(&prior_fix),
+            &presets
+        ));
     }
 }

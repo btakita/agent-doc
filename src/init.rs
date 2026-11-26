@@ -1,13 +1,17 @@
 //! # Module: init
 //!
 //! ## Spec
-//! - `run(file, title, agent, mode, config)`: dispatches on whether a file path was provided.
+//! - `run(file, title, agent, mode, artifact, config)`: dispatches on whether a file path was provided.
 //!   - No file: calls `init_project()` — checks prerequisites, creates `.agent-doc/`, and installs
 //!     `SKILL.md` for the detected harness (generic `.agent/skills/` when none is detected, in
 //!     which case it prints the `skill install --harness` command to run), then prints next
 //!     steps ending in the README "Getting started" link. Per-document state is stored in the typed ledger, not a filesystem sidecar.
+//!     `--artifact` without a session file is an error and does not initialize a project.
 //!   - With file: calls `init_file()` — lazily runs project init if `.agent-doc/` is absent, then
 //!     scaffolds a new session document.  Fails if the file already exists.
+//!   - With `--artifact PLAN.md`: the session is a template control document whose `agent:run`
+//!     names only that path. `PLAN.md` is ordinary markdown (no `agent:*` marker, no
+//!     `agent_doc_format`, no `## Draft`). `--mode append` is refused.
 //! - `init_file` scaffolds two document formats depending on `mode`:
 //!   - `"template"` or `"stream"`: frontmatter with `agent_doc_format: template` and
 //!     `agent_doc_write: crdt`; body contains a single `<!-- agent:exchange -->` component.
@@ -32,9 +36,11 @@
 //! - init_file_template_mode: `mode="template"` → scaffolded file contains `agent_doc_format: template` and `agent:exchange` component
 //! - init_file_append_mode: `mode="append"` → scaffolded file contains `## User` block, no exchange component
 //! - init_file_already_exists: target file exists → returns Err
+//! - artifact_session_is_template_aimed_at_one_plain_markdown_file: `--artifact` writes a template
+//!   session whose queue names only that file, and the artifact has no agent markers.
 
 use anyhow::Result;
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use uuid::Uuid;
 
 use agent_doc_config::Config;
@@ -173,6 +179,7 @@ fn init_file(
     title: Option<&str>,
     agent: Option<&str>,
     mode: Option<&str>,
+    artifact: Option<&Path>,
     config: &Config,
 ) -> Result<()> {
     agent_doc_project_root_io::ensure_project_root_allowed(&std::env::current_dir()?)?;
@@ -182,38 +189,180 @@ fn init_file(
         init_project()?;
     }
 
+    write_new_session(file, title, agent, mode, artifact, config)
+}
+
+/// Write a new session, and when `artifact` is set, the plain markdown file it names.
+///
+/// Callers that already decided project init may call this directly. It does not
+/// touch `.agent-doc/` or the process working directory.
+fn write_new_session(
+    file: &Path,
+    title: Option<&str>,
+    agent: Option<&str>,
+    mode: Option<&str>,
+    artifact: Option<&Path>,
+    config: &Config,
+) -> Result<()> {
     if file.exists() {
         anyhow::bail!("file already exists: {}", file.display());
     }
+    if let Some(artifact) = artifact {
+        if artifact.exists() {
+            anyhow::bail!("file already exists: {}", artifact.display());
+        }
+        if paths_name_the_same_file(file, artifact) {
+            anyhow::bail!(
+                "artifact path must be a different file from the session: {}",
+                artifact.display()
+            );
+        }
+        require_artifact_template_mode(mode)?;
+    }
 
-    let title = title.unwrap_or("Untitled Session");
+    let label = artifact.map(artifact_queue_label).transpose()?;
+    let title = match (title, artifact) {
+        (Some(title), _) => title.to_string(),
+        (None, Some(artifact)) => title_from_path(artifact),
+        (None, None) => "Untitled Session".to_string(),
+    };
     let agent = agent
         .or(config.default_agent.as_deref())
         .unwrap_or("claude");
     let session_id = Uuid::new_v4();
-    let mode = mode.unwrap_or("append");
+    let mode = mode.unwrap_or(if artifact.is_some() {
+        "template"
+    } else {
+        "append"
+    });
 
     let content = if mode == "template" || mode == "stream" {
         let components = agent_doc_document::claim_scaffold::render_default_template_components("");
-        format!(
-            "---\nagent_doc_session: {}\nagent: {}\nagent_doc_format: template\nagent_doc_write: crdt\nenable_tool_search: true\n---\n\n# {}{}",
-            session_id, agent, title, components
-        )
+        let content = format!(
+            "---\nagent_doc_session: {session_id}\nagent: {agent}\nagent_doc_format: template\nagent_doc_write: crdt\nenable_tool_search: true\n---\n\n# {title}{components}"
+        );
+        if let Some(label) = label.as_deref() {
+            aim_queue_at_artifact(&content, label)?
+        } else {
+            content
+        }
     } else {
         format!(
-            "---\nagent_doc_session: {}\nagent: {}\n---\n\n# Session: {}\n\n## User\n\n",
-            session_id, agent, title
+            "---\nagent_doc_session: {session_id}\nagent: {agent}\n---\n\n# Session: {title}\n\n## User\n\n"
         )
     };
 
+    if let Some(artifact) = artifact {
+        write_artifact_file(artifact)?;
+    }
+    if let Err(error) = write_session_file(file, &content) {
+        if let Some(artifact) = artifact {
+            let _ = std::fs::remove_file(artifact);
+        }
+        return Err(error);
+    }
+    if let Some(artifact) = artifact {
+        eprintln!("Created artifact {}", artifact.display());
+    }
+    eprintln!("Created {}", file.display());
+    Ok(())
+}
+
+fn require_artifact_template_mode(mode: Option<&str>) -> Result<()> {
+    match mode {
+        None | Some("template") | Some("stream") => Ok(()),
+        Some(other) => anyhow::bail!(
+            "an artifact session is a template session; --mode {other} cannot be combined with --artifact"
+        ),
+    }
+}
+
+fn artifact_queue_label(artifact: &Path) -> Result<String> {
+    let name = artifact
+        .file_name()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
+    if !name.ends_with(".md") || name == ".md" {
+        anyhow::bail!(
+            "artifact file must be markdown (.md): {}",
+            artifact.display()
+        );
+    }
+    let raw = artifact.to_string_lossy().into_owned();
+    if raw.contains('\n') || raw.contains('\r') || raw.contains("<!--") || raw.contains("-->") {
+        anyhow::bail!(
+            "artifact path must be a single line and must not contain a marker: {}",
+            artifact.display()
+        );
+    }
+    let label = raw.strip_prefix("./").map(str::to_owned).unwrap_or(raw);
+    if label.is_empty() {
+        anyhow::bail!("artifact path is empty");
+    }
+    Ok(label)
+}
+
+fn artifact_markdown(artifact: &Path) -> String {
+    format!("# {}\n", title_from_path(artifact))
+}
+
+fn aim_queue_at_artifact(content: &str, label: &str) -> Result<String> {
+    let components = agent_doc_element::element::parse(content)?;
+    let queue = components
+        .iter()
+        .find(|component| component.name == agent_doc_element::element::QUEUE_COMPONENT)
+        .ok_or_else(|| anyhow::anyhow!("artifact session scaffold is missing agent:run"))?;
+    // The scaffold opener already ends at the following newline, so the row
+    // starts on the next line without a blank line above it.
+    Ok(queue.replace_content(content, &format!("- [ ] {label}\n")))
+}
+
+fn write_artifact_file(artifact: &Path) -> Result<()> {
+    if let Some(parent) = artifact.parent()
+        && !parent.as_os_str().is_empty()
+        && !parent.exists()
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+    std::fs::write(artifact, artifact_markdown(artifact))?;
+    Ok(())
+}
+
+fn write_session_file(file: &Path, content: &str) -> Result<()> {
     if let Some(parent) = file.parent()
+        && !parent.as_os_str().is_empty()
         && !parent.exists()
     {
         std::fs::create_dir_all(parent)?;
     }
     std::fs::write(file, content)?;
-    eprintln!("Created {}", file.display());
     Ok(())
+}
+
+fn paths_name_the_same_file(left: &Path, right: &Path) -> bool {
+    fn normalized(path: &Path) -> PathBuf {
+        let path = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            std::env::current_dir()
+                .unwrap_or_else(|_| PathBuf::from("."))
+                .join(path)
+        };
+        let mut out = PathBuf::new();
+        for component in path.components() {
+            match component {
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if !out.pop() {
+                        out.push("..");
+                    }
+                }
+                other => out.push(other.as_os_str()),
+            }
+        }
+        out
+    }
+    normalized(left) == normalized(right)
 }
 
 pub fn run(
@@ -221,11 +370,15 @@ pub fn run(
     title: Option<&str>,
     agent: Option<&str>,
     mode: Option<&str>,
+    artifact: Option<&Path>,
     config: &Config,
 ) -> Result<()> {
+    if artifact.is_some() && file.is_none() {
+        anyhow::bail!("--artifact requires a session document path");
+    }
     match file {
         None => init_project(),
-        Some(path) => init_file(path, title, agent, mode, config),
+        Some(path) => init_file(path, title, agent, mode, artifact, config),
     }
 }
 
@@ -316,5 +469,127 @@ mod tests {
 
         assert_eq!(outcome, SessionPreparation::Existing);
         assert_eq!(std::fs::read_to_string(&file).unwrap(), content);
+    }
+
+    #[test]
+    fn artifact_session_is_template_aimed_at_one_plain_markdown_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("sessions").join("plan-session.md");
+        let artifact = dir.path().join("plans").join("my-plan.md");
+
+        write_new_session(
+            &session,
+            None,
+            Some("claude"),
+            None,
+            Some(&artifact),
+            &Config::default(),
+        )
+        .unwrap();
+
+        let session_text = std::fs::read_to_string(&session).unwrap();
+        let artifact_text = std::fs::read_to_string(&artifact).unwrap();
+        let label = artifact.display().to_string();
+        assert_eq!(
+            artifact_queue_label(Path::new("plans/my-plan.md")).unwrap(),
+            "plans/my-plan.md"
+        );
+        assert_eq!(
+            artifact_queue_label(Path::new("./plans/my-plan.md")).unwrap(),
+            "plans/my-plan.md"
+        );
+
+        assert!(session_text.contains("agent_doc_format: template"));
+        assert!(session_text.contains("<!-- agent:run"));
+        assert!(session_text.contains("<!-- agent:exchange"));
+        assert!(!session_text.contains("agent:artifact"));
+        assert!(session_text.contains("# My plan"));
+
+        let components = agent_doc_element::element::parse(&session_text).unwrap();
+        assert!(
+            components
+                .iter()
+                .any(|component| component.name == "exchange"),
+            "session keeps agent:exchange"
+        );
+        for component in &components {
+            let body = component.content(&session_text);
+            if component.name == agent_doc_element::element::QUEUE_COMPONENT {
+                assert_eq!(body, format!("- [ ] {label}\n"));
+                assert_eq!(body.matches("- [ ]").count(), 1);
+            } else {
+                assert_eq!(
+                    body.matches("- [ ]").count(),
+                    0,
+                    "{} must not name other work",
+                    component.name
+                );
+            }
+        }
+
+        assert!(artifact_text.starts_with("# My plan\n"));
+        assert!(!artifact_text.contains("<!-- agent:"));
+        assert!(!artifact_text.contains("agent_doc_format"));
+        assert!(!artifact_text.contains("## Draft"));
+        assert!(!artifact_text.contains("agent:run"));
+        assert!(!artifact_text.contains("agent:exchange"));
+        assert!(!artifact_text.contains("agent:artifact"));
+    }
+
+    #[test]
+    fn artifact_session_refuses_append_mode_and_a_missing_session_file() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
+        let artifact = dir.path().join("plan.md");
+        let error = write_new_session(
+            &session,
+            None,
+            None,
+            Some("append"),
+            Some(&artifact),
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("template session"), "{error}");
+        assert!(!session.exists());
+        assert!(!artifact.exists());
+
+        let error = run(
+            None,
+            None,
+            None,
+            None,
+            Some(Path::new("plan.md")),
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("--artifact"), "{error}");
+    }
+
+    #[test]
+    fn artifact_session_refuses_an_existing_or_non_markdown_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
+        let artifact = dir.path().join("plan.md");
+        std::fs::write(&artifact, "already\n").unwrap();
+        let error = write_new_session(
+            &session,
+            None,
+            None,
+            Some("template"),
+            Some(&artifact),
+            &Config::default(),
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("already exists"), "{error}");
+        assert!(!session.exists());
+        assert_eq!(std::fs::read_to_string(&artifact).unwrap(), "already\n");
+
+        let notes = dir.path().join("notes.txt");
+        let error = write_new_session(&session, None, None, None, Some(&notes), &Config::default())
+            .unwrap_err();
+        assert!(error.to_string().contains(".md"), "{error}");
+        assert!(!session.exists());
+        assert!(!notes.exists());
     }
 }

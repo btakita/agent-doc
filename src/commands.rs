@@ -66,7 +66,7 @@ fn all_commands() -> Vec<CommandInfo> {
     ));
     cmds.push(cmd(
         "/agent-doc init",
-        "<FILE>",
+        "<FILE> [--artifact <ARTIFACT.md>]",
         "Scaffold a new session document",
     ));
     cmds.push(cmd(

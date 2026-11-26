@@ -2892,6 +2892,9 @@ enum Commands {
         /// Document mode: append (default) or template
         #[arg(long)]
         mode: Option<String>,
+        /// Plain markdown plan or spec. Writes that file with no agent markers and names only its path in agent:run.
+        #[arg(long)]
+        artifact: Option<PathBuf>,
     },
     /// Initialize an existing markdown file as a template session, then start it
     #[command(name = "init-session")]
@@ -8150,11 +8153,13 @@ fn try_main() -> anyhow::Result<()> {
             title,
             agent,
             mode,
+            artifact,
         } => init::run(
             file.as_deref(),
             title.as_deref(),
             agent.as_deref(),
             mode.as_deref(),
+            artifact.as_deref(),
             &config,
         ),
         Commands::InitSession {
@@ -13537,6 +13542,34 @@ mod recycle_force_tests {
                 assert_eq!(position.as_deref(), Some("right"));
             }
             _ => panic!("expected init-session subcommand"),
+        }
+    }
+
+    #[test]
+    fn init_artifact_parses_the_session_and_artifact_paths() {
+        let cmd = parse(&[
+            "agent-doc",
+            "init",
+            "sessions/plan-session.md",
+            "Plan session",
+            "--artifact",
+            "plans/my-plan.md",
+        ]);
+        match cmd {
+            Commands::Init {
+                file,
+                title,
+                agent,
+                mode,
+                artifact,
+            } => {
+                assert_eq!(file.as_deref(), Some(Path::new("sessions/plan-session.md")));
+                assert_eq!(title.as_deref(), Some("Plan session"));
+                assert!(agent.is_none());
+                assert!(mode.is_none());
+                assert_eq!(artifact.as_deref(), Some(Path::new("plans/my-plan.md")));
+            }
+            _ => panic!("expected init subcommand"),
         }
     }
 

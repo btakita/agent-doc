@@ -78,6 +78,13 @@ an associated runbook is loaded only when that preset is invoked.
 `agent:queue` components remain fully supported as a compatibility alias; Agent
 Doc preserves their spelling, while new documents and generated components use
 `agent:run`.
+
+An artifact session is one of those template sessions aimed at a single plan or
+spec. `agent-doc init <SESSION.md> --artifact <ARTIFACT.md>` writes both files.
+The session keeps `agent_doc_format: template`, `agent:run`, and
+`agent:exchange`, and its queue names only the artifact path. The artifact is
+ordinary markdown: no `agent:*` marker, no `agent_doc_format`, and no
+`## Draft`. There is no `agent:artifact` element.
 Structured presets may also declare `model` and `effort` for queue-dispatched
 subagents. Queue-marker overrides win, then item-specific and queue presets,
 then the session's `subagent_model` / `subagent_effort` defaults. Omitted policy

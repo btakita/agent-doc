@@ -168,6 +168,7 @@ Two modes:
 
 - `agent-doc init` initializes the project-level `.agent-doc/` directories and installs bundled skill content.
 - `agent-doc init <FILE> [TITLE] [--agent NAME]` scaffolds a new session document and lazily runs project init first when needed.
+- `agent-doc init <FILE> [TITLE] [--agent NAME] --artifact <ARTIFACT.md>` scaffolds an artifact session. `<FILE>` is one normal template control session (`agent_doc_format: template`, `<!-- agent:run -->`, and `<!-- agent:exchange -->`) whose queue names `<ARTIFACT.md>` and no other work. `<ARTIFACT.md>` is a second file of ordinary markdown: no `agent:*` marker, no `agent_doc_format`, and no `## Draft`. The worker edits that whole file. The binary keeps writing inside the session elements. There is no `agent:artifact` element. `--mode append` cannot be combined with `--artifact`. Omitting `--mode` still writes the template session. The command fails if either file already exists, if the two paths are the same file, or if the artifact path is not `.md`.
 - Project init reports only installs it made: the skill installer prints the
   real harness and path. When no harness is detected from the calling shell
   (the generic `.agent/skills/` target, which no harness reads on its own), init

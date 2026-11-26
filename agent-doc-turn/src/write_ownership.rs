@@ -672,6 +672,20 @@ pub fn editor_replica_recovery() -> &'static str {
      same command; restart that editor only if the retry is refused again (#84)."
 }
 
+/// Route guidance when an `install_fanout` recycle is already requested and the
+/// editor is still not serving its replica.
+///
+/// [`editor_replica_recovery`] stays the remedy when no sender recycle is
+/// outstanding. Prescribing that sentence while the stale sender's re-exec is
+/// already scheduled contradicts the recycle notice.
+pub fn install_fanout_outstanding_replica_recovery() -> &'static str {
+    "An install_fanout safe-boundary recycle is already requested. Wait for the route-owned \
+     supervisor to re-exec onto the installed build at its next idle boundary, then retry once \
+     that sender is on the installed build. Do not run `agent-doc admin reload-lib`, \
+     `agent-doc admin recycle`, or `restart-supervisor`. Do not adopt the on-disk copy while \
+     the editor is still attached."
+}
+
 /// The state token every reader of the exhausted replica-rebuild record names
 /// (`#splicesessionack`). Mirrors the controller's
 /// `retained_persistence_replica_rebuild_exhausted ... state=` field.
@@ -2561,6 +2575,29 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn install_fanout_route_recovery_does_not_prescribe_reload_lib() {
+        let recovery = install_fanout_outstanding_replica_recovery();
+        assert!(recovery.contains("install_fanout"), "{recovery}");
+        assert!(recovery.contains("next idle boundary"), "{recovery}");
+        assert!(
+            !recovery.contains("Run `agent-doc admin reload-lib`"),
+            "{recovery}"
+        );
+        assert!(recovery.contains("Do not run `agent-doc admin reload-lib`"),);
+        assert!(recovery.contains("`agent-doc admin recycle`"), "{recovery}");
+        assert!(recovery.contains("restart-supervisor"), "{recovery}");
+        assert!(
+            recovery.contains("Do not adopt the on-disk copy"),
+            "{recovery}"
+        );
+        assert_ne!(recovery, editor_replica_recovery());
+        assert!(
+            editor_replica_recovery().contains("Run `agent-doc admin reload-lib`"),
+            "the #84 sentence stays the remedy when no sender recycle is outstanding"
+        );
     }
 
     /// GH #131 shape 2: `session-check`'s integrity gate prescribed `admin

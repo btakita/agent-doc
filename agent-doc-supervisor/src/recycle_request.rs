@@ -98,6 +98,15 @@ pub fn recycle_reason_is_binary_replacement(reason: &str) -> bool {
     )
 }
 
+/// An install fan-out already asked the route-owned supervisor to re-exec onto
+/// the installed build. `install_fanout_force` is the same scheduled recycle.
+pub fn recycle_reason_is_install_fanout(reason: &str) -> bool {
+    matches!(
+        reason,
+        RECYCLE_REQUEST_INSTALL_FANOUT | RECYCLE_REQUEST_INSTALL_FANOUT_FORCE
+    )
+}
+
 /// Whether the cause named by a durable recycle request still holds in the
 /// supervisor generation that is about to consume it.
 ///
@@ -250,6 +259,22 @@ mod tests {
 
         assert_eq!(request.reason, RECYCLE_REQUEST_INSTALL_FANOUT);
         assert_eq!(request.requested_secs, 42);
+    }
+
+    #[test]
+    fn install_fanout_reasons_are_the_scheduled_installed_build_recycle() {
+        assert!(recycle_reason_is_install_fanout(
+            RECYCLE_REQUEST_INSTALL_FANOUT
+        ));
+        assert!(recycle_reason_is_install_fanout(
+            RECYCLE_REQUEST_INSTALL_FANOUT_FORCE
+        ));
+        assert!(!recycle_reason_is_install_fanout(
+            RECYCLE_REQUEST_STALE_SUPERVISOR_TURN_STAGE
+        ));
+        assert!(!recycle_reason_is_install_fanout(
+            RECYCLE_REQUEST_STALE_EDITOR_REPLICA_TURN_STAGE
+        ));
     }
 
     #[test]

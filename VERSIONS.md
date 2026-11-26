@@ -2,6 +2,17 @@
 
 agent-doc is alpha software. Expect breaking changes between minor versions.
 
+## 0.35.592
+
+- **Background GitHub observation (`#operatorshouldnneed`)** (`9cbdfb4e4a`, `5a6b489efb`, `2e124c20b8`, `038fae38f6`, `c77b818068`). The controller observes the GitHub state of tracked work, watches queue heads and recent done entries, and refreshes that state on its schedule loop. A failed lookup has a named TTL. Tree status lists merged and closed URL headings.
+- **Queue handoff, row identity, and closeout** (`5a7e6967c4`, `c5e348569d`, `0ec2402120`, `50beabdc06`, `17902295e0`, `343ecc0831`, `6f50e9abdc`, `1b7b7dd572`). Binary-owned cleanup retires DONE/MOOT queue trees (`#inerttreestrike`). `queue handoff --all` hands off every running claim (`#autohandoff`). A session trigger queues beside other work. A row identity stays synced with its action items. Merged operator-verify pull requests are re-evaluated (`#prverify`). A nested `~~done~~` strikes its operator-verify parent (`#opdonereply`). An unlabeled packet row drops a trailing reply glyph (`#barereplymarker`). `patch` takes `run`, a one-line `queue edit`, and an honest follow-up count (`#patchruncomponent`).
+- **Serve views** (`661a70a95d`). Read-only fleet and queue-tree views.
+- **Empty Obsidian comments** (`8f661627d7`). Empty Obsidian comments and agent-only free-text twins are dropped.
+- **Grok processes a prompt that arrives during a turn** (`07b4edf499`, `b3a524a3a7`, `2703e8b959`). The skill tells Grok to process that prompt immediately (`#grokpromptnow`). An explicit Run Agent Doc into a live Grok turn is delivered now (`#groksteerdeliver`): one Enter on an empty composer while `send a message to interrupt` is up, or a second Enter after the paste on any other live turn. A later click folds into that reference. Pool refills still do not press Enter on the interrupt hint. The send-now Enter check is one collapsed condition so clippy stays clean.
+- **JetBrains schema-5 sibling columns (issue 443)** (`3171cd0604`, `2ce77b592e`, `1952dd4f5c`). A schema-5 accept publishes measured sibling columns. The 262 generation for that layout change is `0.2.1062`. An unmarked operator prompt is kept across a file-cache conflict.
+- **Route and CI** (`17a117191e`, `159e118377`, `46e56b778c`, `1b05589a93`, `4161a83758`). A retained busy generation stays classified as running. Clippy errors that blocked the release are cleared. The second FileCacheConflictGuard once-flag is ledgered. Route parity names the upper-case Claude busy cue. Bundled pending-ops copies match.
+- JetBrains classic `0.2.1050` and the modular 262–263.* ZIP `0.2.1062`; `pluginReleaseVersion` moves to `0.35.592`. VS Code stays `0.2.106`. Zed stays `0.1.8`.
+
 ## 0.35.591
 
 - **Prompt edge operators (`#pipeprompt`)** (`46aa043ecf`, `da965ccd2e`, `28f32c1475`, `881350068c`, `4760f21ecf`, `e309b40130`). A row's suffix now chooses how its children join it: ` |` pipes within one task, ` |+` flattens the whole subtree into one chain, ` >` folds the row and its list into one task, and ` |>` hands each stage to a new subagent with the previous stage's hand-back as its input. A ` |>` head finishes stage 1 as `✅` and is struck together with its last stage. `▶️`/`✅` mark the running and finished stages. Numbered children run in order and bulleted children fan out. Piped preset chains follow the ordered-preset closeout rule (`#presetorder`), and the inline form `- #review | #address` is accepted when every segment is a preset.

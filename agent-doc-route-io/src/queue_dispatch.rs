@@ -418,29 +418,132 @@ fn resolve_route_queue_document_content(
     reason: &str,
     resolve: impl FnMut() -> Result<String>,
 ) -> Result<String> {
-    resolve_route_queue_document_content_awaiting(file, reason, resolve, |file| {
-        agent_doc_document_realtime_io::wait_for_editor_replica_liveness_change(
-            file,
-            ROUTE_QUEUE_RESOLVE_WITNESS_WAIT,
-        )
-    })
+    resolve_route_queue_document_content_observing(
+        file,
+        reason,
+        resolve,
+        |file| {
+            agent_doc_document_realtime_io::wait_for_editor_replica_liveness_change(
+                file,
+                ROUTE_QUEUE_RESOLVE_WITNESS_WAIT,
+            )
+        },
+        route_sender_recycle_observation,
+        |file| wait_for_route_sender_installed(file, ROUTE_QUEUE_RESOLVE_WITNESS_WAIT),
+    )
+}
+
+/// Read-only view of an already-requested install-fanout recycle.
+///
+/// `sender_on_installed_build` is false when the host supervisor is stale or
+/// its binary cannot be proved. This does not write a recycle request.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct RouteSenderRecycleObservation {
+    outstanding_install_fanout: bool,
+    sender_on_installed_build: bool,
+    resolve_blocks_sender_reexec: bool,
+}
+
+fn route_sender_recycle_observation(file: &Path) -> RouteSenderRecycleObservation {
+    let facts =
+        agent_doc_controller_io::project_controller::route_install_fanout_sender_facts(file);
+    RouteSenderRecycleObservation {
+        outstanding_install_fanout: facts.outstanding_install_fanout,
+        // Unproven freshness is not "on the installed build": an outstanding
+        // install-fanout recycle must not fall through to the editor-library refusal.
+        sender_on_installed_build: facts.sender_on_installed_build.unwrap_or(false),
+        resolve_blocks_sender_reexec: facts.resolve_blocks_sender_reexec,
+    }
+}
+
+fn wait_for_route_sender_installed(file: &Path, budget: std::time::Duration) -> bool {
+    wait_until_with(
+        budget,
+        || {
+            let observed = route_sender_recycle_observation(file);
+            // The request is consumed when the supervisor takes the re-exec.
+            // That is the same signal as the sender mapping the installed build:
+            // retry the resolve instead of prescribing reload-lib.
+            observed.sender_on_installed_build || !observed.outstanding_install_fanout
+        },
+        std::thread::sleep,
+    )
+}
+
+fn wait_until_with(
+    budget: std::time::Duration,
+    mut ready: impl FnMut() -> bool,
+    mut sleep: impl FnMut(std::time::Duration),
+) -> bool {
+    const POLL: std::time::Duration = std::time::Duration::from_millis(50);
+    let deadline = std::time::Instant::now() + budget;
+    loop {
+        if ready() {
+            return true;
+        }
+        let now = std::time::Instant::now();
+        if now >= deadline {
+            return false;
+        }
+        sleep(POLL.min(deadline - now));
+    }
+}
+
+fn outstanding_install_fanout_resolve_error(file: &Path, reason: &str) -> anyhow::Error {
+    anyhow::anyhow!(
+        "{reason}: failed to resolve current document {} while the editor is still attached. {}",
+        file.display(),
+        agent_doc_turn::write_ownership::install_fanout_outstanding_replica_recovery(),
+    )
 }
 
 /// `#witnessretrygate` — resolve the document, retrying once across a *proven*
 /// editor replica registration change.
 ///
 /// The witness wait is injected so tests drive the retry gate without a live
-/// reliable-sync plane.
+/// reliable-sync plane. Sender-recycle observations are absent here; production
+/// resolution uses [`resolve_route_queue_document_content`].
 fn resolve_route_queue_document_content_awaiting(
+    file: &Path,
+    reason: &str,
+    resolve: impl FnMut() -> Result<String>,
+    await_liveness_change: impl FnMut(&Path) -> bool,
+) -> Result<String> {
+    resolve_route_queue_document_content_observing(
+        file,
+        reason,
+        resolve,
+        await_liveness_change,
+        |_file| RouteSenderRecycleObservation {
+            outstanding_install_fanout: false,
+            sender_on_installed_build: false,
+            resolve_blocks_sender_reexec: false,
+        },
+        |_file| false,
+    )
+}
+
+/// Resolve the document, accounting for an already-requested `install_fanout`
+/// recycle of the route-owned sender.
+///
+/// A missing-replica refusal still retries when the editor witness changes.
+/// When that refusal would prescribe `reload-lib` and an install-fanout recycle
+/// is already outstanding, the route waits for the scheduled re-exec (or
+/// retries once the sender is on the installed build) instead of failing closed
+/// on that remedy. It does not start a second recycle and it does not read disk.
+fn resolve_route_queue_document_content_observing(
     file: &Path,
     reason: &str,
     mut resolve: impl FnMut() -> Result<String>,
     mut await_liveness_change: impl FnMut(&Path) -> bool,
+    mut observe_sender_recycle: impl FnMut(&Path) -> RouteSenderRecycleObservation,
+    mut await_sender_installed: impl FnMut(&Path) -> bool,
 ) -> Result<String> {
     // `#implementlazilyowned`: Lazily owns the bounded resolve. A recovery
     // refusal is `Retryable` (the authority is unchanged until a registration
     // lands); the witness wait is the pace, and an unchanged witness stops the
-    // drive fail-closed.
+    // drive fail-closed unless an outstanding install-fanout recycle says the
+    // stale sender is the cause.
     let drive = agent_doc_effect_cas::drive_effect_epochs(
         &format!("route-queue-resolve:{reason}:{}", file.display()),
         ROUTE_QUEUE_UNOBSERVED_AUTHORITY,
@@ -456,6 +559,62 @@ fn resolve_route_queue_document_content_awaiting(
             Err(err) => Err(err),
         },
         &mut |attempt, err: &anyhow::Error| {
+            let observed = observe_sender_recycle(file);
+            let attached_reload_editor_refusal =
+                agent_doc_document_realtime_io::attached_editor_disk_read_refusal(err).is_some_and(
+                    |refusal| {
+                        refusal.recovery
+                            == agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor
+                    },
+                );
+            let decision =
+                agent_doc_turn::authority_recovery::decide_route_missing_replica_recovery(
+                    agent_doc_turn::authority_recovery::RouteMissingReplicaRecoveryFacts {
+                        attached_reload_editor_refusal,
+                        outstanding_install_fanout: observed.outstanding_install_fanout,
+                        sender_on_installed_build: observed.sender_on_installed_build,
+                        resolve_blocks_sender_reexec: observed.resolve_blocks_sender_reexec,
+                    },
+                );
+            use agent_doc_turn::authority_recovery::RouteMissingReplicaRecovery::{
+                DeferToScheduledRecycle, RetrySenderInstalled, WaitForScheduledRecycle, WitnessGate,
+            };
+            if !matches!(decision, WitnessGate) {
+                let sender_installed = match decision {
+                    WaitForScheduledRecycle => await_sender_installed(file),
+                    RetrySenderInstalled => true,
+                    DeferToScheduledRecycle | WitnessGate => false,
+                };
+                let terminal = match decision {
+                    WaitForScheduledRecycle if sender_installed => false,
+                    RetrySenderInstalled => false,
+                    WaitForScheduledRecycle | DeferToScheduledRecycle => true,
+                    WitnessGate => false,
+                };
+                agent_doc_ops_log_io::log_op(
+                    file,
+                    &format!(
+                        "{reason}_resolve_retry file={} attempt={} max_attempts={} reason=install_fanout_sender_recycle decision={} sender_installed={} error={}",
+                        file.display(),
+                        attempt,
+                        ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS,
+                        match decision {
+                            WaitForScheduledRecycle if sender_installed => "retry_sender_installed",
+                            WaitForScheduledRecycle => "defer_scheduled_recycle",
+                            RetrySenderInstalled => "retry_sender_installed",
+                            DeferToScheduledRecycle => "defer_scheduled_recycle",
+                            WitnessGate => "witness_gate",
+                        },
+                        sender_installed,
+                        agent_doc_secret_redact::redact(&format!("{err:#}")).replace('\n', " "),
+                    ),
+                );
+                return if terminal {
+                    Err(outstanding_install_fanout_resolve_error(file, reason))
+                } else {
+                    Ok(agent_doc_effect_cas::Pace::Continue)
+                };
+            }
             // Re-asking against the same liveness witness is a provable
             // no-op: both missing-replica recovery latches are keyed on it,
             // so the second attempt would skip the re-registration loop and
@@ -670,5 +829,298 @@ mod tests {
 
         assert_eq!(calls, ROUTE_QUEUE_MAX_RESOLVE_ATTEMPTS as usize);
         assert!(format!("{err:#}").contains("disk read authority is refused"));
+    }
+
+    fn reload_editor_refusal(file: &Path) -> anyhow::Error {
+        anyhow::Error::new(
+            agent_doc_document_realtime_io::AttachedEditorDiskReadRefused {
+                file: file.to_path_buf(),
+                reason: "missing_replica".into(),
+                remedy: agent_doc_turn::write_ownership::editor_replica_recovery().to_string(),
+                recovery:
+                    agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::ReloadEditor,
+            },
+        )
+    }
+
+    fn stale_install_fanout(blocks_reexec: bool) -> RouteSenderRecycleObservation {
+        RouteSenderRecycleObservation {
+            outstanding_install_fanout: true,
+            sender_on_installed_build: false,
+            resolve_blocks_sender_reexec: blocks_reexec,
+        }
+    }
+
+    fn assert_install_fanout_deferral(err: &anyhow::Error) {
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("install_fanout safe-boundary recycle is already requested"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("Run `agent-doc admin reload-lib`"),
+            "{rendered}"
+        );
+        assert!(
+            !rendered.contains("recovery exhausted and disk read authority is refused"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("Do not adopt the on-disk copy"),
+            "{rendered}"
+        );
+        assert!(
+            agent_doc_document_realtime_io::attached_editor_disk_read_refusal(err).is_none(),
+            "the reload-lib refusal must not remain the terminal error: {rendered}"
+        );
+    }
+
+    #[test]
+    fn route_queue_resolution_waits_for_scheduled_install_fanout_then_retries() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+        let mut sender_waits = 0usize;
+        let mut witness_waits = 0usize;
+
+        let content = resolve_route_queue_document_content_observing(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                if calls == 1 {
+                    return Err(reload_editor_refusal(&file));
+                }
+                Ok("live editor content".to_string())
+            },
+            |_| {
+                witness_waits += 1;
+                false
+            },
+            |_| stale_install_fanout(false),
+            |_| {
+                sender_waits += 1;
+                true
+            },
+        )
+        .unwrap();
+
+        assert_eq!(content, "live editor content");
+        assert_eq!(calls, 2);
+        assert_eq!(sender_waits, 1);
+        assert_eq!(
+            witness_waits, 0,
+            "an outstanding install_fanout recycle is not an unchanged-witness refusal"
+        );
+    }
+
+    #[test]
+    fn route_queue_resolution_defers_when_scheduled_install_fanout_does_not_land() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let err = resolve_route_queue_document_content_observing(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                Err(reload_editor_refusal(&file))
+            },
+            |_| panic!("witness wait must not decide an outstanding install_fanout recycle"),
+            |_| stale_install_fanout(false),
+            |_| false,
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert_install_fanout_deferral(&err);
+    }
+
+    #[test]
+    fn route_queue_resolution_does_not_wait_inside_the_stale_sender() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+        let mut sender_waits = 0usize;
+
+        let err = resolve_route_queue_document_content_observing(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                Err(reload_editor_refusal(&file))
+            },
+            |_| panic!("witness wait must not decide an outstanding install_fanout recycle"),
+            |_| stale_install_fanout(true),
+            |_| {
+                sender_waits += 1;
+                true
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        assert_eq!(sender_waits, 0);
+        assert_install_fanout_deferral(&err);
+    }
+
+    #[test]
+    fn route_queue_resolution_retries_once_when_install_fanout_sender_is_installed() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+        let mut sender_waits = 0usize;
+
+        let err = resolve_route_queue_document_content_observing(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                Err(reload_editor_refusal(&file))
+            },
+            |_| false,
+            |_| RouteSenderRecycleObservation {
+                outstanding_install_fanout: true,
+                sender_on_installed_build: true,
+                resolve_blocks_sender_reexec: false,
+            },
+            |_| {
+                sender_waits += 1;
+                false
+            },
+        )
+        .unwrap_err();
+
+        assert_eq!(
+            calls, 2,
+            "retry once after the sender is on the installed build"
+        );
+        assert_eq!(sender_waits, 0);
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("Run `agent-doc admin reload-lib`"),
+            "a fresh sender with the replica still missing keeps #84: {rendered}"
+        );
+    }
+
+    #[test]
+    fn route_queue_resolution_keeps_reload_lib_without_an_install_fanout_recycle() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let err = resolve_route_queue_document_content_observing(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                Err(reload_editor_refusal(&file))
+            },
+            |_| false,
+            |_| RouteSenderRecycleObservation {
+                outstanding_install_fanout: false,
+                sender_on_installed_build: false,
+                resolve_blocks_sender_reexec: false,
+            },
+            |_| panic!("no install_fanout recycle is scheduled"),
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("Run `agent-doc admin reload-lib`"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("recovery exhausted and disk read authority is refused"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn route_queue_resolution_does_not_defer_a_restart_refusal_for_install_fanout() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let err = resolve_route_queue_document_content_observing(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                Err(anyhow::Error::new(
+                    agent_doc_document_realtime_io::AttachedEditorDiskReadRefused {
+                        file: file.clone(),
+                        reason: "missing_replica".into(),
+                        remedy: "Restart that editor so it re-registers its replica".into(),
+                        recovery: agent_doc_turn::authority_recovery::AttachedEditorRecoveryDecision::RestartEditor,
+                    },
+                ))
+            },
+            |_| false,
+            |_| stale_install_fanout(false),
+            |_| panic!("restart is not the install_fanout reload-lib conflict"),
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        let rendered = format!("{err:#}");
+        assert!(rendered.contains("Restart that editor"), "{rendered}");
+        assert!(
+            !rendered.contains("install_fanout safe-boundary recycle is already requested"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn route_queue_resolution_does_not_treat_prose_only_refusal_as_install_fanout() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let file = dir.path().join("session.md");
+        let mut calls = 0usize;
+
+        let err = resolve_route_queue_document_content_observing(
+            &file,
+            "route_queue_activation",
+            || {
+                calls += 1;
+                anyhow::bail!(
+                    "editor is still attached for {}; missing_replica recovery exhausted and disk read authority is refused. {}",
+                    file.display(),
+                    agent_doc_turn::write_ownership::editor_replica_recovery(),
+                )
+            },
+            |_| false,
+            |_| stale_install_fanout(false),
+            |_| panic!("an untyped refusal keeps the witness gate"),
+        )
+        .unwrap_err();
+
+        assert_eq!(calls, 1);
+        let rendered = format!("{err:#}");
+        assert!(
+            rendered.contains("Run `agent-doc admin reload-lib`"),
+            "{rendered}"
+        );
+        assert!(
+            rendered.contains("recovery exhausted and disk read authority is refused"),
+            "{rendered}"
+        );
+    }
+
+    #[test]
+    fn route_queue_resolution_install_fanout_does_not_request_another_recycle() {
+        let source = include_str!("queue_dispatch.rs");
+        let start = source
+            .find("fn route_sender_recycle_observation")
+            .expect("observation");
+        let end = source
+            .find("fn wait_for_route_sender_installed")
+            .expect("wait");
+        let body = &source[start..end];
+        assert!(!body.contains("request_recycle"), "{body}");
+        assert!(!body.contains("reload-lib"), "{body}");
+        assert!(!body.contains("restart-supervisor"), "{body}");
     }
 }

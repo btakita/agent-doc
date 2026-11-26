@@ -6146,16 +6146,7 @@ fn controller_adoption_status(project_root: &Path) -> Result<ControllerStatus> {
 /// PID, a dead PID, an unreadable `/proc/<pid>`, or any stat error yields `None` so this
 /// read-only check can never block a live cycle.
 pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<String> {
-    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
-    let record = durable_actor_binding(&project_root, file).ok().flatten()?;
-    let conn = open_state_db(&project_root).ok()?;
-    let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
-        .ok()
-        .flatten()?;
-    let supervisor_pid = lease.supervisor_pid?;
-    if !process_is_alive(supervisor_pid) {
-        return None;
-    }
+    let supervisor_pid = route_owned_host_supervisor_pid(file)?;
     // `#fccsupwarn2`: compare the supervisor's RUNNING binary inode (via
     // `/proc/<pid>/exe`) against the installed binary's inode. A supervisor that
     // hot-reloaded onto the fresh binary in place (`execve`) maps the install inode and
@@ -6166,6 +6157,63 @@ pub(crate) fn host_supervisor_stale_warning_for_doc(file: &Path) -> Option<Strin
     Some(status::host_supervisor_stale_warning_message(
         supervisor_pid,
     ))
+}
+
+/// Live route-owned host supervisor pid for `file`, if the lease names one that
+/// is still alive. Fail-open: missing project, binding, lease, or pid is `None`.
+fn route_owned_host_supervisor_pid(file: &Path) -> Option<u32> {
+    let project_root = agent_doc_project_root_io::project_root_containing(file)?;
+    let record = durable_actor_binding(&project_root, file).ok().flatten()?;
+    let conn = open_state_db(&project_root).ok()?;
+    let lease = load_supervisor_lease_from_db(&conn, &record.document_id, record.generation)
+        .ok()
+        .flatten()?;
+    let supervisor_pid = lease.supervisor_pid?;
+    process_is_alive(supervisor_pid).then_some(supervisor_pid)
+}
+
+/// Read-only sender facts for a route resolve that must not prescribe
+/// `reload-lib` while an install-fanout recycle is already requested.
+///
+/// This never writes a recycle request. `sender_on_installed_build` is `None`
+/// when the host supervisor's binary cannot be proved fresh or stale.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteInstallFanoutSenderFacts {
+    pub outstanding_install_fanout: bool,
+    pub sender_on_installed_build: Option<bool>,
+    /// This process is the stale host supervisor, so a wait here would hold the
+    /// idle boundary its re-exec needs.
+    pub resolve_blocks_sender_reexec: bool,
+}
+
+pub fn route_install_fanout_sender_facts(file: &Path) -> RouteInstallFanoutSenderFacts {
+    let outstanding = agent_doc_supervisor_io::recycle_request::read_outstanding_recycle_request(
+        &file.to_string_lossy(),
+    );
+    let outstanding_install_fanout = outstanding.as_ref().is_some_and(|request| {
+        agent_doc_supervisor::recycle_request::recycle_reason_is_install_fanout(
+            &request.latest.reason,
+        )
+    });
+    if !outstanding_install_fanout {
+        return RouteInstallFanoutSenderFacts {
+            outstanding_install_fanout: false,
+            sender_on_installed_build: None,
+            resolve_blocks_sender_reexec: false,
+        };
+    }
+    let supervisor_pid = route_owned_host_supervisor_pid(file);
+    let sender_on_installed_build = supervisor_pid.and_then(|pid| {
+        let installed = current_binary_identity().ok()?;
+        host_supervisor_binary_is_stale(pid, &installed.path).map(|stale| !stale)
+    });
+    let resolve_blocks_sender_reexec =
+        sender_on_installed_build == Some(false) && supervisor_pid == Some(std::process::id());
+    RouteInstallFanoutSenderFacts {
+        outstanding_install_fanout: true,
+        sender_on_installed_build,
+        resolve_blocks_sender_reexec,
+    }
 }
 
 /// Final editor-route supervisor freshness, classified across the route effect.

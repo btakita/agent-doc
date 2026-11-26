@@ -80,6 +80,63 @@ pub enum AttachedEditorRecoveryDecision {
     ReloadEditor,
 }
 
+/// Facts for [`decide_route_missing_replica_recovery`].
+///
+/// The route already holds an attached-editor disk-read refusal. These facts
+/// say whether that refusal may be shown, or whether an `install_fanout`
+/// recycle already scheduled for the installed build has to run first.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RouteMissingReplicaRecoveryFacts {
+    /// The refusal's terminal class is [`AttachedEditorRecoveryDecision::ReloadEditor`].
+    /// Restart and reregister remedies are not this conflict.
+    pub attached_reload_editor_refusal: bool,
+    /// A safe-boundary recycle with an install-fanout reason is already requested.
+    /// The route must not schedule another one.
+    pub outstanding_install_fanout: bool,
+    /// The route-owned host supervisor is already executing the installed build.
+    pub sender_on_installed_build: bool,
+    /// This resolve is the stale supervisor. Waiting here holds the idle
+    /// boundary its re-exec needs.
+    pub resolve_blocks_sender_reexec: bool,
+}
+
+/// What `route_queue_activation` does with an exhausted missing-replica refusal.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RouteMissingReplicaRecovery {
+    /// No outstanding install-fanout recycle. Keep the refusal's own remedy
+    /// (#84 `reload-lib` when the class is reload) and retry only if the editor
+    /// replica witness changes.
+    WitnessGate,
+    /// The sender is already on the installed build. Retry the resolve once.
+    RetrySenderInstalled,
+    /// Wait for the already-scheduled idle-boundary re-exec, then retry if the
+    /// sender lands on the installed build.
+    WaitForScheduledRecycle,
+    /// Waiting would hold the stale sender's idle boundary. Stop this resolve
+    /// without prescribing `reload-lib` and without another recycle.
+    DeferToScheduledRecycle,
+}
+
+/// Route recovery when missing-replica exhaustion would otherwise prescribe
+/// `reload-lib` while an `install_fanout` recycle is already outstanding.
+///
+/// Disk stays refused for an attached editor. This chooses the route's next
+/// step only; it does not read disk and it does not request a recycle.
+pub const fn decide_route_missing_replica_recovery(
+    facts: RouteMissingReplicaRecoveryFacts,
+) -> RouteMissingReplicaRecovery {
+    if !facts.attached_reload_editor_refusal || !facts.outstanding_install_fanout {
+        return RouteMissingReplicaRecovery::WitnessGate;
+    }
+    if facts.sender_on_installed_build {
+        RouteMissingReplicaRecovery::RetrySenderInstalled
+    } else if facts.resolve_blocks_sender_reexec {
+        RouteMissingReplicaRecovery::DeferToScheduledRecycle
+    } else {
+        RouteMissingReplicaRecovery::WaitForScheduledRecycle
+    }
+}
+
 /// Decide terminal recovery without consulting presentation strings.
 pub const fn decide_attached_editor_recovery(
     facts: AttachedEditorRecoveryFacts,
@@ -287,6 +344,63 @@ mod tests {
                 "{observation:?}"
             );
         }
+    }
+
+    #[test]
+    fn outstanding_install_fanout_does_not_prescribe_reload_while_the_sender_is_stale() {
+        let base = RouteMissingReplicaRecoveryFacts {
+            attached_reload_editor_refusal: true,
+            outstanding_install_fanout: true,
+            sender_on_installed_build: false,
+            resolve_blocks_sender_reexec: false,
+        };
+        assert_eq!(
+            decide_route_missing_replica_recovery(base),
+            RouteMissingReplicaRecovery::WaitForScheduledRecycle,
+        );
+        assert_eq!(
+            decide_route_missing_replica_recovery(RouteMissingReplicaRecoveryFacts {
+                resolve_blocks_sender_reexec: true,
+                ..base
+            }),
+            RouteMissingReplicaRecovery::DeferToScheduledRecycle,
+        );
+        assert_eq!(
+            decide_route_missing_replica_recovery(RouteMissingReplicaRecoveryFacts {
+                sender_on_installed_build: true,
+                ..base
+            }),
+            RouteMissingReplicaRecovery::RetrySenderInstalled,
+        );
+    }
+
+    #[test]
+    fn reload_lib_remains_when_no_install_fanout_recycle_is_outstanding() {
+        for attached in [false, true] {
+            for sender_on_installed_build in [false, true] {
+                for resolve_blocks_sender_reexec in [false, true] {
+                    assert_eq!(
+                        decide_route_missing_replica_recovery(RouteMissingReplicaRecoveryFacts {
+                            attached_reload_editor_refusal: attached,
+                            outstanding_install_fanout: false,
+                            sender_on_installed_build,
+                            resolve_blocks_sender_reexec,
+                        }),
+                        RouteMissingReplicaRecovery::WitnessGate,
+                        "attached={attached} installed={sender_on_installed_build} blocks={resolve_blocks_sender_reexec}",
+                    );
+                }
+            }
+        }
+        assert_eq!(
+            decide_route_missing_replica_recovery(RouteMissingReplicaRecoveryFacts {
+                attached_reload_editor_refusal: false,
+                outstanding_install_fanout: true,
+                sender_on_installed_build: false,
+                resolve_blocks_sender_reexec: false,
+            }),
+            RouteMissingReplicaRecovery::WitnessGate,
+        );
     }
 
     #[test]

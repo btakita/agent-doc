@@ -2238,7 +2238,11 @@ selection and typing a question are available while its links load. Outgoing
 links appear as soon as they resolve. A failed backlink search leaves the
 selection and outgoing links usable and reports that related locations are
 incomplete. Switching source cancels the old lookup and discards its late
-updates. Search input accepts typing during a foreground operation. A
+updates. Search input and the multiline Question draft accept typing before a
+source is selected and during background work. Enter adds a line to the draft.
+Use Ask about selection or Ctrl+Enter (Command+Enter on macOS) to submit after
+selecting a source. A successful submission preserves subsequent draft edits.
+The labeled Answer area displays the matching response. A
 background query can be cancelled and has a 45-second limit to allow a cold
 index. Open source navigates to the selected location in the editor. Repository
 membership and the saved source fingerprint are verified before a question is

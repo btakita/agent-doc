@@ -16,6 +16,7 @@ import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.openapi.util.SystemInfo
 import com.intellij.openapi.vfs.LocalFileSystem
 import com.intellij.openapi.vfs.VirtualFile
 import com.intellij.openapi.wm.ToolWindowAnchor
@@ -37,6 +38,8 @@ import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.FlowLayout
 import java.awt.LayoutManager
+import java.awt.event.InputEvent
+import java.awt.event.KeyEvent
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -49,6 +52,7 @@ import javax.swing.JButton
 import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JPanel
+import javax.swing.KeyStroke
 import javax.swing.ListSelectionModel
 
 /** Shell-forwarded action, available through Find Action and the Agent Doc Tools menu. */
@@ -126,6 +130,32 @@ internal class RepoContextLocationRenderer : ColoredListCellRenderer<RepoContext
     }
 }
 
+internal class RepoContextQuestionComposer(onSubmit: () -> Unit) : JPanel(BorderLayout(JBUI.scale(5), JBUI.scale(2))) {
+    val editor = JBTextArea(3, 20).apply {
+        lineWrap = true
+        wrapStyleWord = true
+        margin = JBUI.insets(4, 6)
+        emptyText.text = "Draft a question about a source."
+    }
+    val label = JBLabel("Question").apply { labelFor = editor }
+    val submit = JButton("Ask about selection").apply {
+        isEnabled = false
+        addActionListener { onSubmit() }
+    }
+
+    init {
+        add(label, BorderLayout.NORTH)
+        add(JBScrollPane(editor), BorderLayout.CENTER)
+        add(submit, BorderLayout.EAST)
+        val modifier = if (SystemInfo.isMac) InputEvent.META_DOWN_MASK else InputEvent.CTRL_DOWN_MASK
+        editor.registerKeyboardAction({ submit.doClick(0) }, KeyStroke.getKeyStroke(KeyEvent.VK_ENTER, modifier), WHEN_FOCUSED)
+    }
+
+    fun clearSubmittedDraft(draft: String) {
+        if (editor.text == draft) editor.text = ""
+    }
+}
+
 private class RepoContextExplorerPanel(private val project: Project, private val projectPath: Path) :
     RepoContextTypography(BorderLayout(JBUI.scale(8), JBUI.scale(8))), Disposable {
 
@@ -144,14 +174,15 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val openRelated = JButton("Open related source")
     private val chooseSession = JButton("Choose session")
     private val sessionLabel = JBLabel("No session selected.")
-    private val question = JBTextField()
-    private val ask = JButton("Ask about selection")
+    private val question = RepoContextQuestionComposer(::submitQuestion)
     private val answer = JBTextArea(7, 20).apply {
         isEditable = false
         lineWrap = true
         wrapStyleWord = true
         margin = JBUI.insets(4, 6)
+        emptyText.text = "A matching response appears here."
     }
+    private val answerLabel = JBLabel("Answer").apply { labelFor = answer }
     private val openAnswer = JButton("Open answer")
 
     private var root: Path? = null
@@ -169,7 +200,6 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     init {
         border = JBUI.Borders.empty(8)
         query.emptyText.text = "Symbol, function, or type"
-        question.emptyText.text = "Question about this source"
         mode.addActionListener {
             query.emptyText.text = if (mode.selectedItem == RepoContextMode.DOCS) "Heading or Markdown path"
                 else "Symbol, function, or type"
@@ -199,10 +229,8 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 add(JPanel().apply {
                     layout = BoxLayout(this, BoxLayout.Y_AXIS)
                     add(buttonRow(chooseSession, sessionLabel))
-                    add(JPanel(BorderLayout(JBUI.scale(5), 0)).apply {
-                        add(question, BorderLayout.CENTER)
-                        add(ask, BorderLayout.EAST)
-                    })
+                    add(question)
+                    add(answerLabel)
                     add(JBScrollPane(answer))
                     add(buttonRow(openAnswer))
                 }, BorderLayout.SOUTH)
@@ -211,7 +239,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         add(status, BorderLayout.SOUTH)
         useCompactFont(
             mode, query, search, cancel, status, results, related, sourceLabel, relatedStatus, openSource, openRelated,
-            chooseSession, sessionLabel, question, ask, answer, openAnswer,
+            chooseSession, sessionLabel, question.label, question.editor, question.submit, answerLabel, answer, openAnswer,
         )
         search.addActionListener { search() }
         cancel.addActionListener {
@@ -233,8 +261,6 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openSource.addActionListener { selection?.anchor?.let(::open) }
         openRelated.addActionListener { related.selectedValue?.let(::open) }
         chooseSession.addActionListener { chooseSession() }
-        question.addActionListener { submitQuestion() }
-        ask.addActionListener { submitQuestion() }
         openAnswer.addActionListener {
             val submitted = request ?: return@addActionListener
             val response = matchingAnswer ?: return@addActionListener
@@ -266,8 +292,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openSource.isEnabled = idle && selection != null
         openRelated.isEnabled = idle && related.selectedValue != null
         chooseSession.isEnabled = idle
-        ask.isEnabled = idle && selection != null
-        question.isEnabled = ask.isEnabled
+        question.submit.isEnabled = idle && selection != null
         openAnswer.isEnabled = matchingAnswer != null
         sessionLabel.text = session?.name ?: "No session selected."
     }
@@ -422,9 +447,11 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     }
 
     private fun submitQuestion() {
+        if (background != null || disposed) return
         val selected = selection ?: return
         val repo = root ?: return
-        val text = question.text.trim()
+        val draft = question.editor.text
+        val text = draft.trim()
         if (text.isEmpty() || text.length > 1_500) {
             status.text = "Enter a question between 1 and 1500 characters."
             return
@@ -458,7 +485,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             request = submitted
             matchingAnswer = null
             answer.text = "Question saved. Waiting for the matching answer."
-            question.text = ""
+            question.clearSubmittedDraft(draft)
             status.text = "Question saved. Running Agent Doc for ${selectedSession.name}."
             SubmitAction().submit(project, selectedSession)
         }

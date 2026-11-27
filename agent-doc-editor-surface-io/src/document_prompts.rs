@@ -136,8 +136,12 @@ impl<'a> Projection<'a> {
         projection.nodes[0].id = "document".to_string();
         projection.nodes[0].selection_key = Some("document".to_string());
 
-        let (frontmatter, markdown) = split_frontmatter_parts(source);
-        let frontmatter_lines = projection.line(source.len() - markdown.len()) - 1;
+        let normalized = source.replace("\r\n", "\n");
+        let (frontmatter, markdown) = split_frontmatter_parts(&normalized);
+        let frontmatter_lines = normalized[..normalized.len() - markdown.len()]
+            .bytes()
+            .filter(|byte| *byte == b'\n')
+            .count();
         if frontmatter.is_some() {
             projection.context_node(
                 "Frontmatter".into(),
@@ -151,7 +155,7 @@ impl<'a> Projection<'a> {
                 .expect("frontmatter node")
                 .selection_key = Some("frontmatter".into());
         }
-        let mut outlines = project_markdown_outline(&markdown.replace("\r\n", "\n"))
+        let mut outlines = project_markdown_outline(markdown)
             .into_iter()
             .filter(|heading| heading.depth > 0)
             .map(|mut heading| {

@@ -901,6 +901,7 @@ dependencies = [
  "agent-doc-editor-surface",
  "agent-doc-element",
  "agent-doc-element-queue",
+ "agent-doc-frontmatter",
  "agent-doc-fs",
  "agent-doc-hash",
  "agent-doc-markdown-ast",

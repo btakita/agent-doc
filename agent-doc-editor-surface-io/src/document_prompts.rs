@@ -7,6 +7,7 @@ use agent_doc_element::element::{self, Component};
 use agent_doc_element_queue::{
     strip_attempt_projection_prefix, strip_generated_queue_prompt_id_annotation,
 };
+use agent_doc_frontmatter::frontmatter::split_frontmatter_parts;
 use agent_doc_hash::{content_hash, short_content_hash};
 use agent_doc_markdown_ast::{
     exchange_tree::{ExchangeNodeKind, parse_exchange_nodes},
@@ -135,9 +136,28 @@ impl<'a> Projection<'a> {
         projection.nodes[0].id = "document".to_string();
         projection.nodes[0].selection_key = Some("document".to_string());
 
-        let mut outlines = project_markdown_outline(&source.replace("\r\n", "\n"))
+        let (frontmatter, markdown) = split_frontmatter_parts(source);
+        let frontmatter_lines = projection.line(source.len() - markdown.len()) - 1;
+        if frontmatter.is_some() {
+            projection.context_node(
+                "Frontmatter".into(),
+                0,
+                1,
+                Some("session frontmatter".into()),
+            );
+            projection
+                .nodes
+                .last_mut()
+                .expect("frontmatter node")
+                .selection_key = Some("frontmatter".into());
+        }
+        let mut outlines = project_markdown_outline(&markdown.replace("\r\n", "\n"))
             .into_iter()
             .filter(|heading| heading.depth > 0)
+            .map(|mut heading| {
+                heading.line += frontmatter_lines;
+                heading
+            })
             .peekable();
         let mut overlay = overlay::components(source).into_iter().peekable();
         let mut heading_levels = Vec::new();
@@ -773,6 +793,23 @@ mod tests {
             .1;
         assert!(body.contains("❯ Repo Context Explorer question."), "{body}");
         assert!(body.contains("> Can we iterate here?\r\n"), "{body}");
+    }
+
+    #[test]
+    fn session_metadata_is_one_frontmatter_node_with_correct_body_lines() {
+        let source = format!(
+            "---\r\nagent_doc_session: fixture\r\n---\r\n{}",
+            DOCUMENT.replace('\n', "\r\n")
+        );
+        let projection = outline(&source);
+        assert_eq!(node(&projection, "Frontmatter")["line"], 1);
+        assert_eq!(node(&projection, "Project")["line"], 4);
+        assert!(projection["nodes"].as_array().unwrap().iter().all(|node| {
+            !node["label"]
+                .as_str()
+                .unwrap()
+                .contains("agent_doc_session")
+        }));
     }
 
     #[test]

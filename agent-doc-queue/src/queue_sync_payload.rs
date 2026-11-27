@@ -167,6 +167,9 @@ pub enum QueueSyncResponseEvidence {
     AgentHistory,
     Missing,
     AmbiguousHistory,
+    /// The native worker is known, but its attested dispatch names a different
+    /// row. Its output cannot be evidence for the current attempt.
+    MismatchedHistory,
     UnsupportedHistory,
 }
 

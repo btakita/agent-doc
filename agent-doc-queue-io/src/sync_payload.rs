@@ -10,6 +10,31 @@ use agent_doc_queue::queue_sync_payload::{
 };
 use anyhow::Result;
 
+#[path = "grok_worker_completion.rs"]
+mod grok_worker_completion;
+
+/// The queue projector already associated the full nested identity with the
+/// attempt. Use its exact attempt coordinates below, since the visible item
+/// is only a leaf and may be repeated under different parents.
+fn projected_attempt<'a>(
+    claims: &'a [agent_doc_queue::queue_claim::QueueClaim],
+    item: &agent_doc_queue::queue_sync_payload::QueueSyncItem,
+) -> Option<&'a agent_doc_queue::queue_claim::QueueClaim> {
+    let generation = item.generation?;
+    let owner = item.owner.as_deref()?;
+    let mut candidates = claims.iter().filter(|claim| {
+        claim.generation == generation
+            && claim.owner == owner
+            && claim
+                .worker
+                .as_ref()
+                .map(|worker| worker.worker_id.as_str())
+                == item.worker_id.as_deref()
+    });
+    let claim = candidates.next()?;
+    candidates.next().is_none().then_some(claim)
+}
+
 /// Inspect the settled current-document cut plus every sibling session
 /// document in the same project. Failures are retained as explicit reconcile
 /// debt rather than being mistaken for a drained queue.
@@ -250,8 +275,10 @@ fn reclassify_ended_owner_claims(
     for partition in [&mut payload.claimed_unstarted, &mut payload.running] {
         let mut retained = Vec::with_capacity(partition.len());
         for mut item in std::mem::take(partition) {
-            let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
-            if ended.contains(&identity) {
+            if item.operation != QueueSyncOperation::Retry
+                && projected_attempt(claims, &item)
+                    .is_some_and(|claim| ended.contains(&claim.identity))
+            {
                 item.lifecycle =
                     agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::ReconcileUnknown;
                 item.operation = QueueSyncOperation::Reconcile;
@@ -272,6 +299,7 @@ enum HistoryResponse {
     Recovered(String),
     Missing,
     Ambiguous,
+    ScopeMismatch,
     Unsupported,
 }
 
@@ -308,18 +336,13 @@ fn apply_response_evidence_with(
     retained_capture_targets: &[String],
     mut recover: impl FnMut(&agent_doc_queue::queue_claim::QueueClaim) -> HistoryResponse,
 ) {
-    let claims = claims
-        .iter()
-        .map(|claim| (claim.identity.clone(), claim))
-        .collect::<std::collections::HashMap<_, _>>();
     let root_exchange = root_authored_exchange(content);
     for item in payload
         .reported_checkmark
         .iter_mut()
         .chain(&mut payload.lost_reported)
     {
-        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
-        let Some(claim) = claims.get(&identity).copied() else {
+        let Some(claim) = projected_attempt(claims, item) else {
             item.response_evidence = QueueSyncResponseEvidence::Missing;
             item.missing_response_debt = true;
             item.operation = QueueSyncOperation::Reconcile;
@@ -367,11 +390,21 @@ fn apply_response_evidence_with(
     // completed and therefore remains a normal wait.
     let mut waiting = Vec::new();
     for mut item in std::mem::take(&mut payload.running) {
-        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
-        let Some(claim) = claims.get(&identity).copied() else {
+        let Some(claim) = projected_attempt(claims, &item) else {
             waiting.push(item);
             continue;
         };
+        // An explicit abandonment has a successor generation, even if the
+        // old worker's terminal output still exists. Never resurrect it.
+        if item.operation == QueueSyncOperation::Retry
+            || claim
+                .frozen
+                .as_ref()
+                .is_some_and(|freeze| freeze.is_abandon())
+        {
+            waiting.push(item);
+            continue;
+        }
         let key = crate::queue_claim::completion_feedback_key(claim).ok();
         let outbox_response = key.as_deref().and_then(|key| {
             durable_completion_response(
@@ -392,9 +425,12 @@ fn apply_response_evidence_with(
             });
         let history = recover(claim);
         let completed = has_outbox_receipt
+            || (claim.ended_hand_back_owed().is_some() && claim.interim_end_hand_back().is_none())
             || matches!(
                 &history,
-                HistoryResponse::Recovered(_) | HistoryResponse::Ambiguous
+                HistoryResponse::Recovered(_)
+                    | HistoryResponse::Ambiguous
+                    | HistoryResponse::ScopeMismatch
             );
         if !completed {
             waiting.push(item);
@@ -413,7 +449,13 @@ fn apply_response_evidence_with(
             history,
             committed_queue_response,
         );
-        payload.reported_checkmark.push(item);
+        if item.response_evidence == QueueSyncResponseEvidence::MismatchedHistory {
+            item.lifecycle =
+                agent_doc_queue::queue_sync_payload::QueueSyncLifecycle::ReconcileUnknown;
+            payload.reconcile_unknown.push(item);
+        } else {
+            payload.reported_checkmark.push(item);
+        }
     }
     payload.running = waiting;
 }
@@ -472,6 +514,11 @@ fn apply_completed_response_evidence(
         }
         HistoryResponse::Ambiguous => {
             item.response_evidence = QueueSyncResponseEvidence::AmbiguousHistory;
+            item.missing_response_debt = true;
+            item.operation = QueueSyncOperation::Reconcile;
+        }
+        HistoryResponse::ScopeMismatch => {
+            item.response_evidence = QueueSyncResponseEvidence::MismatchedHistory;
             item.missing_response_debt = true;
             item.operation = QueueSyncOperation::Reconcile;
         }
@@ -765,6 +812,13 @@ fn recover_agent_history_response_from(
     };
     match harness {
         "claude" | "claude-code" => recover_claude_history_response(home, session_id, worker_id),
+        "grok" | "grok-build" => {
+            let sessions = std::env::var_os("GROK_HOME")
+                .map(PathBuf::from)
+                .unwrap_or_else(|| home.join(".grok"))
+                .join("sessions");
+            grok_worker_completion::recover(&sessions, claim, session_id, worker_id)
+        }
         "codex" => {
             if claim.generation == 0 {
                 return HistoryResponse::Unsupported;
@@ -1060,9 +1114,7 @@ pub(crate) fn recover_codex_turn_handback(
         Some(worker_turn),
     ) {
         HistoryResponse::Recovered(response) => Some(response),
-        HistoryResponse::Missing | HistoryResponse::Ambiguous | HistoryResponse::Unsupported => {
-            None
-        }
+        _ => None,
     }
 }
 
@@ -1173,23 +1225,18 @@ fn apply_lineage_evidence(
         .chain(&mut payload.reconcile_unknown)
         .chain(&mut payload.operator_gated)
     {
-        let Some(generation) = item.generation else {
+        let Some(claim) = projected_attempt(claims, item) else {
             continue;
         };
-        let identity = agent_doc_queue::queue_claim::claim_identity(&item.item);
-        let claim = claims.iter().find(|claim| {
-            claim.generation == generation
-                && Some(claim.owner.as_str()) == item.owner.as_deref()
-                && claim.identity == identity
-        });
-        if claim.is_some_and(|claim| claim.native_spawn_confirmed_failed()) {
+        let identity = &claim.identity;
+        if claim.native_spawn_confirmed_failed() {
             apply_attempt_evidence(item, QueueSyncExecutionEvidence::NeverStarted, Vec::new());
             continue;
         }
         let Some(attempt) = lineage.attempts.iter().find(|attempt| {
-            attempt.generation == generation
-                && Some(attempt.owner.as_str()) == item.owner.as_deref()
-                && (attempt.identity == identity || attempt.identity_history.contains(&identity))
+            attempt.generation == claim.generation
+                && attempt.owner == claim.owner
+                && (&attempt.identity == identity || attempt.identity_history.contains(identity))
         }) else {
             continue;
         };
@@ -1204,7 +1251,7 @@ fn apply_lineage_evidence(
                     | QueueLineageEventKind::Released
             )
         });
-        let fenced_before_spawn = claim.is_some_and(|claim| !claim.native_spawn_result_required())
+        let fenced_before_spawn = !claim.native_spawn_result_required()
             && crate::queue_lineage::has_fenced_creation_only(attempt);
         let execution = if item.completion_outbox_recovered {
             QueueSyncExecutionEvidence::CompletedOutbox
@@ -2021,6 +2068,113 @@ mod tests {
             QueueSyncResponseEvidence::UnsupportedHistory
         );
         assert!(!item.retry_safe);
+    }
+
+    #[test]
+    fn nested_grok_history_recovers_only_the_exact_attempt_without_reviving_a_retry() {
+        use agent_doc_queue::queue_claim::{
+            ClaimOwnerSession, LostContinueRecord, QueueClaimLedger, QueueClaimState,
+            QueueWorkerBinding, QueueWorkerFreeze, subagent_end_freeze_reason,
+        };
+        let content = concat!(
+            "<!-- agent:run id=run subagents -->\n",
+            "- Feature A\n  - 🚧 #review\n",
+            "- Feature B\n  - 🚧 #review\n",
+            "- Feature C\n  - 📥 #review\n",
+            "- Feature D\n  - 🚧 #review\n",
+            "- Feature E\n  - 🚧 #review\n",
+            "<!-- /agent:run -->\n",
+        );
+        let mut ledger = QueueClaimLedger::default();
+        for label in ["A", "B", "C", "D", "E"] {
+            ledger.claim_in_session(
+                &format!("Feature {label}: #review"),
+                "subagent:review",
+                10,
+                600,
+                Some(ClaimOwnerSession {
+                    harness: Some("grok".into()),
+                    session_id: Some("parent-session".into()),
+                    ..Default::default()
+                }),
+            );
+            let claim = ledger.claims.last_mut().unwrap();
+            claim.state = QueueClaimState::Running;
+            claim.worker = Some(QueueWorkerBinding {
+                worker_id: format!("worker-{label}"),
+                started_at_secs: 12,
+            });
+            if label == "C" {
+                claim.frozen = Some(QueueWorkerFreeze {
+                    frozen_at_secs: 25,
+                    reason: "explicit requeue".into(),
+                    abandoned: true,
+                });
+                claim.lost_continue = Some(LostContinueRecord {
+                    attempted_at_secs: 25,
+                    reason: "explicit requeue".into(),
+                    failed: true,
+                    during_turn: false,
+                });
+            } else if label == "E" {
+                claim.frozen = Some(QueueWorkerFreeze {
+                    frozen_at_secs: 25,
+                    reason: subagent_end_freeze_reason(Some("A handback excerpt.")),
+                    abandoned: false,
+                });
+            }
+        }
+        let mut payload = project_document_queue_sync(
+            "/tmp/sample.md",
+            QueueSyncDocumentScope::Current,
+            content,
+            None,
+            &ledger.claims,
+        )
+        .unwrap();
+        assert_eq!(payload.running.len(), 5, "{payload:#?}");
+
+        apply_response_evidence_with(
+            &mut payload,
+            content,
+            None,
+            &ledger.claims,
+            &[],
+            &[],
+            |claim| match claim.worker.as_ref().unwrap().worker_id.as_str() {
+                "worker-A" => HistoryResponse::Recovered("Feature A's full worker result.".into()),
+                "worker-B" => HistoryResponse::ScopeMismatch,
+                "worker-C" => panic!("an explicitly abandoned worker must not be recovered"),
+                "worker-D" => HistoryResponse::Missing,
+                "worker-E" => HistoryResponse::Unsupported,
+                id => panic!("unexpected worker {id}"),
+            },
+        );
+        let result = |id: &str| {
+            payload
+                .items()
+                .find(|item| item.worker_id.as_deref() == Some(id))
+                .unwrap()
+        };
+        assert_eq!(
+            result("worker-A").operation,
+            QueueSyncOperation::IntegrateClose
+        );
+        assert_eq!(
+            result("worker-A").recovered_response.as_deref(),
+            Some("Feature A's full worker result.")
+        );
+        assert_eq!(result("worker-B").operation, QueueSyncOperation::Reconcile);
+        assert_eq!(
+            result("worker-B").response_evidence,
+            QueueSyncResponseEvidence::MismatchedHistory
+        );
+        assert!(result("worker-B").missing_response_debt);
+        assert!(result("worker-B").recovered_response.is_none());
+        assert_eq!(result("worker-C").operation, QueueSyncOperation::Retry);
+        assert_eq!(result("worker-D").operation, QueueSyncOperation::Wait);
+        assert_eq!(result("worker-E").operation, QueueSyncOperation::Reconcile);
+        assert!(result("worker-E").missing_response_debt);
     }
 
     #[test]

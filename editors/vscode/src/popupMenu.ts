@@ -14,7 +14,6 @@ export type PopupMenuActionId =
     | 'clear'
     | 'interruptClear'
     | 'doctor'
-    | 'more'
     | 'runWithJunie'
     | 'forceClaim'
     | 'stopAgent'
@@ -42,27 +41,22 @@ export function buildPrimaryPopupMenuItems(): PopupMenuItem[] {
         { label: '[7] $(window) Load Tmux Window', id: 'loadTmuxWindow' },
         { label: '[8] $(pulse) Show Session Status', id: 'status' },
         { label: '[9] $(clear-all) Clear Session Context', id: 'clear' },
-        { label: '[10] $(debug-restart) Recycle Supervisor', id: 'restartSupervisor' },
-        { label: '[11] $(debug-restart) Restart Agent', id: 'restartAgent' },
-        { label: '[12] $(warning) Interrupt and Clear Session Context', id: 'interruptClear' },
-        { label: '[13] $(copy) Copy Session Diagnostics', id: 'doctor' },
-        { label: '[14] $(dashboard) Dashboard', id: 'dashboard' },
-        { label: '[15] $(list-tree) Tree Status', id: 'treeStatus' },
-        { label: '$(kebab-horizontal) More Actions', id: 'more' },
-    ];
-}
-
-export function buildOverflowPopupMenuItems(): PopupMenuItem[] {
-    return [
-        { label: '$(terminal) Start Agent Doc', id: 'startAgentDoc' },
-        { label: '$(hubot) Run with Junie', id: 'runWithJunie' },
-        { label: '$(warning) Force Claim Control Session', id: 'forceClaim' },
-        { label: '$(link) Claim Artifact Session', id: 'claimArtifact' },
-        { label: '$(debug-stop) Stop Agent', id: 'stopAgent' },
-        { label: '$(circle-slash) Cancel Turn', id: 'cancelTurn' },
-        { label: '$(trash) Kill Supervisor', id: 'killSupervisor' },
-        { label: '$(sync) Resync / Fix Sessions', id: 'resyncFixSessions' },
-        { label: '$(database) GC Stale Sessions', id: 'gcStaleSessions' },
-        { label: '$(info) About Agent Doc', id: 'about' },
+        // After Clear so [9] stays Clear. Still the first quick-pick screen.
+        { label: '[10] $(link) Claim Artifact Session', id: 'claimArtifact' },
+        { label: '[11] $(debug-restart) Recycle Supervisor', id: 'restartSupervisor' },
+        { label: '[12] $(debug-restart) Restart Agent', id: 'restartAgent' },
+        { label: '[13] $(warning) Interrupt and Clear Session Context', id: 'interruptClear' },
+        { label: '[14] $(copy) Copy Session Diagnostics', id: 'doctor' },
+        { label: '[15] $(dashboard) Dashboard', id: 'dashboard' },
+        { label: '[16] $(list-tree) Tree Status', id: 'treeStatus' },
+        { label: '[17] $(terminal) Start Agent Doc', id: 'startAgentDoc' },
+        { label: '[18] $(hubot) Run with Junie', id: 'runWithJunie' },
+        { label: '[19] $(warning) Force Claim Control Session', id: 'forceClaim' },
+        { label: '[20] $(debug-stop) Stop Agent', id: 'stopAgent' },
+        { label: '[21] $(circle-slash) Cancel Turn', id: 'cancelTurn' },
+        { label: '[22] $(trash) Kill Supervisor', id: 'killSupervisor' },
+        { label: '[23] $(sync) Resync / Fix Sessions', id: 'resyncFixSessions' },
+        { label: '[24] $(database) GC Stale Sessions', id: 'gcStaleSessions' },
+        { label: '[25] $(info) About Agent Doc', id: 'about' },
     ];
 }

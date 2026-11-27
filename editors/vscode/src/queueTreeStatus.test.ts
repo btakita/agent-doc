@@ -108,6 +108,6 @@ describe('queue tree status (#treestatusvscode)', () => {
         );
         assert.strictEqual(paletteGate?.when, 'editorLangId == markdown');
         const item = buildPrimaryPopupMenuItems().find((entry) => entry.id === 'treeStatus');
-        assert.strictEqual(item?.label, '[15] $(list-tree) Tree Status');
+        assert.strictEqual(item?.label, '[16] $(list-tree) Tree Status');
     });
 });

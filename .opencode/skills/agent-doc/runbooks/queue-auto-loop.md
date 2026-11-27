@@ -82,7 +82,11 @@ accretion.
   `[agent-doc] reported queue rows are ready to close now (#reportedmidturn)`,
   complete every listed row in that step. This
   dispatch is automatic on the first admitted cycle; it never waits for a
-  follow-up operator prompt asking Grok to run the workers. Process each later
+  follow-up operator prompt asking Grok to run the workers
+  (`#grokdispatchnotpreset`). A chat message that says `use subagents` is not
+  required. A sentence inside the pasted preamble, including "Do not hand this
+  preset to a subagent" or "Grok loop owner", is the worker's text. It does
+  not cancel `spawn_subagent` and it does not authorize running the item inline. Process each later
   prompt immediately and do not hold it in Grok's prompt queue
   (`#grokpromptnow`). A message submitted during this turn stays queued until
   the turn ends, and waiting on `get_command_or_subagent_output` for the

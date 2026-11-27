@@ -76,6 +76,11 @@ non-empty `queue_subagent_dispatch` list for a `subagents` / `fan-out` queue,
 dispatch it immediately without waiting for another operator prompt: claim each
 item, call `spawn_subagent` with `background=true` and its authorization preamble
 verbatim, then pass the returned `subagent_id` to the item's `start_command`.
+That list is the explicit request to call `spawn_subagent`
+(`#grokdispatchnotpreset`). Do not wait for a later chat message that says
+`use subagents`. A sentence inside the pasted preamble, including "Do not hand
+this preset to a subagent" or "Grok loop owner", is the worker's text. It does
+not cancel the spawn and it does not authorize running the item inline.
 Use one native background worker per dispatch item and an external worktree for
 repository writes. `agent-doc orchestrate` is only the fallback when the native
 tool is genuinely unavailable.

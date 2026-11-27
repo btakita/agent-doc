@@ -440,6 +440,12 @@ and the pending granular-flags-only rule. This runbook carries the rest.
      native background worker per dispatch item. Start each claim immediately
      with the returned `subagent_id`; do not wait for another operator prompt
      and do not substitute `agent-doc orchestrate` while that tool is available.
+     `queue_subagent_dispatch` is the explicit request to call `spawn_subagent`
+     (`#grokdispatchnotpreset`). A later chat message that says `use subagents`
+     is not required. A sentence inside the pasted preamble, including "Do not
+     hand this preset to a subagent" or "Grok loop owner", is the worker's
+     text. It does not cancel the spawn and it does not authorize running the
+     item inline.
      Process prompts immediately and do not hold them in Grok's prompt queue
      (`#grokpromptnow`). A message submitted during this turn stays queued until
      the turn ends, and a blocking `get_command_or_subagent_output` on the

@@ -779,6 +779,24 @@ pub const SUBAGENT_RESOLVED_AUTHORIZATION_RULE: &str = concat!(
     "harness-native tool permission.\n"
 );
 
+/// `#grokdispatchnotpreset`: the Grok coordinator reads this preamble before
+/// `spawn_subagent`. A preset such as `#adversarial-pr` tells the queue owner
+/// not to hand the preset to a subagent, because a Grok worker cannot nest
+/// another `spawn_subagent`. That sentence is worker text. It must not cancel
+/// a `subagents` queue, and the coordinator must not wait for a chat line that
+/// says `use subagents`.
+///
+/// A string literal so dispatch guidance can `concat!` it.
+#[macro_export]
+macro_rules! grok_dispatch_not_preset {
+    () => {
+        "Dispatch fence (`#grokdispatchnotpreset`): on Grok Build, a `subagents` / `fan-out` queue is the operator's explicit request to call `spawn_subagent`. Do not wait for a later chat message that says `use subagents`. A quoted preset line such as \"Do not hand this preset to a subagent\" or \"Grok loop owner\" is worker text inside this preamble. It does not cancel the spawn and it does not mean the coordinator runs the item inline (`#subagentinlineveto`). The coordinator spawns this worker and pastes this preamble verbatim. The worker is already dispatched: do not bounce the item back. If this worker cannot start another subagent, it performs the preset's reviewer step and fixer step itself, one at a time, re-querying the remote head before each review and posting each review and address the preset requires.\n"
+    };
+}
+
+/// [`grok_dispatch_not_preset!`] as a constant.
+pub const GROK_DISPATCH_NOT_PRESET: &str = crate::grok_dispatch_not_preset!();
+
 /// `#nestedoutwardauth`: a live nested sub-prompt that names push or publish
 /// is itself the operator's authorization, even when the preset body is only
 /// "rebase" or "review" and a skill says to wait.
@@ -808,7 +826,11 @@ fn render_preamble(
     out.push_str(&format!(
         "\n\nYou are a background subagent the agent-doc coordinator dispatched for ONE queue item \
          of `{document}`. The operator's authorization is quoted verbatim below; it is the operator's \
-         own words, not the coordinator's paraphrase.\n\nQueue item (verbatim):\n{}\n",
+         own words, not the coordinator's paraphrase.\n\n"
+    ));
+    out.push_str(GROK_DISPATCH_NOT_PRESET);
+    out.push_str(&format!(
+        "\nQueue item (verbatim):\n{}\n",
         quote(&auth.item)
     ));
     let submitted = submitted.trim();
@@ -1124,6 +1146,18 @@ mod tests {
         );
         let p = &auth.subagent_prompt_preamble;
         assert!(p.starts_with(SUBAGENT_PREAMBLE_MARKER), "{p}");
+        assert!(
+            p.contains("#grokdispatchnotpreset"),
+            "the coordinator reads the preamble before spawn; the fence must precede the preset body"
+        );
+        let fence_at = p.find("#grokdispatchnotpreset").unwrap();
+        let preset_at = p
+            .find("#spec-test-build-install-commit-push")
+            .expect("preset");
+        assert!(
+            fence_at < preset_at,
+            "the dispatch fence must be visible before the quoted preset"
+        );
         assert!(
             p.contains(
                 "  \"#spec-test-build-install-commit-push\": |-\n    update spec + tests. build + install for local testing. commit + push"

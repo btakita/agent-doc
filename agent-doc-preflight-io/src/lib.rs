@@ -1447,6 +1447,8 @@ or `queue report-quota-blocked` when you still have it, which records the same b
 quietly if the hook already did. OpenCode has no subagent-end hook, so its limit still \
 has to be passed that way. `agent-doc queue pool <FILE>` prints the \
 current refill. ",
+    agent_doc_queue::grok_dispatch_not_preset!(),
+    " ",
     agent_doc_queue::subagent_worktree_layout_rule!()
 );
 
@@ -15718,6 +15720,8 @@ agent_doc_write: crdt\n\
         // `#subagentinlineveto`: never run a dispatch item inline, and say so
         // when the harness cannot spawn a subagent.
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("#subagentinlineveto"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("#grokdispatchnotpreset"));
+        assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("use subagents"));
         assert!(QUEUE_SUBAGENT_DISPATCH_GUIDANCE.contains("`**Deferred:** no subagent available`"));
         let json = serde_json::to_value(&entries[0]).unwrap();
         assert!(json["authorization"]["subagent_prompt_preamble"].is_string());

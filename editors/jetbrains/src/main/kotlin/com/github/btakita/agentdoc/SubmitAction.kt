@@ -3,6 +3,8 @@ package com.github.btakita.agentdoc
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
+import com.intellij.openapi.application.ReadAction
+import com.intellij.openapi.editor.Document
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.vfs.VirtualFile
@@ -33,7 +35,7 @@ class SubmitAction : ImplAction {
     internal fun submit(project: Project, file: VirtualFile) {
         LOG.warn("[run] actionPerformed: ${file.name}")
         val fileDocumentManager = FileDocumentManager.getInstance()
-        val document = fileDocumentManager.getDocument(file)
+        val document = ReadAction.compute<Document?, RuntimeException> { fileDocumentManager.getDocument(file) }
         val saveStage =
             if (document == null) {
                 "document_not_loaded"

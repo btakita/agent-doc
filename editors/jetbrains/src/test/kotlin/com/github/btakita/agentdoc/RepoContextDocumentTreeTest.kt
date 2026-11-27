@@ -3,8 +3,10 @@ package com.github.btakita.agentdoc
 import com.intellij.openapi.editor.Document
 import com.intellij.ui.treeStructure.Tree
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertThrows
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.awt.Component
 import java.awt.Container
@@ -50,7 +52,7 @@ class RepoContextDocumentTreeTest {
         val before = DocumentPromptTarget("18:old", "tracked:beta", "[#beta] Review next action", 2, 1, DocumentPromptAction.EXCHANGE)
         val after = before.copy(id = "77:new", line = 6)
         view.show(RepoContextDocumentOutline("before", listOf(root, before)))
-        view.components.asSequence().flatMap(::children).filterIsInstance<Tree>().single().setSelectionRow(1)
+        view.selectTarget(before.id)
         assertEquals(before, view.selection)
 
         view.show(RepoContextDocumentOutline("after", listOf(root, after)))
@@ -59,6 +61,54 @@ class RepoContextDocumentTreeTest {
         view.show(RepoContextDocumentOutline("ambiguous", listOf(root, after.copy(selectionKey = null))))
         assertNull(view.selection)
     }
+
+    @Test
+    fun `inline composer follows the selected row and keeps drafts through refreshes`() = SwingUtilities.invokeAndWait {
+        val view = RepoContextDocumentTree({}, {})
+        val alpha = DocumentPromptTarget("old-alpha", "tracked:alpha", "Repeated title", 1, 0, DocumentPromptAction.EXCHANGE)
+        val beta = DocumentPromptTarget("old-beta", "tracked:beta", "Repeated title", 2, 0, DocumentPromptAction.SUBPROMPT)
+        val navigation = DocumentPromptTarget("read", "tracked:read", "A status row", 3, 0, DocumentPromptAction.NAVIGATE)
+        view.show(RepoContextDocumentOutline("before", listOf(alpha, beta, navigation)), "session-a")
+        val tree = tree(view).apply { setSize(360, 500) }
+        val composer = view.question
+        view.selectTarget(beta.id)
+        tree.doLayout()
+        val betaBounds = tree.getPathBounds(tree.selectionPath)
+        assertTrue(composer.isVisible)
+        assertTrue(composer.y >= betaBounds.y + betaBounds.height)
+        assertTrue(composer.x > betaBounds.x)
+        composer.editor.text = "Beta keeps its draft."
+        composer.editor.caretPosition = 5
+
+        val refreshedBeta = beta.copy(id = "new-beta", line = 6)
+        view.show(RepoContextDocumentOutline("after", listOf(alpha, refreshedBeta, navigation)), "session-a")
+        tree.doLayout()
+        assertEquals(refreshedBeta, view.selection)
+        assertEquals("Beta keeps its draft.", composer.editor.text)
+        assertEquals(5, composer.editor.caretPosition)
+
+        val composerPath = tree.getPathForRow(tree.getRowForPath(tree.selectionPath) + 1)
+        tree.selectionPath = composerPath
+        assertEquals(navigation, view.selection)
+        view.selectTarget(alpha.id)
+        assertEquals("", composer.editor.text)
+        composer.editor.text = "Alpha keeps its own draft."
+        view.selectTarget(navigation.id)
+        tree.doLayout()
+        assertFalse(composer.isVisible)
+        view.selectTarget(refreshedBeta.id)
+        assertEquals("Beta keeps its draft.", composer.editor.text)
+        view.selectTarget(alpha.id)
+        assertEquals("Alpha keeps its own draft.", composer.editor.text)
+
+        view.show(RepoContextDocumentOutline("after", listOf(alpha, refreshedBeta, navigation)), "session-b")
+        assertEquals("", composer.editor.text)
+        view.show(RepoContextDocumentOutline("after", listOf(alpha, refreshedBeta, navigation)), "session-a")
+        assertEquals("Alpha keeps its own draft.", composer.editor.text)
+    }
+
+    private fun tree(view: RepoContextDocumentTree): Tree =
+        view.components.asSequence().flatMap(::children).filterIsInstance<Tree>().single()
 
     private fun children(component: Component): Sequence<Component> = sequence {
         yield(component)

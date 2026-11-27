@@ -35,6 +35,7 @@ pub(crate) struct Evidence {
     answer: Option<String>,
     active_prompts: Vec<String>,
     file: Option<PathBuf>,
+    project_root: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -53,6 +54,9 @@ enum Action {
     Subprompt,
     Navigate,
 }
+
+const PROMPT_HEADER: &str = "Document Context Explorer prompt";
+const LEGACY_PROMPT_HEADER: &str = "Repo Context Explorer question";
 
 const ANSWER_INSTRUCTION: &str =
     "Please answer the quoted request and include a standalone HTML comment whose text is ";
@@ -150,7 +154,15 @@ pub(crate) fn derive(evidence: Evidence) -> Value {
                 _ => {}
             }
         }
-        project_document_prompts_with_active(source, &active)
+        project_document_prompts_with_active(source, &active).map(|mut outline| {
+            if let (Some(file), Some(root)) = (&evidence.file, &evidence.project_root) {
+                let links: Vec<_> = crate::linked_markdown_documents(source, file, root)
+                    .into_keys()
+                    .collect();
+                outline["links"] = json!(links);
+            }
+            outline
+        })
     };
     result.unwrap_or_else(|error| json!({"error": error.to_string()}))
 }
@@ -624,7 +636,8 @@ impl<'a> Projection<'a> {
                         addition.push_str(newline);
                     }
                 }
-                addition.push_str("❯ Repo Context Explorer question");
+                addition.push_str("❯ ");
+                addition.push_str(PROMPT_HEADER);
                 if let Some(context) = &node.context {
                     addition.push_str(&format!(
                         " about {} (selected at line {} before submission)",
@@ -916,11 +929,17 @@ mod tests {
         assert_eq!(running["revision"], pending["revision"]);
         assert_eq!(running["nodes"][at]["task"]["state"], "running");
         let marked = shifted.replace(
-            "❯ Repo Context Explorer question",
-            "❯ 🚧 Repo Context Explorer question",
+            &format!("❯ {PROMPT_HEADER}"),
+            &format!("❯ 🚧 {PROMPT_HEADER}"),
         );
         assert_eq!(
             task_projection(&marked, RECEIPT, &[]).0["nodes"][at]["task"]["state"],
+            "running"
+        );
+
+        let legacy = marked.replace(PROMPT_HEADER, LEGACY_PROMPT_HEADER);
+        assert_eq!(
+            task_projection(&legacy, RECEIPT, &[]).0["nodes"][at]["task"]["state"],
             "running"
         );
 
@@ -1037,7 +1056,10 @@ mod tests {
             .split_once("<!-- agent:boundary:sample -->\r\n")
             .unwrap()
             .1;
-        assert!(body.contains("❯ Repo Context Explorer question."), "{body}");
+        assert!(
+            body.contains("❯ Document Context Explorer prompt."),
+            "{body}"
+        );
         assert!(body.contains("> Can we iterate here?\r\n"), "{body}");
     }
 

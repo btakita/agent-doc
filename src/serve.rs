@@ -13,6 +13,8 @@
 //!   - `GET /doc/<path-or-hash>` → current text for a project session document.
 //!   - `GET /api/auth` → current auth mode and token scope.
 //!   - `GET /api/sessions` → project session list.
+//!   - `GET /api/document-link?source=…&path=…` → plain text of a Markdown
+//!     file linked from the current authoritative session snapshot.
 //!   - `GET /board` → embedded per-project work board page (`BOARD_HTML`).
 //!   - `GET /api/board` → read-only work board JSON for this server's project
 //!     (`agent-doc board --json`).
@@ -259,9 +261,16 @@ impl ServeState {
     }
 
     fn resolve_doc(&self, token: Option<&str>) -> Result<PathBuf> {
+        let decoded = token
+            .filter(|token| !token.is_empty())
+            .map(|token| percent_decode(token.trim_start_matches('/')))
+            .transpose()?;
+        self.resolve_doc_path(decoded.as_deref())
+    }
+
+    fn resolve_doc_path(&self, decoded: Option<&str>) -> Result<PathBuf> {
         let sessions = list_sessions(self)?;
-        if let Some(token) = token.filter(|token| !token.is_empty()) {
-            let decoded = percent_decode(token.trim_start_matches('/'))?;
+        if let Some(decoded) = decoded.filter(|path| !path.is_empty()) {
             if let Some(session) = sessions.iter().find(|session| {
                 session.id == decoded || session.path == decoded || session.absolute == decoded
             }) {
@@ -273,7 +282,7 @@ impl ServeState {
                 }
                 return Ok(PathBuf::from(&session.absolute));
             }
-            return self.resolve_relative_doc(&decoded);
+            return self.resolve_relative_doc(decoded);
         }
         if let Some(doc) = &self.default_doc {
             return Ok(doc.clone());
@@ -537,6 +546,7 @@ fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()>
         ),
         (Method::Get, "/api/auth") => handle_auth(request, state, scope),
         (Method::Get, "/api/sessions") => handle_sessions(request, state),
+        (Method::Get, "/api/document-link") => handle_document_link(request, state, &url),
         (Method::Get, "/board") => respond(
             request,
             BOARD_HTML,
@@ -934,7 +944,17 @@ fn handle_projection(
         .flat_map(explorer_active_prompts)
         .cloned()
         .collect();
-    let projection = build_projection(&body, &active_prompts)?;
+    let mut projection = build_projection(&body, &active_prompts)?;
+    projection.document_links = served_document_links(state, &doc, &body)
+        .into_iter()
+        .map(|(path, target)| ServeDocumentLink {
+            path,
+            session: is_agent_doc_file(&target).unwrap_or_else(|error| {
+                eprintln!("[serve] linked document type unavailable: {error:#}");
+                false
+            }),
+        })
+        .collect();
     respond(
         request,
         &serde_json::to_string(&projection)?,
@@ -943,10 +963,74 @@ fn handle_projection(
     )
 }
 
+fn served_document_links(state: &ServeState, doc: &Path, body: &str) -> BTreeMap<String, PathBuf> {
+    agent_doc_editor_surface_io::linked_markdown_documents(body, doc, &state.root)
+        .into_iter()
+        .filter(|(path, _)| {
+            !path
+                .split('/')
+                .any(|name| is_ignored_session_scan_dir(name.as_ref()))
+        })
+        .collect()
+}
+
+fn handle_document_link(request: tiny_http::Request, state: &ServeState, url: &str) -> Result<()> {
+    let source = query_param(url, "source");
+    let target = query_param(url, "path");
+    let linked_preview = (|| {
+        let doc = state.resolve_doc_path(source.as_deref())?;
+        let snapshot = agent_doc_document_realtime_io::peek_current_document_content(
+            &doc,
+            "serve_document_link",
+        )?;
+        let mut links = served_document_links(state, &doc, &snapshot);
+        let target = links
+            .remove(target.as_deref().unwrap_or_default())
+            .context("target is not a Markdown link in this session")?;
+        let mut content = String::new();
+        std::fs::File::open(target)?
+            .take(MAX_BODY_BYTES as u64 + 1)
+            .read_to_string(&mut content)?;
+        anyhow::ensure!(
+            content.len() <= MAX_BODY_BYTES,
+            "linked document is too large to preview"
+        );
+        Ok::<_, anyhow::Error>(content)
+    })();
+    match linked_preview {
+        Ok(content) => respond_with_headers(
+            request,
+            &content,
+            "text/plain; charset=utf-8",
+            StatusCode(200),
+            vec![
+                header("Cache-Control", "no-store")?,
+                header("X-Content-Type-Options", "nosniff")?,
+            ],
+        ),
+        Err(error) => {
+            eprintln!("[serve] linked document unavailable: {error:#}");
+            respond(
+                request,
+                "linked document unavailable\n",
+                "text/plain; charset=utf-8",
+                StatusCode(404),
+            )
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+struct ServeDocumentLink {
+    path: String,
+    session: bool,
+}
+
 #[derive(Debug, Serialize)]
 struct ServeProjection {
     components: Vec<ServeProjectionComponent>,
     document_prompts: serde_json::Value,
+    document_links: Vec<ServeDocumentLink>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1170,6 +1254,7 @@ fn build_projection(doc: &str, active_prompts: &[String]) -> Result<ServeProject
     let components = agent_doc_element::element::parse(doc)?;
     let names = ["exchange", "backlog", "queue", "review"];
     Ok(ServeProjection {
+        document_links: Vec::new(),
         components: names
             .into_iter()
             .map(|name| projection_component(doc, &components, name))
@@ -2726,6 +2811,55 @@ mod tests {
         let (status, revision, content) = browser_request(state, "GET", "/doc", None, "");
         assert_eq!(status, 200, "{content}");
         (revision.unwrap(), content)
+    }
+
+    #[test]
+    fn browser_follows_session_links_and_only_previews_current_in_project_markdown_links() {
+        let (dir, doc) = serve_save_project();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("guides")).unwrap();
+        std::fs::write(root.join("guides/Setup + Tips.md"), "# Setup\n").unwrap();
+        std::fs::write(root.join("unlinked.md"), "# Private\n").unwrap();
+        std::fs::write(root.join("other session.md"), SERVE_SAVE_DISK).unwrap();
+        std::fs::write(root.join(".agent-doc/notes.md"), "# Internal\n").unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        std::fs::write(outside.path().join("external.md"), "# Outside\n").unwrap();
+        #[cfg(unix)]
+        std::os::unix::fs::symlink(outside.path().join("external.md"), root.join("alias.md"))
+            .unwrap();
+        let source = format!(
+            "{SERVE_SAVE_DISK}\n\n[Setup][setup]\n\n[setup]: guides/Setup%20%2B%20Tips.md#intro\n\n\
+             [Session](other%20session.md)\n[Internal](.agent-doc/notes.md)\n\
+             [Alias](alias.md)\n`[Unlinked](unlinked.md)`\n[Web](https://example.invalid/page.md)\n"
+        );
+        std::fs::write(&doc, &source).unwrap();
+        let state = browser_for(&doc);
+        let (status, _, body) = browser_request(&state, "GET", "/api/projection", None, "");
+        assert_eq!(status, 200, "{body}");
+        let projection: serde_json::Value = serde_json::from_str(&body).unwrap();
+        assert_eq!(
+            projection["document_links"],
+            serde_json::json!([
+                {"path": "guides/Setup + Tips.md", "session": false},
+                {"path": "other session.md", "session": true}
+            ])
+        );
+        let preview = "/api/document-link?source=session.md&path=guides%2FSetup%20%2B%20Tips.md";
+        assert_eq!(
+            browser_request(&state, "GET", preview, None, ""),
+            (200, None, "# Setup\n".to_string())
+        );
+        assert_eq!(
+            browser_request(&state, "GET", "/doc/other%20session.md", None, "").0,
+            200
+        );
+        for path in ["unlinked.md", ".agent-doc%2Fnotes.md", "alias.md"] {
+            let url = format!("/api/document-link?source=session.md&path={path}");
+            assert_eq!(browser_request(&state, "GET", &url, None, "").0, 404);
+        }
+
+        std::fs::write(&doc, SERVE_SAVE_DISK).unwrap();
+        assert_eq!(browser_request(&state, "GET", preview, None, "").0, 404);
     }
 
     #[test]

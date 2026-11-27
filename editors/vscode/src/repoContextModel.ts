@@ -141,7 +141,7 @@ export function formatRepoContextQuestion(
         .split('<!--').join('&lt;!--').split('-->').join('--&gt;');
     const range = anchor.line === anchor.endLine ? `${anchor.line}` : `${anchor.line}-${anchor.endLine}`;
     const handle = anchor.handle ? `, source handle ${inline(anchor.handle)}` : '';
-    return `❯ Repo Context Explorer question about ${inline(anchor.file)}:${range} (${inline(anchor.kind)} ${inline(anchor.name)}${handle}, file SHA-256 ${revision}): ${inline(question)} Please cite the source locations in your answer and include a standalone HTML comment whose text is repo-context-answer:${requestId} in the matching response.`;
+    return `❯ Document Context Explorer prompt about ${inline(anchor.file)}:${range} (${inline(anchor.kind)} ${inline(anchor.name)}${handle}, file SHA-256 ${revision}): ${inline(question)} Please cite the source locations in your answer and include a standalone HTML comment whose text is repo-context-answer:${requestId} in the matching response.`;
 }
 
 export function planExchangePromptInsertion(

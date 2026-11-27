@@ -2219,12 +2219,15 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - The generation proxy calls `requireLosslessNativeStringArgs(method.name, args)` before every native call. A `String` argument with an unpaired UTF-16 surrogate, the one input that UTF-8 encoding also replaces with `?`, refuses the call with `LossyNativeStringException` and never crosses.
 - `NativeStringEncodingTest` forces JNA's default to US-ASCII. It proves the default is the issue's lossy encoder (`dispatched ? opus-5.5 ?`), and that the bound handler crosses the issue's text and 500 seeded random non-ASCII documents byte-exact (length and round trip). It also proves the surrogate and malformed-UTF-8 refusals, and source-scans the plugin so no un-encoded crossing returns.
 
-### Repo Context Explorer
+### Document Context Explorer
 
-**Agent Doc: Repo Context Explorer** is a project action in Tools, Find
+**Agent Doc: Document Context Explorer** is a project action in Tools, Find
 Action, and the Agent Doc popup. It opens a native tool window in local
 IntelliJ IDEA. The classic plugin and the 262–263 modular backend use the
-same implementation.
+same implementation. The Document tab lists in-project Markdown links from the
+current session snapshot. Open a linked document in the editor or switch the
+document tree to a linked Agent Doc session. The Repository tab provides the
+code and Docs search described below.
 
 Explorer controls, labels, result lists, and answers use 70% of the IDE's UI
 font size and follow UI font and zoom changes. Result rows size themselves to

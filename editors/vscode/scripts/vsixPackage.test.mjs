@@ -74,7 +74,7 @@ test('VSIX carries koffi runtime JavaScript and license', () => {
     }
 });
 
-test('VSIX carries the Repo Context Explorer webview assets', () => {
+test('VSIX carries the Document Context Explorer webview assets', () => {
     for (const file of ['repoContext.css', 'repoContext.js']) {
         assert.ok(fs.existsSync(path.join(extensionDir, 'media', file)), `missing media/${file}`);
     }

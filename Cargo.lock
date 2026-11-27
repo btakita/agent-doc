@@ -912,6 +912,8 @@ dependencies = [
  "agent-doc-tmux-io",
  "anyhow",
  "lazily 0.64.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "percent-encoding",
+ "pulldown-cmark",
  "serde",
  "serde_json",
 ]

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>agent-doc</title>
+  <title>Document Context Explorer</title>
   <style>
     :root { --bg: #0f1115; --fg: #e6e6e6; --muted: #888; --accent: #4ea1ff; --warn: #ffb454; --err: #ff6b6b; }
     * { box-sizing: border-box; }
@@ -64,11 +64,18 @@
       .doc-nav { border-right: 0; border-bottom: 1px solid #232735; }
       .inspector { border-left: 0; border-top: 1px solid #232735; }
     }
+    .document-links { margin: 0 0 8px; }
+    .document-links summary { cursor: pointer; }
+    .document-links > div { max-height: min(20dvh, 12rem); overflow: auto; }
+    .document-links button { display: block; padding: 4px 0; text-align: left; overflow-wrap: anywhere; background: none; color: var(--accent); }
+    .document-link-preview { max-width: min(84vw, 860px); max-height: 80vh; color: var(--fg); background: var(--bg); border: 1px solid #2a2f3a; }
+    .document-link-preview::backdrop { background: #0009; }
+    .document-link-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; }
   </style>
 </head>
 <body>
   <header>
-    <h1>agent-doc</h1>
+    <h1>Document Context Explorer</h1>
     <div class="status" id="status">loading…</div>
     <a id="boardLink" class="secondary" href="/board" title="Fleet work board: queue + backlog across every project">board</a>
     <button id="reload" class="secondary" title="Discard unsaved edits and reload from disk">reload</button>
@@ -82,7 +89,7 @@
       <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
       <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="soft"></textarea>
     </section>
-    <aside class="inspector" aria-label="Document components">
+    <aside class="inspector" aria-label="Document Context Explorer">
       <section class="live-response" id="liveResponse" hidden>
         <div class="component-meta" id="liveResponseMeta">agent response</div>
         <pre id="liveResponseBody"></pre>
@@ -96,6 +103,10 @@
       </div>
       <div class="panels">
         <section class="document-prompts" id="documentPrompts" aria-label="Document prompts">
+          <details class="document-links" id="documentLinks" hidden>
+            <summary>Linked documents</summary>
+            <div id="documentLinkList"></div>
+          </details>
           <div class="prompt-tree" id="promptTree" aria-label="Document structure"></div>
           <p class="component-meta" id="promptAccess" hidden></p>
           <form class="prompt-composer" id="promptForm" hidden>
@@ -118,6 +129,11 @@
     <span id="dirty"></span>
   </div>
 
+  <dialog class="document-link-preview" id="documentLinkPreview" aria-labelledby="documentLinkTitle">
+    <form method="dialog"><button class="secondary">Close</button></form>
+    <h2 id="documentLinkTitle"></h2>
+    <pre id="documentLinkContent"></pre>
+  </dialog>
   <script>
     const workspace = document.querySelector(".workspace");
     const docNav = document.getElementById("docNav");
@@ -141,6 +157,11 @@
     const promptSubmit = document.getElementById("promptSubmit");
     const promptStatus = document.getElementById("promptStatus");
     const promptAccess = document.getElementById("promptAccess");
+    const documentLinks = document.getElementById("documentLinks");
+    const documentLinkList = document.getElementById("documentLinkList");
+    const documentLinkPreview = document.getElementById("documentLinkPreview");
+    const documentLinkTitle = document.getElementById("documentLinkTitle");
+    const documentLinkContent = document.getElementById("documentLinkContent");
 
     let savedContent = "";
     let savedRevision = "";
@@ -154,6 +175,7 @@
     let accessScope = "edit";
     let canRun = false;
     let promptProjection = null;
+    let documentLinkRequest = null;
     let promptTarget = null;
     const promptDrafts = new Map();
     const promptRows = new Map();
@@ -284,11 +306,10 @@
         const projection = await r.json();
         sessions = projection.sessions || [];
         const hashDoc = hashSelection();
-        selectedDoc = sessions.some((session) => session.path === selectedDoc)
-          ? selectedDoc
-          : sessions.some((session) => session.path === hashDoc)
-          ? hashDoc
-          : (projection.selected || sessions.find((session) => session.exists)?.path || "");
+        selectedDoc ||= hashDoc || projection.selected || sessions.find((session) => session.exists)?.path || "";
+        if (selectedDoc && !hashDoc) {
+          window.history.replaceState(null, "", "#/" + encodeURIComponent(selectedDoc));
+        }
         renderSessions();
       } catch (e) {
         sessions = [];
@@ -315,13 +336,20 @@
     }
 
     function selectDoc(path) {
-      if (saving || path === selectedDoc) return;
-      if (hasUnsavedEdits() && !confirm("Discard unsaved edits and switch documents?")) return;
+      if (path === selectedDoc) return;
+      if (saving || (hasUnsavedEdits() && !confirm("Discard unsaved edits and switch documents?"))) {
+        if (hashSelection() === path) {
+          window.history.replaceState(null, "", "#/" + encodeURIComponent(selectedDoc));
+        }
+        return;
+      }
       promptProjection = null;
       promptTarget = null;
       promptRows.clear();
       documentPrompts.append(promptForm);
       promptTree.replaceChildren();
+      renderDocumentLinks([]);
+      documentLinks.open = false;
       selectedDoc = path;
       savedRevision = "";
       updateDirty();
@@ -378,9 +406,47 @@
         if (requestedDoc !== selectedDoc || requestedRevision !== savedRevision) return;
         renderProjection(projection);
         renderPromptTree(projection.document_prompts);
+        renderDocumentLinks(requestedRevision === '"' + projection.document_prompts?.revision + '"'
+          ? projection.document_links || [] : []);
       } catch (e) {
         if (requestedDoc === selectedDoc) {
           setStatus("component projection failed: " + e.message, "err");
+        }
+      }
+    }
+
+    function renderDocumentLinks(links) {
+      documentLinkList.replaceChildren();
+      documentLinks.hidden = links.length === 0;
+      for (const link of links) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = link.path;
+        button.addEventListener("click", () => {
+          if (link.session) selectDoc(link.path);
+          else previewDocumentLink(link.path);
+        });
+        documentLinkList.append(button);
+      }
+    }
+
+    async function previewDocumentLink(path) {
+      const query = "?source=" + encodeURIComponent(selectedDoc) + "&path=" + encodeURIComponent(path);
+      const request = new AbortController();
+      documentLinkRequest = request;
+      documentLinkTitle.textContent = path;
+      documentLinkContent.textContent = "Loading…";
+      documentLinkPreview.showModal();
+      try {
+        const response = await fetch("/api/document-link" + query, {
+          headers: authHeaders(), cache: "no-store", signal: request.signal,
+        });
+        if (!response.ok) throw new Error("HTTP " + response.status);
+        const text = await response.text();
+        if (documentLinkRequest === request) documentLinkContent.textContent = text;
+      } catch (error) {
+        if (documentLinkRequest === request) {
+          documentLinkContent.textContent = "Could not open the linked document. " + error.message;
         }
       }
     }
@@ -682,6 +748,10 @@
       }
       documentPrompts.hidden = button.dataset.panel !== "document";
     });
+    documentLinkPreview.addEventListener("close", () => {
+      documentLinkRequest?.abort();
+      documentLinkRequest = null;
+    });
     promptForm.addEventListener("submit", submitPrompt);
     promptDraft.addEventListener("input", () => {
       if (promptTarget) promptDraftState(promptTarget).text = promptDraft.value;
@@ -718,7 +788,7 @@
 
     window.addEventListener("hashchange", () => {
       const hashDoc = hashSelection();
-      if (hashDoc && sessions.some((session) => session.path === hashDoc)) {
+      if (hashDoc) {
         selectDoc(hashDoc);
       }
     });

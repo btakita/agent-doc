@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.google.gson.JsonObject
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.ui.ComboBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
@@ -43,7 +44,11 @@ internal data class DocumentPromptTask(val requestId: String, val state: String)
         }
 }
 
-internal data class RepoContextDocumentOutline(val revision: String, val targets: List<DocumentPromptTarget>)
+internal data class RepoContextDocumentOutline(
+    val revision: String,
+    val targets: List<DocumentPromptTarget>,
+    val links: List<String> = emptyList(),
+)
 
 internal data class RepoContextPromptEdit(val offset: Int, val text: String, val action: DocumentPromptAction) {
     fun applyTo(document: Document, stamp: Long) {
@@ -55,8 +60,11 @@ internal data class RepoContextPromptEdit(val offset: Int, val text: String, val
 }
 
 internal class RepoContextDocumentPrompts(private val native: EditorDerivation = EditorDerivation.Native) {
-    fun outline(source: String, filePath: String? = null): RepoContextDocumentOutline {
-        val output = derive(source) { filePath?.let { addProperty("file", it) } }
+    fun outline(source: String, filePath: String? = null, projectRoot: String? = null): RepoContextDocumentOutline {
+        val output = derive(source) {
+            filePath?.let { addProperty("file", it) }
+            projectRoot?.let { addProperty("project_root", it) }
+        }
         return RepoContextDocumentOutline(
             output.get("revision").asString,
             output.getAsJsonArray("nodes").map { entry ->
@@ -74,6 +82,7 @@ internal class RepoContextDocumentPrompts(private val native: EditorDerivation =
                     endLine = node.get("end_line")?.takeUnless { it.isJsonNull }?.asInt,
                 )
             },
+            links = output.getAsJsonArray("links")?.map { it.asString }.orEmpty(),
         )
     }
 
@@ -120,6 +129,7 @@ internal class RepoContextDocumentTree(
     private val onSelection: () -> Unit,
     onOpen: (DocumentPromptTarget) -> Unit,
     onSubmit: () -> Unit = {},
+    onOpenLink: (String) -> Unit = {},
 ) : RepoContextTypography(BorderLayout(0, JBUI.scale(4))) {
     val question = RepoContextQuestionComposer(onSubmit)
     private val tree = RepoContextInlinePromptTree(question).apply {
@@ -131,6 +141,20 @@ internal class RepoContextDocumentTree(
     private val open = JButton("Open in editor").apply {
         isEnabled = false
         addActionListener { selection?.let(onOpen) }
+    }
+    private val linkedDocuments = ComboBox<String>().apply {
+        preferredSize = JBUI.size(180, preferredSize.height)
+        accessibleContext.accessibleName = "Linked documents"
+    }
+    private val openLink = JButton("Open link").apply {
+        addActionListener { (linkedDocuments.selectedItem as? String)?.let(onOpenLink) }
+    }
+    private val linksLabel = JBLabel("Linked documents").apply { labelFor = linkedDocuments }
+    private val links = JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
+        add(linksLabel, BorderLayout.WEST)
+        add(linkedDocuments, BorderLayout.CENTER)
+        add(openLink, BorderLayout.EAST)
+        isVisible = false
     }
     private var revision: RepoContextDocumentOutline? = null
     private var scope = ""
@@ -145,12 +169,13 @@ internal class RepoContextDocumentTree(
         get() = question.editor.isFocusOwner
 
     init {
+        add(links, BorderLayout.NORTH)
         add(JBScrollPane(tree), BorderLayout.CENTER)
         add(JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
             add(hint, BorderLayout.CENTER)
             add(open, BorderLayout.EAST)
         }, BorderLayout.SOUTH)
-        useCompactFont(tree, hint, open, question.label, question.editor, question.submit)
+        useCompactFont(tree, hint, open, question.label, question.editor, question.submit, linksLabel, linkedDocuments, openLink)
         tree.model = DefaultTreeModel(DefaultMutableTreeNode())
         tree.addTreeSelectionListener {
             if (!replacingModel) updateSelection()
@@ -192,6 +217,7 @@ internal class RepoContextDocumentTree(
     }
 
     fun clear(message: String) {
+        showLinks(emptyList())
         revision = null
         targetBranches = emptyMap()
         replacingModel = true
@@ -199,6 +225,14 @@ internal class RepoContextDocumentTree(
         replacingModel = false
         updateSelection()
         hint.text = message
+    }
+
+    private fun showLinks(paths: List<String>) {
+        val selected = linkedDocuments.selectedItem as? String
+        linkedDocuments.removeAllItems()
+        paths.forEach { linkedDocuments.addItem(it) }
+        if (selected != null && selected in paths) linkedDocuments.selectedItem = selected
+        links.isVisible = paths.isNotEmpty()
     }
 
     fun show(outline: RepoContextDocumentOutline, draftScope: String = "") {
@@ -232,6 +266,7 @@ internal class RepoContextDocumentTree(
                 newWorking.add(branch)
             }
         }
+        if (outline.links != revision?.links || !sameSession) showLinks(outline.links)
         revision = outline
         scope = draftScope
         targetBranches = branches

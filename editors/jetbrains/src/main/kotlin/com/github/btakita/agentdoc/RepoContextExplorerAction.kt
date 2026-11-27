@@ -86,7 +86,7 @@ class RepoContextExplorerAction : ImplAction {
     }
 
     companion object {
-        internal const val TITLE = "Repo Context Explorer"
+        internal const val TITLE = "Document Context Explorer"
     }
 }
 
@@ -182,7 +182,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val chooseSession = JButton("Choose session")
     private val sessionLabel = JBLabel("No session selected.")
     private val tabs = JBTabbedPane()
-    private val documentTree = RepoContextDocumentTree(::updateControls, ::openDocumentTarget, ::submitDocumentQuestion)
+    private val documentTree = RepoContextDocumentTree(
+        ::updateControls, ::openDocumentTarget, ::submitDocumentQuestion, ::openLinkedDocument,
+    )
     private val documentPrompts = RepoContextDocumentPrompts()
     private val question = RepoContextQuestionComposer(::submitSourceQuestion)
     private val answer = JBTextArea(7, 20).apply {
@@ -536,7 +538,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         val snapshot = document.immutableCharSequence
         val stamp = document.modificationStamp
         outlineWork = GenerationWork.schedule({
-            val projection = runCatching { documentPrompts.outline(snapshot.toString(), file.path) }
+            val projection = runCatching {
+                documentPrompts.outline(snapshot.toString(), file.path, projectPath.toString())
+            }
             GenerationWork.invokeLater {
                 if (disposed || project.isDisposed || outlineRevision != revision ||
                     session != file || document.modificationStamp != stamp) return@invokeLater
@@ -561,6 +565,14 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         caretSync.openFromTree(target.line) {
             OpenFileDescriptor(project, projection.session, target.line - 1, 0).navigate(true)
         }
+    }
+
+    private fun openLinkedDocument(path: String) {
+        val outline = currentOutline ?: return
+        if (path !in outline.outline.links || readDocument(outline.session)?.modificationStamp != outline.stamp) return
+        val file = LocalFileSystem.getInstance().findFileByNioFile(projectPath.resolve(path)) ?: return
+        if (AgentDocSessionFiles.isSessionDocument(file)) setSession(file)
+        OpenFileDescriptor(project, file).navigate(true)
     }
 
     private fun questionText(draft: String): String? {

@@ -141,7 +141,7 @@ async function sourceLinks(root: string, file: string, anchor: RepoContextAnchor
         if (backlink.status === 'fulfilled') {
             if (backlink.value) result.push(backlink.value);
         } else {
-            console.warn('[agent-doc] Repo Context Explorer could not inspect a backlink candidate', backlink.reason);
+            console.warn('[agent-doc] Document Context Explorer could not inspect a backlink candidate', backlink.reason);
         }
     }
     return result.slice(0, 20);
@@ -239,11 +239,11 @@ function renderPanel(panel: vscode.WebviewPanel, media: vscode.Uri): string {
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src ${panel.webview.cspSource}; script-src 'nonce-${nonce}'">
     <link rel="stylesheet" href="${css}">
-    <title>Repo Context Explorer</title>
+    <title>Document Context Explorer</title>
 </head>
 <body>
     <header>
-        <div><h1>Repo Context Explorer</h1><p id="repository"></p></div>
+        <div><h1>Document Context Explorer</h1><p id="repository"></p></div>
         <div class="session"><button id="open-session" type="button" hidden>Open session</button><button id="choose-session" class="secondary" type="button">Choose session</button></div>
     </header>
     <main>
@@ -295,7 +295,7 @@ export async function openRepoContextExplorer(
         ? path.dirname(active.fsPath) : workspace.uri.fsPath);
     const media = vscode.Uri.joinPath(extensionUri, 'media');
     const panel = vscode.window.createWebviewPanel(
-        'agentDoc.repoContextExplorer', 'Repo Context Explorer', vscode.ViewColumn.Beside,
+        'agentDoc.repoContextExplorer', 'Document Context Explorer', vscode.ViewColumn.Beside,
         { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [media] },
     );
     let session = active?.scheme === 'file' && actions.isSession(active) ? active : undefined;
@@ -312,7 +312,7 @@ export async function openRepoContextExplorer(
         const body = answer?.body;
         Promise.resolve(post({ type: 'answer', source: request.anchor,
             body: body && (body.length > 8000 ? body.slice(0, 8000) + '\n…' : body) }))
-            .catch(error => console.warn('[agent-doc] Repo Context Explorer could not display the response', error));
+            .catch(error => console.warn('[agent-doc] Document Context Explorer could not display the response', error));
     });
     panel.onDidDispose(() => sessionSaved.dispose());
 

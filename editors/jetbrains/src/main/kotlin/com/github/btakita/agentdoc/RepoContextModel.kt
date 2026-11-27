@@ -134,7 +134,7 @@ internal object RepoContextModel {
             .replace("<!--", "&lt;!--").replace("-->", "--&gt;")
         val range = if (anchor.endLine == anchor.line) "${anchor.line}" else "${anchor.line}-${anchor.endLine}"
         val handle = anchor.handle?.let { ", source handle ${inline(it)}" }.orEmpty()
-        return "❯ Repo Context Explorer question about ${inline(anchor.path.toString())}:$range " +
+        return "❯ Document Context Explorer prompt about ${inline(anchor.path.toString())}:$range " +
             "(${inline(anchor.kind)} ${inline(anchor.name)}$handle, file SHA-256 $revision): ${inline(text)} " +
             "Please cite the source locations in your answer and include a standalone HTML comment " +
             "whose text is repo-context-answer:$requestId in the matching response."

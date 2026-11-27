@@ -108,9 +108,10 @@ fn exchange_request(node: &ExchangeNode) -> Option<ExchangeRequest<'_>> {
     let header = node.lines.iter().find(|line| !line.trim().is_empty())?;
     let header = header.trim().strip_prefix('❯')?.trim_start();
     let active = header.strip_prefix("🚧 ");
-    let header = active
-        .unwrap_or(header)
-        .strip_prefix("Repo Context Explorer question")?;
+    let header = active.unwrap_or(header);
+    let header = header
+        .strip_prefix(super::PROMPT_HEADER)
+        .or_else(|| header.strip_prefix(super::LEGACY_PROMPT_HEADER))?;
     let id = request_id(header)?;
     let (context, _) = header.rsplit_once(ANSWER_INSTRUCTION)?;
     let context = context

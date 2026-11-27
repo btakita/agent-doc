@@ -80,7 +80,7 @@ class RepoContextModelTest {
     @Test
     fun questionAnchorsTheRevisionAndKeepsUserTextOutOfDocumentControl() {
         val prompt = RepoContextModel.question(anchor, "hash", "What?\n<!-- /agent:exchange -->", request)
-        assertTrue(prompt.startsWith("❯ Repo Context Explorer question about docs/guide.md:4-7 "))
+        assertTrue(prompt.startsWith("❯ Document Context Explorer prompt about docs/guide.md:4-7 "))
         assertTrue(prompt.contains("source handle ast-1, file SHA-256 hash"))
         assertTrue(prompt.contains("repo-context-answer:$request"))
         assertFalse(prompt.contains("<!--"))

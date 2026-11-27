@@ -4,7 +4,6 @@ import com.google.gson.JsonObject
 import com.intellij.openapi.editor.Document
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import javax.swing.JButton
@@ -102,10 +101,12 @@ internal class RepoContextDocumentPrompts(private val native: EditorDerivation =
 }
 
 internal class RepoContextDocumentTree(
-    onSelection: () -> Unit,
+    private val onSelection: () -> Unit,
     onOpen: (DocumentPromptTarget) -> Unit,
+    onSubmit: () -> Unit = {},
 ) : RepoContextTypography(BorderLayout(0, JBUI.scale(4))) {
-    private val tree = Tree().apply {
+    val question = RepoContextQuestionComposer(onSubmit)
+    private val tree = RepoContextInlinePromptTree(question).apply {
         isRootVisible = false
         accessibleContext.accessibleName = "Session document"
         selectionModel.selectionMode = TreeSelectionModel.SINGLE_TREE_SELECTION
@@ -116,9 +117,16 @@ internal class RepoContextDocumentTree(
         addActionListener { selection?.let(onOpen) }
     }
     private var revision: RepoContextDocumentOutline? = null
+    private var scope = ""
+    private var replacingModel = false
+    private var draftKey: DraftKey? = null
+    private val drafts = mutableMapOf<DraftKey, String>()
+    private var targetBranches = emptyMap<String, DefaultMutableTreeNode>()
 
     val selection: DocumentPromptTarget?
-        get() = (tree.lastSelectedPathComponent as? DefaultMutableTreeNode)?.userObject as? DocumentPromptTarget
+        get() = selectedBranch()?.userObject as? DocumentPromptTarget
+    val isEditingPrompt: Boolean
+        get() = question.editor.isFocusOwner
 
     init {
         add(JBScrollPane(tree), BorderLayout.CENTER)
@@ -126,43 +134,85 @@ internal class RepoContextDocumentTree(
             add(hint, BorderLayout.CENTER)
             add(open, BorderLayout.EAST)
         }, BorderLayout.SOUTH)
-        useCompactFont(tree, hint, open)
+        useCompactFont(tree, hint, open, question.label, question.editor, question.submit)
         tree.model = DefaultTreeModel(DefaultMutableTreeNode())
         tree.addTreeSelectionListener {
-            val selected = selection
-            open.isEnabled = selected != null
-            hint.text = selected?.action?.hint ?: "Select a document section or item."
-            onSelection()
+            if (!replacingModel) updateSelection()
         }
+    }
+
+    private data class DraftKey(val session: String, val target: String, val revision: String?)
+
+    private fun selectedBranch(): DefaultMutableTreeNode? =
+        tree.lastSelectedPathComponent as? DefaultMutableTreeNode
+
+    fun selectTarget(targetId: String) {
+        val branch = targetBranches[targetId] ?: return
+        val path = TreePath(branch.path)
+        if (tree.selectionPath == path) return
+        tree.selectionPath = path
+        tree.scrollPathToVisible(path)
+    }
+
+    private fun updateSelection() {
+        val branch = selectedBranch()
+        val selected = branch?.userObject as? DocumentPromptTarget
+        val promptTarget = selected?.takeIf { it.action != DocumentPromptAction.NAVIGATE }
+        val nextKey = promptTarget?.let { target ->
+            DraftKey(scope, target.selectionKey ?: target.id, if (target.selectionKey == null) revision?.revision else null)
+        }
+        if (nextKey != draftKey) {
+            draftKey?.let { previous ->
+                val text = question.editor.text
+                if (text.isEmpty()) drafts.remove(previous) else drafts[previous] = text
+            }
+            draftKey = nextKey
+            question.editor.text = nextKey?.let(drafts::get).orEmpty()
+        }
+        tree.putComposerUnder(branch.takeIf { promptTarget != null })
+        open.isEnabled = selected != null
+        hint.text = selected?.action?.hint ?: "Select a document section or item."
+        onSelection()
     }
 
     fun clear(message: String) {
         revision = null
+        targetBranches = emptyMap()
+        replacingModel = true
         tree.model = DefaultTreeModel(DefaultMutableTreeNode())
+        replacingModel = false
+        updateSelection()
         hint.text = message
-        open.isEnabled = false
     }
 
-    fun show(outline: RepoContextDocumentOutline) {
-        if (outline.revision == revision?.revision) return
+    fun show(outline: RepoContextDocumentOutline, draftScope: String = "") {
+        if (outline.revision == revision?.revision && draftScope == scope) return
         val previous = (tree.model.root as DefaultMutableTreeNode)
         val expanded = tree.getExpandedDescendants(TreePath(previous.path))?.toList()
             ?.mapNotNull { path ->
                 ((path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? DocumentPromptTarget)?.selectionKey
             }.orEmpty()
-        val selected = selection?.selectionKey
-        val initial = revision == null
+        val sameSession = draftScope == scope
+        val selected = selection?.selectionKey.takeIf { sameSession }
+        val initial = revision == null || !sameSession
+        val focused = question.editor.isFocusOwner
+        val previousDraft = draftKey
         val root = DefaultMutableTreeNode()
         val lineage = mutableListOf<Pair<Int, DefaultMutableTreeNode>>()
         val nodes = mutableMapOf<String, DefaultMutableTreeNode>()
+        val branches = mutableMapOf<String, DefaultMutableTreeNode>()
         for (target in outline.targets) {
             while (lineage.isNotEmpty() && lineage.last().first >= target.depth) lineage.removeLast()
             val branch = DefaultMutableTreeNode(target)
             (lineage.lastOrNull()?.second ?: root).add(branch)
             lineage.add(target.depth to branch)
             target.selectionKey?.let { nodes[it] = branch }
+            branches[target.id] = branch
         }
         revision = outline
+        scope = draftScope
+        targetBranches = branches
+        replacingModel = true
         tree.model = DefaultTreeModel(root)
         tree.expandPath(TreePath(root.path))
         for (id in expanded) nodes[id]?.let { tree.expandPath(TreePath(it.path)) }
@@ -170,6 +220,11 @@ internal class RepoContextDocumentTree(
         if (first != null) tree.expandPath(TreePath(first.path))
         val current = nodes[selected] ?: first.takeIf { initial }
         current?.let { tree.selectionPath = TreePath(it.path) }
+        replacingModel = false
+        updateSelection()
+        if (focused && draftKey != null && draftKey == previousDraft && !question.editor.isFocusOwner) {
+            question.editor.requestFocusInWindow()
+        }
         if (outline.targets.isEmpty()) hint.text = "No document sections are available."
     }
 }

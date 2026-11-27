@@ -180,9 +180,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val chooseSession = JButton("Choose session")
     private val sessionLabel = JBLabel("No session selected.")
     private val tabs = JBTabbedPane()
-    private val documentTree = RepoContextDocumentTree(::updateControls, ::openDocumentTarget)
+    private val documentTree = RepoContextDocumentTree(::updateControls, ::openDocumentTarget, ::submitDocumentQuestion)
     private val documentPrompts = RepoContextDocumentPrompts()
-    private val question = RepoContextQuestionComposer(::submitQuestion)
+    private val question = RepoContextQuestionComposer(::submitSourceQuestion)
     private val answer = JBTextArea(7, 20).apply {
         isEditable = false
         lineWrap = true
@@ -324,15 +324,14 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openSource.isEnabled = idle && selection != null
         openRelated.isEnabled = idle && related.selectedValue != null
         chooseSession.isEnabled = idle
+        val documentSelected = tabs.selectedComponent == documentTree
         val target = documentTree.selection
-        if (tabs.selectedComponent == documentTree) {
-            question.submit.text = target?.action?.button ?: "Ask agent"
-            question.submit.isEnabled = idle && currentOutline != null &&
-                target != null && target.action != DocumentPromptAction.NAVIGATE
-        } else {
-            question.submit.text = "Ask about source"
-            question.submit.isEnabled = idle && selection != null
-        }
+        question.isVisible = !documentSelected
+        question.submit.text = "Ask about source"
+        question.submit.isEnabled = !documentSelected && idle && selection != null
+        documentTree.question.submit.text = target?.action?.button ?: "Ask agent"
+        documentTree.question.submit.isEnabled = documentSelected && idle && currentOutline != null &&
+            target != null && target.action != DocumentPromptAction.NAVIGATE
         openAnswer.isEnabled = matchingAnswer != null
         sessionLabel.text = session?.name ?: "No session selected."
     }
@@ -503,7 +502,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         refreshOutline()
     }
 
-    private fun refreshOutline(document: Document? = session?.let(FileDocumentManager.getInstance()::getDocument)) {
+    private fun refreshOutline(document: Document? = session?.let(::readDocument)) {
         currentOutline = null
         outlineWork?.cancel(false)
         val revision = ++outlineRevision
@@ -522,7 +521,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                     session != file || document.modificationStamp != stamp) return@invokeLater
                 projection.onSuccess { outline ->
                     currentOutline = CurrentOutline(file, stamp, outline)
-                    documentTree.show(outline)
+                    documentTree.show(outline, file.url)
                 }.onFailure { error ->
                     documentTree.clear(error.message ?: "Could not read this session document.")
                 }
@@ -534,37 +533,37 @@ private class RepoContextExplorerPanel(private val project: Project, private val
 
     private fun openDocumentTarget(target: DocumentPromptTarget) {
         val projection = currentOutline ?: return
-        val document = FileDocumentManager.getInstance().getDocument(projection.session) ?: return
+        val document = readDocument(projection.session) ?: return
         if (document.modificationStamp != projection.stamp) return
         OpenFileDescriptor(project, projection.session, target.line - 1, 0).navigate(true)
     }
 
-    private fun submitQuestion() {
-        if (background != null || disposed) return
-        val draft = question.editor.text
+    private fun questionText(draft: String): String? {
+        if (background != null || disposed) return null
         val text = draft.trim()
         if (text.isEmpty() || text.length > 1_500) {
             status.text = "Enter a question between 1 and 1500 characters."
-            return
+            return null
         }
-        if (tabs.selectedComponent == documentTree) {
-            submitDocumentQuestion(draft)
-        } else {
-            submitSourceQuestion(draft, text)
-        }
+        return text
     }
 
-    private fun submitDocumentQuestion(draft: String) {
+    private fun submitDocumentQuestion() {
+        val composer = documentTree.question
+        val draft = composer.editor.text
+        questionText(draft) ?: return
         val target = documentTree.selection ?: return
         val projection = currentOutline ?: return
         val file = projection.session
-        val document = FileDocumentManager.getInstance().getDocument(file) ?: return
-        if (document.modificationStamp != projection.stamp) {
+        val document = readDocument(file) ?: return
+        val snapshot = ReadAction.compute<CharSequence?, RuntimeException> {
+            if (document.modificationStamp == projection.stamp) document.immutableCharSequence else null
+        }
+        if (snapshot == null) {
             status.text = "The session changed. Select the target and try again."
             refreshOutline(document)
             return
         }
-        val snapshot = document.immutableCharSequence
         val submitted = SubmittedQuestion(
             UUID.randomUUID().toString().replace("-", ""), file, target.action != DocumentPromptAction.EXCHANGE,
         )
@@ -576,11 +575,14 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             }
             check(edit.action == target.action) { "The prompt action changed. Select it and try again." }
             WriteCommandAction.runWriteCommandAction(project, Runnable { edit.applyTo(document, projection.stamp) })
-            sendQuestion(submitted, draft)
+            composer.clearSubmittedDraft(draft)
+            sendQuestion(submitted)
         }
     }
 
-    private fun submitSourceQuestion(draft: String, text: String) {
+    private fun submitSourceQuestion() {
+        val draft = question.editor.text
+        val text = questionText(draft) ?: return
         val selected = selection ?: return
         val repo = root ?: return
         val selectedSession = session ?: chooseSession() ?: return
@@ -593,9 +595,8 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 "The selected source changed. Search again before asking."
             }
         }, submission = true) {
-            val documents = FileDocumentManager.getInstance()
             check(!isUnsaved(selected.source)) { "Save the source and search again before asking." }
-            val doc = documents.getDocument(selectedSession) ?: error("The session cannot be opened.")
+            val doc = readDocument(selectedSession) ?: error("The session cannot be opened.")
             check(AgentDocSessionFiles.isSessionDocument(selectedSession)) {
                 "Choose an Agent Doc session in this repository."
             }
@@ -607,15 +608,15 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 check(doc.text == snapshot) { "The session changed. Try again." }
                 doc.insertString(exchange.closeStart, RepoContextModel.insertion(snapshot, exchange, prompt))
             })
-            sendQuestion(submitted, draft)
+            question.clearSubmittedDraft(draft)
+            sendQuestion(submitted)
         }
     }
 
-    private fun sendQuestion(submitted: SubmittedQuestion, draft: String) {
+    private fun sendQuestion(submitted: SubmittedQuestion) {
         request = submitted
         matchingAnswer = null
         answer.text = if (submitted.queued) "Waiting for the queue to run this prompt." else "Waiting for the matching answer."
-        question.clearSubmittedDraft(draft)
         status.text = if (submitted.queued) "Prompt added to the queue." else "Question added to ${submitted.session.name}."
         SubmitAction().submit(project, submitted.session)
     }
@@ -703,6 +704,10 @@ private class RepoContextExplorerPanel(private val project: Project, private val
 
         private fun virtualFile(path: Path): VirtualFile =
             LocalFileSystem.getInstance().refreshAndFindFileByNioFile(path) ?: error("The source file is unavailable.")
+
+        private fun readDocument(file: VirtualFile): Document? = ReadAction.compute<Document?, RuntimeException> {
+            FileDocumentManager.getInstance().getDocument(file)
+        }
 
         private fun isUnsaved(file: VirtualFile): Boolean = ReadAction.compute<Boolean, RuntimeException> {
             val manager = FileDocumentManager.getInstance()

@@ -1547,29 +1547,30 @@ fn persist_browser_prompt(
             "prompt submission requires an Agent Doc project\n".into(),
         )
     })?;
-    let doc = doc.to_path_buf();
+    let owned_doc = doc.to_path_buf();
     agent_doc_queue_io::write_queue::DocumentWriteQueue::new(
         &agent_doc_document_realtime_io::SESSION_ACTOR_WRITE_QUEUE,
         &project,
         &doc.to_string_lossy(),
     )
     .agent_write(move || {
-        let current = agent_doc_document_realtime_io::peek_current_document_content(&doc, SOURCE)
-            .map_err(|error| {
-            SaveFailure::new(409, format!("document authority unavailable: {error:#}\n"))
-        })?;
+        let current =
+            agent_doc_document_realtime_io::peek_current_document_content(&owned_doc, SOURCE)
+                .map_err(|error| {
+                    SaveFailure::new(409, format!("document authority unavailable: {error:#}\n"))
+                })?;
         let content = agent_doc_editor_surface_io::insert_document_prompt(&current, &submission)
             .map_err(|error| SaveFailure::new(409, format!("{error:#}\n")))?;
         if content.len() > MAX_BODY_BYTES {
             return Err(SaveFailure::new(413, "the document is too large\n".into()));
         }
-        let active_cycle = active_cycle_id(&doc)
+        let active_cycle = active_cycle_id(&owned_doc)
             .map_err(|error| {
                 SaveFailure::new(500, format!("failed to inspect active cycle: {error:#}\n"))
             })?
             .is_some();
         agent_doc_document_realtime_io::persist_exact_operator_edit_through_authority(
-            &doc, &current, &content, SOURCE,
+            &owned_doc, &current, &content, SOURCE,
         )
         .map_err(|error| {
             SaveFailure::new(

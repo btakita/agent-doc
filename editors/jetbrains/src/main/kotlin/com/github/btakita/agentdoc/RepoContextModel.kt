@@ -23,6 +23,19 @@ internal data class RepoContextLocation(
 
 internal data class RepoContextAnswer(val offset: Int, val text: String)
 
+/** Publish each set of links as it arrives so either lookup can fail independently. */
+internal fun streamRepoContextLinks(
+    outgoing: () -> List<RepoContextLocation>,
+    incoming: () -> List<RepoContextLocation>,
+    publish: (List<RepoContextLocation>, Throwable?, Boolean) -> Unit,
+) {
+    val outbound = runCatching(outgoing)
+    publish(outbound.getOrNull().orEmpty(), null, false)
+    if (Thread.currentThread().isInterrupted || outbound.exceptionOrNull() is InterruptedException) return
+    val inbound = runCatching(incoming)
+    publish(inbound.getOrNull().orEmpty(), outbound.exceptionOrNull() ?: inbound.exceptionOrNull(), true)
+}
+
 internal object RepoContextModel {
     private val requestIdPattern = Regex("[a-f0-9]{32}")
     private val matchLine = Regex("""^line ([1-9][0-9]*)\b""")

@@ -14,6 +14,17 @@ class RepoContextModelTest {
     private val anchor = RepoContextLocation(Path.of("docs/guide.md"), 4, 7, "Start <!-- marker -->", "heading", "ast-1")
 
     @Test
+    fun publishesOutgoingLinksBeforeAnIncomingTimeout() {
+        val updates = mutableListOf<Triple<List<RepoContextLocation>, String?, Boolean>>()
+        streamRepoContextLinks({ listOf(anchor) }, {
+            assertEquals(listOf(Triple(listOf(anchor), null, false)), updates)
+            error("Backlink search timed out.")
+        }) { locations, error, done -> updates += Triple(locations, error?.message, done) }
+        assertEquals(listOf(Triple(listOf(anchor), null, false),
+            Triple(emptyList<RepoContextLocation>(), "Backlink search timed out.", true)), updates)
+    }
+
+    @Test
     fun anchorsRetainOneBasedRangesAndStayInRepo() {
         val json = RepoContextModel.decode("""
             {"symbols":[

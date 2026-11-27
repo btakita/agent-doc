@@ -2233,10 +2233,16 @@ the text with scaled padding.
 Code mode queries tsift for symbols and provides call-site navigation with
 unambiguous definitions. If the search has source hits only, it lists their
 locations as matches. Docs mode queries Markdown headings and outlines and
-shows links resolved by IDEA's Markdown PSI. A background query can be
-cancelled and has a 45-second limit to allow a cold index. Open source
-navigates to the selected location in the editor. Repository membership and
-the saved source fingerprint are verified before a question is accepted.
+shows links resolved by IDEA's Markdown PSI. Opening a validated Markdown
+selection and typing a question are available while its links load. Outgoing
+links appear as soon as they resolve. A failed backlink search leaves the
+selection and outgoing links usable and reports that related locations are
+incomplete. Switching source cancels the old lookup and discards its late
+updates. Search input accepts typing during a foreground operation. A
+background query can be cancelled and has a 45-second limit to allow a cold
+index. Open source navigates to the selected location in the editor. Repository
+membership and the saved source fingerprint are verified before a question is
+accepted.
 
 Choose a saved Agent Doc session in the same repository to ask about the
 selection. The tool window inserts one source-scoped question into the exchange

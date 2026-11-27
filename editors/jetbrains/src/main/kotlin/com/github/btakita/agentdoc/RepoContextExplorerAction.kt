@@ -139,6 +139,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val relatedModel = DefaultListModel<RepoContextLocation>()
     private val related = JBList(relatedModel)
     private val sourceLabel = JBLabel("Select a search result.")
+    private val relatedStatus = JBLabel().apply { isVisible = false }
     private val openSource = JButton("Open source")
     private val openRelated = JButton("Open related source")
     private val chooseSession = JButton("Choose session")
@@ -160,6 +161,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private var request: SubmittedQuestion? = null
     private var matchingAnswer: CurrentAnswer? = null
     private var background: Future<*>? = null
+    private var relatedWork: Future<*>? = null
     private var taskRevision = 0L
     private var answerWork: Future<*>? = null
     @Volatile private var disposed = false
@@ -171,6 +173,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         mode.addActionListener {
             query.emptyText.text = if (mode.selectedItem == RepoContextMode.DOCS) "Heading or Markdown path"
                 else "Symbol, function, or type"
+            clearSelection()
             resultsModel.clear()
             status.text = "Enter a search."
         }
@@ -190,6 +193,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                     layout = BoxLayout(this, BoxLayout.Y_AXIS)
                     add(sourceLabel)
                     add(buttonRow(openSource, openRelated))
+                    add(relatedStatus)
                 }, BorderLayout.NORTH)
                 add(JBScrollPane(related), BorderLayout.CENTER)
                 add(JPanel().apply {
@@ -206,7 +210,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         }, BorderLayout.CENTER)
         add(status, BorderLayout.SOUTH)
         useCompactFont(
-            mode, query, search, cancel, status, results, related, sourceLabel, openSource, openRelated,
+            mode, query, search, cancel, status, results, related, sourceLabel, relatedStatus, openSource, openRelated,
             chooseSession, sessionLabel, question, ask, answer, openAnswer,
         )
         search.addActionListener { search() }
@@ -220,9 +224,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         query.addActionListener { search() }
         results.addListSelectionListener { event ->
             if (!event.valueIsAdjusting) {
-                selection = null
-                relatedModel.clear()
-                sourceLabel.text = "Select a search result."
+                clearSelection()
                 updateControls()
                 results.selectedValue?.let(::select)
             }
@@ -258,7 +260,6 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         val idle = background == null
         search.isEnabled = idle
         cancel.isVisible = !idle
-        query.isEnabled = idle
         mode.isEnabled = idle
         results.isEnabled = idle
         related.isEnabled = idle
@@ -298,6 +299,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             return
         }
         val selectedMode = mode.selectedItem as RepoContextMode
+        clearSelection()
         resultsModel.clear()
         runTask("Searching…", {
             val repo = gitRoot(projectPath)
@@ -330,7 +332,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             val (current, links) = if (anchor.kind == "heading") {
                 val heading = outline(repo, file, "100").firstOrNull { it.name == anchor.name && it.line == anchor.line }
                     ?: error("The heading changed. Search again.")
-                heading to markdownLinks(repo, file, virtual, heading)
+                heading to emptyList()
             } else if (anchor.kind == "source match") {
                 anchor to emptyList()
             } else {
@@ -350,6 +352,51 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             sourceLabel.text = "${selected.anchor.path}:${selected.anchor.line}–${selected.anchor.endLine}"
             selected.related.forEach(relatedModel::addElement)
             status.text = if (selected.related.isEmpty()) "Source selected." else "${selected.related.size} related locations."
+            if (selected.anchor.kind == "heading") loadMarkdownLinks(repo, selected)
+        }
+    }
+
+    private fun clearSelection() {
+        relatedWork?.cancel(true)
+        relatedWork = null
+        selection = null
+        relatedStatus.isVisible = false
+        relatedModel.clear()
+        sourceLabel.text = "Select a search result."
+    }
+
+    private fun loadMarkdownLinks(repo: Path, selected: SourceSelection) {
+        relatedStatus.text = "Finding related locations…"
+        relatedStatus.toolTipText = null
+        relatedStatus.isVisible = true
+        relatedWork = GenerationWork.executeOnPooledThread {
+            streamRepoContextLinks(
+                { outgoingLinks(repo, selected.source, selected.anchor) },
+                { backlinks(repo, selected.source) },
+            ) { locations, error, done ->
+                publishRelated(selected, locations, error, done)
+            }
+        }
+    }
+
+    private fun publishRelated(
+        selected: SourceSelection,
+        locations: List<RepoContextLocation>,
+        error: Throwable?,
+        done: Boolean,
+    ) {
+        GenerationWork.invokeLater {
+            if (disposed || project.isDisposed || selection !== selected) return@invokeLater
+            locations.forEach { location ->
+                if (relatedModel.size() < 20 && !relatedModel.contains(location)) relatedModel.addElement(location)
+            }
+            if (done) {
+                relatedWork = null
+                relatedStatus.isVisible = error != null
+                relatedStatus.text = "Some related locations are unavailable."
+                relatedStatus.toolTipText = error?.message
+            }
+            updateControls()
         }
     }
 
@@ -442,22 +489,24 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         RepoContextModel.anchors(tsift(repo, listOf("markdown-ast", "--json", "--max-items", limit, "--path",
             repo.toString(), "--", file.toString())), repo, RepoContextMode.DOCS, file)
 
-    private fun markdownLinks(repo: Path, file: Path, virtual: VirtualFile, heading: RepoContextLocation): List<RepoContextLocation> {
-        val result = resolvedLinks(virtual).mapNotNull { (line, target) ->
+    private fun outgoingLinks(repo: Path, file: VirtualFile, heading: RepoContextLocation): List<RepoContextLocation> =
+        resolvedLinks(file).mapNotNull { (line, target) ->
             val path = RepoContextModel.pathInRepo(repo, target.path)
             if (path == null || line !in heading.line..heading.endLine) null
             else RepoContextLocation(repo.relativize(path), 1, 1, "Links to ${repo.relativize(path)}", "Link")
-        }.toMutableList()
-        val candidates = tsift(repo, listOf("search", "--json", "--exact", "--lang", "markdown", "--no-tagpath",
-            "--limit", "8", "--path", repo.toString(), "--", file.fileName.toString()))
-        for (candidate in RepoContextModel.markdownFiles(candidates, repo)) {
-            if (candidate == file) continue
-            val referrer = LocalFileSystem.getInstance().findFileByNioFile(candidate) ?: continue
-            val line = resolvedLinks(referrer).firstOrNull { (_, target) -> target == virtual }?.first ?: continue
-            val path = repo.relativize(candidate)
-            result += RepoContextLocation(path, line, line, "Links from $path", "Backlink")
         }
-        return result.distinct().take(20)
+
+    private fun backlinks(repo: Path, file: VirtualFile): List<RepoContextLocation> {
+        val source = checkedFile(repo, file.path)
+        val candidates = tsift(repo, listOf("search", "--json", "--exact", "--lang", "markdown", "--no-tagpath",
+            "--limit", "8", "--path", repo.toString(), "--", source.fileName.toString()))
+        return RepoContextModel.markdownFiles(candidates, repo).mapNotNull { candidate ->
+            if (candidate == source) return@mapNotNull null
+            val referrer = LocalFileSystem.getInstance().findFileByNioFile(candidate) ?: return@mapNotNull null
+            val line = resolvedLinks(referrer).firstOrNull { (_, target) -> target == file }?.first ?: return@mapNotNull null
+            val path = repo.relativize(candidate)
+            RepoContextLocation(path, line, line, "Links from $path", "Backlink")
+        }
     }
 
     private fun resolvedLinks(file: VirtualFile): List<Pair<Int, VirtualFile>> = ReadAction.compute<List<Pair<Int, VirtualFile>>, RuntimeException> {
@@ -484,6 +533,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     override fun dispose() {
         disposed = true
         background?.cancel(true)
+        relatedWork?.cancel(true)
         answerWork?.cancel(false)
     }
 

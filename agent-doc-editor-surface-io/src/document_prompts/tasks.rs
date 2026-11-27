@@ -50,7 +50,7 @@ pub(super) fn anchor_comment(selection_key: &str) -> String {
 }
 
 fn request_id(line: &str) -> Option<&str> {
-    let (_, suffix) = line.split_once(ANSWER_INSTRUCTION)?;
+    let (_, suffix) = line.rsplit_once(ANSWER_INSTRUCTION)?;
     let suffix = suffix.strip_prefix(ANSWER_PREFIX)?;
     let (id, after_id) = suffix.split_at_checked(32)?;
     (valid_receipt(id) && after_id.starts_with(" in your matching response.")).then_some(id)
@@ -112,7 +112,7 @@ fn exchange_request(node: &ExchangeNode) -> Option<ExchangeRequest<'_>> {
         .unwrap_or(header)
         .strip_prefix("Repo Context Explorer question")?;
     let id = request_id(header)?;
-    let (context, _) = header.split_once(ANSWER_INSTRUCTION)?;
+    let (context, _) = header.rsplit_once(ANSWER_INSTRUCTION)?;
     let context = context
         .strip_prefix(" about ")
         .and_then(|text| text.rsplit_once(" (selected at line "))

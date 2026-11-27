@@ -119,7 +119,14 @@ class AuthenticatedSurfaceIngressStateTest {
     @Test
     fun shellOnlyBackendAcceptsLegacySnapshotsAndRejectsUnpairedImplementationClaims() = runBlocking {
         val publisher = RecordingPublisher()
-        val state = AuthenticatedSurfaceIngressState(publisher, RecordingForwarder())
+        val state = AuthenticatedSurfaceIngressState(
+            publisher,
+            RecordingForwarder(),
+            backendActivationReceipt = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND).copy(
+                shellDigest = frontendActivation.shellDigest,
+                jvmInstanceId = "backend-jvm",
+            ),
+        )
         val lease = state.open("client-a", "frontend-a")
 
         val unexpected = snapshot("frontend-a", 1).copy(activationReceipt = frontendActivation.encode())
@@ -129,6 +136,68 @@ class AuthenticatedSurfaceIngressStateTest {
             SurfaceIngressStatus.ACCEPTED,
             state.publish("client-a", lease, snapshot("frontend-a", 2).forSchema(4)).status,
         )
+    }
+
+    /**
+     * GH #450: a Client left on the previous plugin keeps publishing the generation it already
+     * activated. This backend's shell moved on, so the release stays withheld and the peer stays
+     * shell-only; refusing that receipt dropped the Client's measured columns and Run Agent Doc
+     * waited out its budget, then refused `sync_tmux_layout`. The receipt names another shell, so
+     * it is not a claim on this generation, and the snapshot is admitted. A receipt that names
+     * this shell is still an unpaired claim.
+     */
+    @Test
+    fun shellOnlyBackendAdmitsAnotherShellsAlreadyActivatedMeasuredSnapshot() = runBlocking {
+        val backendShell = "a".repeat(64)
+        val shellOnly = ActivationReceipt.shellOnly(ActivationReceipt.ROLE_BACKEND).copy(
+            shellDigest = backendShell,
+            jvmInstanceId = "backend-jvm",
+        )
+        val publisher = RecordingPublisher()
+        val forwarder = RecordingForwarder()
+        val state = AuthenticatedSurfaceIngressState(
+            publisher,
+            forwarder,
+            backendActivationReceipt = shellOnly,
+        )
+        val lease = state.open("client-old", "frontend-old")
+        val olderGeneration = frontendActivation.copy(
+            shellDigest = "d".repeat(64),
+            implSha256 = "c".repeat(64),
+            epoch = 4,
+            jvmInstanceId = "older-client-jvm",
+        )
+        val first = state.publish(
+            "client-old",
+            lease,
+            snapshot("frontend-old", 1).copy(activationReceipt = olderGeneration.encode()),
+        )
+        assertEquals(SurfaceIngressStatus.ACCEPTED, first.status, first.diagnostic)
+        val again = state.publish(
+            "client-old",
+            lease,
+            snapshot("frontend-old", 2).copy(activationReceipt = olderGeneration.encode()),
+        )
+        assertEquals(SurfaceIngressStatus.ACCEPTED, again.status, again.diagnostic)
+        assertEquals(listOf(1L, 2L), publisher.published.map { it.third })
+        assertEquals(listOf(1L, 2L), forwarder.forwarded.map { it.third })
+        assertEquals(LayoutPublicationReadiness.ACCEPTED, state.layoutPublicationReadiness.value)
+        assertTrue(publisher.retired.isEmpty(), publisher.retired.toString())
+
+        val unpaired = AuthenticatedSurfaceIngressState(
+            RecordingPublisher(),
+            RecordingForwarder(),
+            backendActivationReceipt = shellOnly,
+        )
+        val unpairedLease = unpaired.open("client-old", "frontend-old")
+        val claim = olderGeneration.copy(shellDigest = backendShell)
+        val refused = unpaired.publish(
+            "client-old",
+            unpairedLease,
+            snapshot("frontend-old", 1).copy(activationReceipt = claim.encode()),
+        )
+        assertEquals(SurfaceIngressStatus.DELIVERY_FAILED, refused.status)
+        assertEquals(FRONTEND_AUTHORITY_UNAVAILABLE_READINESS, refused.diagnostic)
     }
 
     @Test

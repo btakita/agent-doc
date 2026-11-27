@@ -311,17 +311,17 @@ class ShellRegistrationOwnershipTest {
         )
 
         /** Every Tier A registration the implementation stages (one per former direct call). */
-        const val STAGED_LISTENERS = 18
+        const val STAGED_LISTENERS = 19
 
         /** Every EDT, pooled, executor, thread and alarm call the implementation stages. */
         val STAGED_WORK: Map<String, Int> = sortedMapOf(
             "executeOnPooledThread" to 29,
-            "invokeLater" to 54,
+            "invokeLater" to 56,
             "newPooledAlarm" to 1,
             "newSingleThreadExecutor" to 1,
             "newSingleThreadScheduledExecutor" to 8,
             "newThread" to 14,
-            "schedule" to 6,
+            "schedule" to 7,
             "scheduleWithFixedDelay" to 1,
         )
 

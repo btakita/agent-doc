@@ -63,6 +63,8 @@ struct Target {
     selection_key: Option<String>,
     label: String,
     line: usize,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    end_line: Option<usize>,
     depth: usize,
     action: Action,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -170,6 +172,7 @@ impl<'a> Projection<'a> {
         projection.context_node("Document".to_string(), 0, 0, None);
         projection.nodes[0].id = "document".to_string();
         projection.nodes[0].selection_key = Some("document".to_string());
+        projection.nodes[0].end_line = Some(projection.line(source.len()));
 
         let normalized = source.replace("\r\n", "\n");
         let (frontmatter, markdown) = split_frontmatter_parts(&normalized);
@@ -184,11 +187,14 @@ impl<'a> Projection<'a> {
                 1,
                 Some("session frontmatter".into()),
             );
-            projection
-                .nodes
-                .last_mut()
-                .expect("frontmatter node")
-                .selection_key = Some("frontmatter".into());
+            let last_line = if markdown.is_empty() {
+                projection.line(source.len())
+            } else {
+                frontmatter_lines.max(1)
+            };
+            let node = projection.nodes.last_mut().expect("frontmatter node");
+            node.selection_key = Some("frontmatter".into());
+            node.end_line = Some(last_line);
         }
         let mut outlines = project_markdown_outline(markdown)
             .into_iter()
@@ -221,12 +227,7 @@ impl<'a> Projection<'a> {
             let inline_heading = outlines
                 .next_if(|heading| heading.line == component_line)
                 .map(|heading| {
-                    while heading_levels
-                        .last()
-                        .is_some_and(|level| *level >= heading.depth)
-                    {
-                        heading_levels.pop();
-                    }
+                    projection.close_headings(&mut heading_levels, heading.depth, heading.line);
                     (
                         heading.depth,
                         compact_label(heading.heading.split("<!--").next().unwrap_or("")),
@@ -256,7 +257,9 @@ impl<'a> Projection<'a> {
                     depth,
                     (!direct).then(|| label.clone()),
                 );
+                let end_line = projection.line(component.close_end.saturating_sub(1));
                 let node = projection.nodes.last_mut().expect("component node");
+                node.end_line = Some(end_line.max(node.line));
                 node.selection_key = Some(format!("section:{label}"));
                 if direct {
                     node.id = "exchange".to_string();
@@ -277,7 +280,7 @@ impl<'a> Projection<'a> {
                 overlay.next();
             }
             if let Some((level, _)) = inline_heading {
-                heading_levels.push(level);
+                heading_levels.push((level, None));
             }
             while outlines.peek().is_some_and(|heading| {
                 projection
@@ -342,6 +345,7 @@ impl<'a> Projection<'a> {
             selection_key: None,
             label,
             line,
+            end_line: Some(line),
             depth,
             action: Action::Navigate,
             task: None,
@@ -362,19 +366,40 @@ impl<'a> Projection<'a> {
         self.nodes.push(node);
     }
 
-    fn heading(&mut self, line: usize, level: usize, raw: &str, levels: &mut Vec<usize>) {
+    fn close_headings(
+        &mut self,
+        levels: &mut Vec<(usize, Option<usize>)>,
+        next_level: usize,
+        next_line: usize,
+    ) {
+        while levels.last().is_some_and(|(level, _)| *level >= next_level) {
+            if let Some((_, Some(index))) = levels.pop() {
+                let node = &mut self.nodes[index];
+                node.end_line = Some(next_line.saturating_sub(1).max(node.line));
+            }
+        }
+    }
+
+    fn heading(
+        &mut self,
+        line: usize,
+        level: usize,
+        raw: &str,
+        levels: &mut Vec<(usize, Option<usize>)>,
+    ) {
         let Some(&offset) = self.line_starts.get(line - 1) else {
             return;
         };
-        while levels.last().is_some_and(|previous| *previous >= level) {
-            levels.pop();
-        }
+        self.close_headings(levels, level, line);
         let label = compact_label(raw);
         if !label.is_empty() {
             self.context_node(label.clone(), offset, levels.len() + 1, Some(label.clone()));
-            self.nodes.last_mut().expect("heading node").selection_key =
-                Some(format!("heading:{label}"));
-            levels.push(level);
+            let end_line = self.line(self.source.len());
+            let index = self.nodes.len() - 1;
+            let node = &mut self.nodes[index];
+            node.selection_key = Some(format!("heading:{label}"));
+            node.end_line = Some(end_line);
+            levels.push((level, Some(index)));
         }
     }
 
@@ -394,9 +419,11 @@ impl<'a> Projection<'a> {
                         format!("{section}, item \"{label}\"")
                     };
                 self.context_node(label, item.start_byte, depth, Some(context));
+                let end_line = self.line(item.end_byte.saturating_sub(1));
+                let node = self.nodes.last_mut().expect("item node");
+                node.end_line = Some(end_line.max(node.line));
                 if item.explicit_id {
-                    self.nodes.last_mut().expect("item node").selection_key =
-                        Some(format!("tracked:{section}:{}", item.id));
+                    node.selection_key = Some(format!("tracked:{section}:{}", item.id));
                 }
             }
         }
@@ -405,6 +432,7 @@ impl<'a> Projection<'a> {
     fn exchange_nodes(&mut self, component: &Component, depth: usize) {
         let mut offset = component.open_end;
         for node in parse_exchange_nodes(component.content(self.source)) {
+            let end = offset + node.lines.iter().map(String::len).sum::<usize>();
             if !matches!(node.kind, ExchangeNodeKind::Salient { .. })
                 && !tasks::is_explorer_exchange_request(&node)
                 && let Some(line) = node.lines.iter().find(|line| {
@@ -415,12 +443,12 @@ impl<'a> Projection<'a> {
                 let label = compact_label(line);
                 let context = format!("agent:exchange, \"{label}\"");
                 self.context_node(label, offset, depth, Some(context));
-                self.nodes
-                    .last_mut()
-                    .expect("Exchange item node")
-                    .selection_key = Some(node.node_id());
+                let end_line = self.line(end.saturating_sub(1));
+                let target = self.nodes.last_mut().expect("Exchange item node");
+                target.selection_key = Some(node.node_id());
+                target.end_line = Some(end_line.max(target.line));
             }
-            offset += node.lines.iter().map(String::len).sum::<usize>();
+            offset = end;
         }
     }
 
@@ -440,7 +468,10 @@ impl<'a> Projection<'a> {
             depth,
             Some(label.to_string()),
         );
-        self.nodes.last_mut().expect("run node").selection_key = Some(format!("section:{label}"));
+        let end_line = self.line(component.close_end.saturating_sub(1));
+        let node = self.nodes.last_mut().expect("run node");
+        node.selection_key = Some(format!("section:{label}"));
+        node.end_line = Some(end_line.max(node.line));
         if valid {
             let node = self.nodes.last_mut().expect("run node");
             node.action = Action::Queue;
@@ -493,6 +524,8 @@ impl<'a> Projection<'a> {
                         &prompt.text,
                         matches!(entries[index], QueueEntry::Completed(_)),
                     );
+                    let end = component.open_end + subtree_ends[index];
+                    node.end_line = Some(self.line(end.saturating_sub(1)).max(node.line));
                     let lineage = document_queue::nest_vector_at(&entries, index, text)
                         .unwrap_or_else(|| text.to_string());
                     let work_key = strip_generated_queue_prompt_id_annotation(&lineage);
@@ -804,6 +837,20 @@ mod tests {
                     .is_some_and(|title| title.contains(label))
             })
             .unwrap_or_else(|| panic!("missing {label:?} in {projection:#}"))
+    }
+
+    #[test]
+    fn caret_ranges_follow_queue_subtrees_and_stop_at_component_boundaries() {
+        let fixture = DOCUMENT.replace(
+            "<!-- /agent:run -->\n",
+            "<!-- /agent:run -->\nOutside the run.\n",
+        );
+        let projection = outline(&fixture);
+        assert_eq!(node(&projection, "Project 🧭")["end_line"], 23);
+        assert_eq!(node(&projection, "Current Run")["end_line"], 5);
+        assert_eq!(node(&projection, "Earlier work")["end_line"], 4);
+        assert_eq!(node(&projection, "Follow up on this")["end_line"], 9);
+        assert_eq!(node(&projection, "Existing subprompt")["end_line"], 9);
     }
 
     fn edit(source: &str, revision: &Value, target: &Value, draft: &str) -> Value {

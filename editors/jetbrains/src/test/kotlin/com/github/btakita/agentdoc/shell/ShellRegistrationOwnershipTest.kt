@@ -299,6 +299,7 @@ class ShellRegistrationOwnershipTest {
             "message_bus_connect" to Regex("""messageBus\s*\.\s*connect\b"""),
             "document_or_vfs_listener" to Regex("""(?<!GenerationListeners)\.add(?:Document|VirtualFile|Bulk\w*)Listener\("""),
             "editor_factory_or_multicaster_listener" to Regex("""(?<!GenerationListeners)\.add(?:EditorFactory|EditorMouse\w*)Listener\("""),
+            "editor_multicaster_caret_listener" to Regex("""eventMulticaster\s*\.\s*addCaretListener\("""),
             // EDT and pooled work: `GenerationWork.` calls are the staged form.
             "invoke_later" to Regex("""(?<!GenerationWork\.)invokeLater\s*[({]"""),
             "pooled_thread" to Regex("""(?<!GenerationWork\.)executeOnPooledThread\s*[({]"""),
@@ -311,12 +312,12 @@ class ShellRegistrationOwnershipTest {
         )
 
         /** Every Tier A registration the implementation stages (one per former direct call). */
-        const val STAGED_LISTENERS = 19
+        const val STAGED_LISTENERS = 20
 
         /** Every EDT, pooled, executor, thread and alarm call the implementation stages. */
         val STAGED_WORK: Map<String, Int> = sortedMapOf(
             "executeOnPooledThread" to 29,
-            "invokeLater" to 56,
+            "invokeLater" to 57,
             "newPooledAlarm" to 1,
             "newSingleThreadExecutor" to 1,
             "newSingleThreadScheduledExecutor" to 8,

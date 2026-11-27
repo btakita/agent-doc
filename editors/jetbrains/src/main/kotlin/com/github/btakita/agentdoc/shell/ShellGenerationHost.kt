@@ -9,6 +9,7 @@ import com.intellij.openapi.application.ApplicationManager
 import com.intellij.openapi.components.Service
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.editor.EditorFactory
+import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.event.EditorMouseListener
@@ -76,6 +77,13 @@ class ShellGenerationHost : Disposable {
             if (!admits(DOCUMENT_LISTENERS)) return
             applicationListeners.addListener(DOCUMENT_LISTENERS, DocumentListener::class.java, listener, parent) { forwarder, owner ->
                 EditorFactory.getInstance().eventMulticaster.addDocumentListener(forwarder, owner)
+            }
+        }
+
+        override fun addCaretListener(listener: CaretListener, parent: Disposable) {
+            if (!admits(EDITOR_CARET_LISTENERS)) return
+            applicationListeners.addListener(EDITOR_CARET_LISTENERS, CaretListener::class.java, listener, parent) { forwarder, owner ->
+                EditorFactory.getInstance().eventMulticaster.addCaretListener(forwarder, owner)
             }
         }
 
@@ -181,6 +189,7 @@ class ShellGenerationHost : Disposable {
         private val LOG = Logger.getInstance(ShellGenerationHost::class.java)
 
         internal const val DOCUMENT_LISTENERS = "editor-multicaster-document"
+        internal const val EDITOR_CARET_LISTENERS = "editor-multicaster-caret"
         internal const val EDITOR_MOUSE_LISTENERS = "editor-multicaster-mouse"
         internal const val EDITOR_FACTORY_LISTENERS = "editor-factory"
 

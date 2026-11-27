@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc.shell
 
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.event.EditorMouseListener
@@ -111,6 +112,9 @@ interface GenerationContext {
 
     /** Tier A: `EditorFactory.eventMulticaster.addDocumentListener`. */
     fun addDocumentListener(listener: DocumentListener, parent: Disposable)
+
+    /** Tier A: `EditorFactory.eventMulticaster.addCaretListener`. */
+    fun addCaretListener(listener: CaretListener, parent: Disposable)
 
     /** Tier A: `EditorFactory.eventMulticaster.addEditorMouseListener`. */
     fun addEditorMouseListener(listener: EditorMouseListener, parent: Disposable)

@@ -7,6 +7,7 @@ import com.github.btakita.agentdoc.shell.ImplGeneration
 import com.github.btakita.agentdoc.shell.ShellGenerationHost
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.editor.event.EditorFactoryListener
 import com.intellij.openapi.editor.event.EditorMouseListener
@@ -168,6 +169,10 @@ internal object GenerationListeners {
 
     fun addDocumentListener(listener: DocumentListener, parent: Disposable) {
         context("document listener")?.addDocumentListener(listener, parent)
+    }
+
+    fun addCaretListener(listener: CaretListener, parent: Disposable) {
+        context("editor caret listener")?.addCaretListener(listener, parent)
     }
 
     fun addEditorMouseListener(listener: EditorMouseListener, parent: Disposable) {

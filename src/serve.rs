@@ -23,6 +23,7 @@
 //!   - `GET /api/queue-tree/<doc>` → that document's queue tree. Each row's
 //!     `queue_id` is the claim join key, and `claims` use the same key.
 //!     Reads the claim ledger read-only and never creates `state.db`.
+//!   - `POST /api/prompt[/<doc>]` → revision-bound prompt placement and dispatch on an opted-in local server.
 //!   - `POST /save` → body = full document text, with `X-Agent-Doc-Base-Revision` naming its
 //!     base cut. Merges independent changes and returns the committed text and
 //!     its `ETag`. An overlap or unavailable authority returns `409 Conflict`.
@@ -83,6 +84,7 @@ pub struct ServeOptions {
     pub port: u16,
     pub auth_token: Option<String>,
     pub read_only_token: Option<String>,
+    pub allow_run: bool,
     pub tls_cert: Option<PathBuf>,
     pub tls_key: Option<PathBuf>,
 }
@@ -103,6 +105,7 @@ impl ServeOptions {
             port: port.unwrap_or(DEFAULT_PORT),
             auth_token,
             read_only_token,
+            allow_run: false,
             tls_cert,
             tls_key,
         }
@@ -110,10 +113,19 @@ impl ServeOptions {
 }
 
 pub fn run(options: ServeOptions) -> Result<()> {
-    let auth = ServeAuth::from_options(&options.host, options.auth_token, options.read_only_token)?;
+    anyhow::ensure!(
+        !options.allow_run || is_loopback_host(&options.host),
+        "--allow-run requires a loopback --host"
+    );
+    let auth_token = options
+        .auth_token
+        .or_else(|| options.allow_run.then(|| generate_bearer_token("edit")));
+    let auth = ServeAuth::from_options(&options.host, auth_token, options.read_only_token)?;
     let tls = ServeTls::from_options(options.tls_cert, options.tls_key)?;
     let scheme = if tls.is_some() { "https" } else { "http" };
-    let state = Arc::new(ServeState::new(options.target, auth)?);
+    let mut state = ServeState::new(options.target, auth)?;
+    state.allow_run = options.allow_run;
+    let state = Arc::new(state);
 
     let bind = format!("{}:{}", options.host, options.port);
     let server = bind_server(&bind, tls)?;
@@ -156,6 +168,8 @@ struct ServeState {
     default_doc: Option<PathBuf>,
     browse_root: bool,
     auth: ServeAuth,
+    allow_run: bool,
+    prompt_runs: Arc<Mutex<std::collections::HashSet<PathBuf>>>,
     revisions: Arc<Mutex<VecDeque<BrowserRevision>>>,
     /// Last `/api/fleet` body. The scan of every running controller is slow,
     /// so a second read inside [`FLEET_CACHE_TTL`] returns this copy.
@@ -198,6 +212,8 @@ impl ServeState {
                 default_doc: Some(canonical),
                 browse_root: false,
                 auth,
+                allow_run: false,
+                prompt_runs: Arc::default(),
                 revisions: Arc::default(),
                 fleet_cache: Arc::default(),
             })
@@ -208,6 +224,8 @@ impl ServeState {
                 default_doc: None,
                 browse_root: true,
                 auth,
+                allow_run: false,
+                prompt_runs: Arc::default(),
                 revisions: Arc::default(),
                 fleet_cache: Arc::default(),
             })
@@ -558,6 +576,10 @@ fn handle_request(request: tiny_http::Request, state: &ServeState) -> Result<()>
         (Method::Post, route) if route.starts_with("/save/") => {
             handle_save(request, state, Some(&route["/save/".len()..]))
         }
+        (Method::Post, "/api/prompt") => handle_prompt(request, state, None),
+        (Method::Post, route) if route.starts_with("/api/prompt/") => {
+            handle_prompt(request, state, Some(&route["/api/prompt/".len()..]))
+        }
         _ => respond(
             request,
             "not found\n",
@@ -577,7 +599,11 @@ fn authorize_request(
 }
 
 fn route_requires_write(method: &Method, route: &str) -> bool {
-    *method == Method::Post && (route == "/save" || route.starts_with("/save/"))
+    *method == Method::Post
+        && (route == "/save"
+            || route.starts_with("/save/")
+            || route == "/api/prompt"
+            || route.starts_with("/api/prompt/"))
 }
 
 fn bearer_token(request: &tiny_http::Request) -> Option<String> {
@@ -818,6 +844,7 @@ fn handle_auth(request: tiny_http::Request, state: &ServeState, scope: AuthScope
         "authRequired": state.auth.is_enabled(),
         "scope": scope.as_str(),
         "canWrite": scope.can_write(),
+        "canRun": state.allow_run && scope.can_write(),
     });
     respond(
         request,
@@ -906,6 +933,7 @@ fn handle_projection(
 #[derive(Debug, Serialize)]
 struct ServeProjection {
     components: Vec<ServeProjectionComponent>,
+    document_prompts: serde_json::Value,
 }
 
 #[derive(Debug, Serialize)]
@@ -1133,6 +1161,8 @@ fn build_projection(doc: &str) -> Result<ServeProjection> {
             .into_iter()
             .map(|name| projection_component(doc, &components, name))
             .collect(),
+        document_prompts: agent_doc_editor_surface_io::project_document_prompts(doc)
+            .unwrap_or_else(|error| serde_json::json!({"error": error.to_string()})),
     })
 }
 
@@ -1393,6 +1423,214 @@ impl Read for SsePollStream {
             }
         }
     }
+}
+
+fn handle_prompt(
+    mut request: tiny_http::Request,
+    state: &ServeState,
+    token: Option<&str>,
+) -> Result<()> {
+    const MAX_PROMPT_BYTES: usize = 16 * 1024;
+    if !state.allow_run
+        || !state.auth.is_enabled()
+        || state
+            .auth
+            .scope_for_token(bearer_token(&request).as_deref())
+            .ok()
+            != Some(AuthScope::Edit)
+    {
+        return respond(
+            request,
+            "prompt submission requires --allow-run and an edit bearer header\n",
+            "text/plain; charset=utf-8",
+            StatusCode(403),
+        );
+    }
+    let doc = match state.resolve_doc(token) {
+        Ok(doc)
+            if state
+                .default_doc
+                .as_ref()
+                .is_none_or(|default| *default == doc) =>
+        {
+            doc
+        }
+        _ => {
+            return respond(
+                request,
+                "session document not found\n",
+                "text/plain; charset=utf-8",
+                StatusCode(404),
+            );
+        }
+    };
+    let mut body = Vec::new();
+    request
+        .as_reader()
+        .take(MAX_PROMPT_BYTES as u64 + 1)
+        .read_to_end(&mut body)
+        .context("failed to read prompt request")?;
+    if body.len() > MAX_PROMPT_BYTES {
+        return respond(
+            request,
+            "prompt request is too large\n",
+            "text/plain; charset=utf-8",
+            StatusCode(413),
+        );
+    }
+    let submission = match serde_json::from_slice(&body) {
+        Ok(submission) => submission,
+        Err(error) => {
+            return respond(
+                request,
+                &format!("invalid prompt request: {error}\n"),
+                "text/plain; charset=utf-8",
+                StatusCode(400),
+            );
+        }
+    };
+    if !state.prompt_runs.lock().insert(doc.clone()) {
+        return respond(
+            request,
+            "The previous browser submission is still running. Your draft is unchanged.\n",
+            "text/plain; charset=utf-8",
+            StatusCode(409),
+        );
+    }
+    let (content, active_cycle) = match persist_browser_prompt(&doc, submission) {
+        Ok(saved) => saved,
+        Err(failure) => {
+            state.prompt_runs.lock().remove(&doc);
+            return respond(
+                request,
+                &failure.message,
+                "text/plain; charset=utf-8",
+                StatusCode(failure.status),
+            );
+        }
+    };
+    let dispatch = if active_cycle {
+        Ok(false)
+    } else {
+        start_browser_prompt_run(state, &doc).map(|()| true)
+    };
+    if !matches!(dispatch, Ok(true)) {
+        state.prompt_runs.lock().remove(&doc);
+    }
+    let dispatch_error = dispatch.as_ref().err().map(|error| format!("{error:#}"));
+    let revision = state.remember_revision(&doc, &content);
+    let payload = serde_json::json!({
+        "content": content,
+        "started": dispatch.unwrap_or(false),
+        "dispatch_error": dispatch_error,
+    });
+    respond_with_headers(
+        request,
+        &payload.to_string(),
+        "application/json; charset=utf-8",
+        StatusCode(200),
+        vec![
+            header("ETag", &revision)?,
+            header("Cache-Control", "no-store")?,
+        ],
+    )
+}
+
+fn persist_browser_prompt(
+    doc: &Path,
+    submission: agent_doc_editor_surface_io::DocumentPromptSubmission,
+) -> std::result::Result<(String, bool), SaveFailure> {
+    const SOURCE: &str = "serve_browser_prompt";
+    let project = agent_doc_project_root_io::project_root_containing(doc).ok_or_else(|| {
+        SaveFailure::new(
+            409,
+            "prompt submission requires an Agent Doc project\n".into(),
+        )
+    })?;
+    let doc = doc.to_path_buf();
+    agent_doc_queue_io::write_queue::DocumentWriteQueue::new(
+        &agent_doc_document_realtime_io::SESSION_ACTOR_WRITE_QUEUE,
+        &project,
+        &doc.to_string_lossy(),
+    )
+    .agent_write(move || {
+        let current = agent_doc_document_realtime_io::peek_current_document_content(&doc, SOURCE)
+            .map_err(|error| {
+            SaveFailure::new(409, format!("document authority unavailable: {error:#}\n"))
+        })?;
+        let content = agent_doc_editor_surface_io::insert_document_prompt(&current, &submission)
+            .map_err(|error| SaveFailure::new(409, format!("{error:#}\n")))?;
+        if content.len() > MAX_BODY_BYTES {
+            return Err(SaveFailure::new(413, "the document is too large\n".into()));
+        }
+        let active_cycle = active_cycle_id(&doc)
+            .map_err(|error| {
+                SaveFailure::new(500, format!("failed to inspect active cycle: {error:#}\n"))
+            })?
+            .is_some();
+        agent_doc_document_realtime_io::persist_exact_operator_edit_through_authority(
+            &doc, &current, &content, SOURCE,
+        )
+        .map_err(|error| {
+            SaveFailure::new(
+                409,
+                format!("prompt placement could not be confirmed: {error:#}\n"),
+            )
+        })?;
+        // Admission consumes this operator edit. A browser save's Git commit
+        // would instead establish it as the next baseline.
+        Ok((content, active_cycle))
+    })
+    .map_err(|error| {
+        SaveFailure::new(
+            500,
+            format!("document write queue unavailable: {error:#}\n"),
+        )
+    })?
+}
+
+fn start_browser_prompt_run(state: &ServeState, doc: &Path) -> Result<()> {
+    use agent_doc_state_backbone::pane_execution_authority::{
+        AuthorityOperation, AuthorityVerdict,
+    };
+
+    let scope = agent_doc_state_backbone::DocumentScope::new();
+    let verdict = agent_doc_run_io::pane_execution_authority::verdict_in(
+        &scope,
+        doc,
+        AuthorityOperation::Mutation,
+    )?;
+    let binary = std::env::current_exe().context("locate Agent Doc executable")?;
+    let mut command = Command::new(binary);
+    if matches!(
+        verdict,
+        AuthorityVerdict::PermitHeadless | AuthorityVerdict::PermitUnregistered
+    ) {
+        command.arg("run");
+    } else {
+        command.args(["route", "--dispatch-only", "--debounce", "0"]);
+    }
+    let mut child = command
+        .arg(doc)
+        .current_dir(&state.root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("start Agent Doc")?;
+    let runs = Arc::clone(&state.prompt_runs);
+    let doc = doc.to_path_buf();
+    thread::spawn(move || {
+        match child.wait() {
+            Ok(status) if status.success() => {}
+            Ok(status) => eprintln!("[serve] prompt run for {} exited {status}", doc.display()),
+            Err(error) => eprintln!(
+                "[serve] prompt run for {} could not be observed: {error}",
+                doc.display()
+            ),
+        }
+        runs.lock().remove(&doc);
+    });
+    Ok(())
 }
 
 fn handle_save(
@@ -2043,6 +2281,8 @@ mod tests {
             default_doc: None,
             browse_root: true,
             auth: ServeAuth::Disabled,
+            allow_run: false,
+            prompt_runs: Arc::default(),
             revisions: Arc::default(),
             fleet_cache: Arc::default(),
         };
@@ -2076,6 +2316,8 @@ mod tests {
             default_doc: None,
             browse_root: true,
             auth: ServeAuth::Disabled,
+            allow_run: false,
+            prompt_runs: Arc::default(),
             revisions: Arc::default(),
             fleet_cache: Arc::default(),
         };
@@ -2344,6 +2586,50 @@ mod tests {
         let (status, revision, content) = browser_request(state, "GET", "/doc", None, "");
         assert_eq!(status, 200, "{content}");
         (revision.unwrap(), content)
+    }
+
+    #[test]
+    fn browser_prompt_persists_one_operator_edit_for_normal_admission() {
+        use agent_doc_editor_surface_io::DocumentPromptSubmission;
+
+        let (dir, doc) = serve_save_project();
+        let head_before = git(dir.path(), &["rev-parse", "HEAD"]);
+        let submit = || DocumentPromptSubmission {
+            revision: agent_doc_hash::content_hash(SERVE_SAVE_DISK),
+            target: "document".into(),
+            draft: "Which steps remain?\nInclude the test status.".into(),
+            request_id: "0123456789abcdef0123456789abcdef".into(),
+        };
+        let (content, active_cycle) = persist_browser_prompt(&doc, submit()).unwrap();
+        assert!(!active_cycle);
+        assert!(content.contains("> Which steps remain?\n> Include the test status."));
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+        assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
+        assert_eq!(
+            persist_browser_prompt(&doc, submit()).unwrap_err().status,
+            409
+        );
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
+    }
+
+    #[test]
+    fn browser_prompt_requires_opt_in_and_an_edit_bearer_header() {
+        let (_dir, doc) = serve_save_project();
+        let mut state = browser_for(&doc);
+        assert_eq!(
+            browser_request(&state, "POST", "/api/prompt", None, "{}").0,
+            403
+        );
+        state.allow_run = true;
+        state.auth = ServeAuth::Enabled {
+            edit_token: "edit-secret".into(),
+            read_only_token: Some("read-secret".into()),
+        };
+        for token in ["edit-secret", "read-secret"] {
+            let path = format!("/api/prompt?token={token}");
+            assert_eq!(browser_request(&state, "POST", &path, None, "{}").0, 403);
+        }
+        assert_eq!(std::fs::read_to_string(doc).unwrap(), SERVE_SAVE_DISK);
     }
 
     #[test]

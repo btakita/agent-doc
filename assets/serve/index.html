@@ -2,6 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>agent-doc</title>
   <style>
     :root { --bg: #0f1115; --fg: #e6e6e6; --muted: #888; --accent: #4ea1ff; --warn: #ffb454; --err: #ff6b6b; }
@@ -29,7 +30,7 @@
     .gutter { padding: 16px 10px; color: #5c6370; background: #11141a; border-right: 1px solid #232735; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; text-align: right; overflow: hidden; user-select: none; white-space: pre; }
     textarea { width: 100%; height: 100%; background: #0b0d11; color: var(--fg); border: 0; padding: 16px; font: 13px/1.5 ui-monospace, "SF Mono", Menlo, monospace; resize: none; outline: none; tab-size: 2; line-height: 1.5; overflow: auto; white-space: pre-wrap; overflow-wrap: anywhere; }
     .inspector { min-width: 0; min-height: 0; display: flex; flex-direction: column; background: #12151c; border-left: 1px solid #232735; }
-    .tabs { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border-bottom: 1px solid #232735; }
+    .tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-bottom: 1px solid #232735; }
     .tabs button { border-radius: 0; padding: 8px 6px; background: transparent; color: var(--muted); border-right: 1px solid #232735; }
     .tabs button.active { color: var(--fg); background: #1b202a; }
     .live-response { max-height: 34%; min-height: 92px; border-bottom: 1px solid #232735; display: flex; flex-direction: column; }
@@ -42,10 +43,21 @@
     .component-panel { height: 100%; display: flex; flex-direction: column; min-height: 0; }
     .component-meta { display: flex; gap: 12px; padding: 8px 10px; color: var(--muted); border-bottom: 1px solid #232735; font: 11px/1.4 ui-monospace, monospace; }
     .component-content { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d8dee9; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
+    .document-prompts { height: 100%; display: flex; flex-direction: column; }
+    .document-prompts[hidden] { display: none; }
+    .prompt-tree { flex: 1; min-height: 65px; overflow: auto; padding: 5px; }
+    .prompt-tree button { min-height: 30px; width: 100%; text-align: left; overflow-wrap: anywhere; background: transparent; color: var(--fg); font-weight: 400; }
+    .prompt-tree button[aria-pressed="true"] { background: #263248; }
+    .prompt-tree button:hover { background: #1b202a; }
+    .prompt-composer { padding: 8px 10px; border-top: 1px solid #232735; display: grid; gap: 6px; }
+    .prompt-composer textarea { height: auto; min-height: 60px; padding: 7px 9px; border: 1px solid #323b4a; border-radius: 4px; resize: vertical; }
+    .prompt-composer textarea:focus-visible { outline: 2px solid var(--accent); }
+    .prompt-composer button { justify-self: start; }
+    .prompt-status { color: var(--muted); min-height: 1.4em; overflow-wrap: anywhere; }
     .footer { padding: 6px 12px; background: #181b22; border-top: 1px solid #232735; color: var(--muted); font-size: 11px; font-family: ui-monospace, monospace; display: flex; gap: 16px; flex-shrink: 0; }
     @media (max-width: 900px) {
-      .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: 160px minmax(0, 1fr) 220px; }
-      .workspace.single-doc { grid-template-rows: minmax(0, 1fr) 220px; }
+      .workspace { grid-template-columns: minmax(0, 1fr); grid-template-rows: 100px minmax(0, 1fr) min(42dvh, 350px); }
+      .workspace.single-doc { grid-template-rows: minmax(0, 1fr) min(46dvh, 380px); }
       .doc-nav { border-right: 0; border-bottom: 1px solid #232735; }
       .inspector { border-left: 0; border-top: 1px solid #232735; }
     }
@@ -73,13 +85,23 @@
         <pre id="liveResponseBody"></pre>
       </section>
       <div class="tabs" id="tabs" role="tablist" aria-label="Document components">
-        <button class="active" data-panel="exchange" type="button">exchange</button>
+        <button class="active" data-panel="document" type="button">document</button>
+        <button data-panel="exchange" type="button">exchange</button>
         <button data-panel="backlog" type="button">backlog</button>
         <button data-panel="queue" type="button">queue</button>
         <button data-panel="review" type="button">review</button>
       </div>
       <div class="panels">
-        <agent-doc-component data-name="exchange"></agent-doc-component>
+        <section class="document-prompts" id="documentPrompts" aria-label="Document prompts">
+          <div class="prompt-tree" id="promptTree" aria-label="Document structure"></div>
+          <form class="prompt-composer" id="promptForm">
+            <label for="promptDraft">Prompt</label>
+            <textarea id="promptDraft" rows="3" aria-describedby="promptStatus" placeholder="Ask about the selected section or item"></textarea>
+            <button id="promptSubmit" type="submit" disabled>Ask agent</button>
+            <div class="prompt-status" id="promptStatus" role="status"></div>
+          </form>
+        </section>
+        <agent-doc-component data-name="exchange" hidden></agent-doc-component>
         <agent-doc-component data-name="backlog" hidden></agent-doc-component>
         <agent-doc-component data-name="queue" hidden></agent-doc-component>
         <agent-doc-component data-name="review" hidden></agent-doc-component>
@@ -108,6 +130,12 @@
     const liveResponse = document.getElementById("liveResponse");
     const liveResponseMeta = document.getElementById("liveResponseMeta");
     const liveResponseBody = document.getElementById("liveResponseBody");
+    const documentPrompts = document.getElementById("documentPrompts");
+    const promptTree = document.getElementById("promptTree");
+    const promptForm = document.getElementById("promptForm");
+    const promptDraft = document.getElementById("promptDraft");
+    const promptSubmit = document.getElementById("promptSubmit");
+    const promptStatus = document.getElementById("promptStatus");
 
     let savedContent = "";
     let savedRevision = "";
@@ -119,6 +147,10 @@
     let sessions = [];
     let selectedDoc = "";
     let accessScope = "edit";
+    let canRun = false;
+    let promptProjection = null;
+    let promptTarget = null;
+    const promptDrafts = new Map();
     const authToken = (() => {
       const token = new URLSearchParams(window.location.search).get("token");
       if (token) {
@@ -159,6 +191,7 @@
       editor.readOnly = saving || !canEdit;
       dirtyEl.textContent = dirty ? "● unsaved" : "";
       bytesEl.textContent = editor.value.length + " bytes";
+      updatePromptComposer();
     }
 
     function updateGutter() {
@@ -209,6 +242,12 @@
         if (!r.ok) throw new Error("HTTP " + r.status);
         const auth = await r.json();
         accessScope = auth.canWrite ? "edit" : "read-only";
+        canRun = auth.canRun === true;
+        if (!canRun) {
+          promptStatus.textContent = auth.canWrite
+            ? "Start the local server with --allow-run to submit prompts here."
+            : "This connection is read-only.";
+        }
         saveBtn.textContent = auth.canWrite ? "save (Ctrl+S)" : "read only";
         updateDirty();
       } catch (e) {
@@ -271,6 +310,12 @@
     function selectDoc(path) {
       if (saving || path === selectedDoc) return;
       if (hasUnsavedEdits() && !confirm("Discard unsaved edits and switch documents?")) return;
+      promptDrafts.set(selectedDoc, promptDraft.value);
+      promptDraft.value = promptDrafts.get(path) || "";
+      promptProjection = null;
+      promptTarget = null;
+      promptTree.replaceChildren();
+      if (canRun) promptStatus.textContent = "";
       selectedDoc = path;
       savedRevision = "";
       updateDirty();
@@ -315,6 +360,8 @@
     }
 
     async function loadProjection() {
+      const requestedDoc = selectedDoc;
+      const requestedRevision = savedRevision;
       try {
         const r = await fetch(docUrl("/api/projection"), {
           cache: "no-store",
@@ -322,9 +369,106 @@
         });
         if (!r.ok) throw new Error("HTTP " + r.status);
         const projection = await r.json();
+        if (requestedDoc !== selectedDoc || requestedRevision !== savedRevision) return;
         renderProjection(projection);
+        renderPromptTree(projection.document_prompts);
       } catch (e) {
-        setStatus("component projection failed: " + e.message, "err");
+        if (requestedDoc === selectedDoc) {
+          setStatus("component projection failed: " + e.message, "err");
+        }
+      }
+    }
+
+    function updatePromptComposer() {
+      const draft = promptDraft.value.trim();
+      const labels = { exchange: "Ask agent", queue: "Add prompt", subprompt: "Add subprompt", navigate: "Navigation only" };
+      promptSubmit.textContent = labels[promptTarget?.action] || "Ask agent";
+      promptSubmit.disabled = !canRun || saving || loadedDoc !== selectedDoc || hasUnsavedEdits()
+        || !promptTarget || promptTarget.action === "navigate"
+        || !draft || [...draft].length > 1500
+        || savedRevision !== '"' + promptProjection?.revision + '"';
+    }
+
+    function renderPromptTree(projection) {
+      const scroll = promptTree.scrollTop;
+      const previous = promptTarget;
+      promptProjection = projection;
+      const nodes = projection?.nodes || [];
+      promptTarget = nodes.find((target) => previous?.selection_key && target.selection_key === previous.selection_key)
+        || nodes.find((target) => target.id === previous?.id) || nodes[0] || null;
+      const buttons = document.createDocumentFragment();
+      for (const target of nodes) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.textContent = target.label;
+        button.style.paddingInlineStart = (8 + Math.min(target.depth, 12) * 12) + "px";
+        button.setAttribute("aria-pressed", String(target === promptTarget));
+        button.title = "Line " + target.line;
+        button.addEventListener("click", () => {
+          promptTarget = target;
+          promptTree.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
+          button.setAttribute("aria-pressed", "true");
+          updatePromptComposer();
+        });
+        button.addEventListener("dblclick", () => {
+          if (hasUnsavedEdits()) return;
+          const lines = savedContent.split("\n");
+          let start = 0;
+          for (let line = 1; line < target.line && line <= lines.length; line++) start += lines[line - 1].length + 1;
+          editor.focus();
+          editor.setSelectionRange(start, start + (lines[target.line - 1]?.length || 0));
+          editor.scrollTop = Math.max(0, (target.line - 3) * parseFloat(getComputedStyle(editor).lineHeight));
+        });
+        buttons.append(button);
+      }
+      promptTree.replaceChildren(buttons);
+      if (!nodes.length) promptTree.textContent = projection?.error || "No document structure available.";
+      promptTree.scrollTop = scroll;
+      updatePromptComposer();
+    }
+
+    async function submitPrompt(event) {
+      event.preventDefault();
+      if (promptSubmit.disabled) return;
+      const draft = promptDraft.value;
+      const revision = promptProjection.revision;
+      const target = promptTarget.id;
+      const requestId = [...crypto.getRandomValues(new Uint8Array(16))]
+        .map((byte) => byte.toString(16).padStart(2, "0")).join("");
+      const path = selectedDoc ? "/api/prompt/" + encodeURIComponent(selectedDoc) : "/api/prompt";
+      let refresh = false;
+      saving = true;
+      ++loadEpoch;
+      updateDirty();
+      promptStatus.textContent = "Submitting prompt…";
+      try {
+        const response = await fetch(path, {
+          method: "POST",
+          headers: authHeaders({ "Content-Type": "application/json" }),
+          body: JSON.stringify({ revision, target, draft, request_id: requestId }),
+        });
+        if (!response.ok) {
+          refresh = response.status === 409;
+          throw new Error((await response.text()).split("\n")[0] || ("HTTP " + response.status));
+        }
+        const result = await response.json();
+        const currentRevision = response.headers.get("ETag");
+        if (!currentRevision || typeof result.content !== "string") {
+          throw new Error("server did not return the submitted document revision");
+        }
+        acceptSavedText(result.content, currentRevision);
+        refresh = true;
+        if (promptDraft.value === draft) promptDraft.value = "";
+        promptStatus.textContent = result.dispatch_error
+          ? "Prompt saved. Agent Doc could not start: " + result.dispatch_error
+          : result.started ? "Prompt submitted. Agent Doc is starting."
+          : "Prompt added to the running session.";
+      } catch (error) {
+        promptStatus.textContent = "Submission could not be confirmed. " + error.message;
+      } finally {
+        saving = false;
+        updateDirty();
+        if (refresh) loadDoc();
       }
     }
 
@@ -435,6 +579,15 @@
       }
       for (const panel of document.querySelectorAll("agent-doc-component")) {
         panel.hidden = panel.dataset.name !== button.dataset.panel;
+      }
+      documentPrompts.hidden = button.dataset.panel !== "document";
+    });
+    promptForm.addEventListener("submit", submitPrompt);
+    promptDraft.addEventListener("input", updatePromptComposer);
+    promptDraft.addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !promptSubmit.disabled) {
+        event.preventDefault();
+        promptForm.requestSubmit();
       }
     });
     editor.addEventListener("input", () => {

@@ -3725,6 +3725,9 @@ enum Commands {
         /// Read-only bearer token for viewer access.
         #[arg(long, value_name = "TOKEN")]
         read_only_token: Option<String>,
+        /// Enable authenticated prompt submission on a loopback listener.
+        #[arg(long)]
+        allow_run: bool,
         /// TLS certificate PEM path. Requires --tls-key.
         #[arg(long, value_name = "PEM")]
         tls_cert: Option<PathBuf>,
@@ -9346,17 +9349,22 @@ fn try_main() -> anyhow::Result<()> {
             port,
             auth_token,
             read_only_token,
+            allow_run,
             tls_cert,
             tls_key,
-        } => serve::run(serve::ServeOptions::new(
-            file,
-            host,
-            port,
-            auth_token,
-            read_only_token,
-            tls_cert,
-            tls_key,
-        )),
+        } => {
+            let mut options = serve::ServeOptions::new(
+                file,
+                host,
+                port,
+                auth_token,
+                read_only_token,
+                tls_cert,
+                tls_key,
+            );
+            options.allow_run = allow_run;
+            serve::run(options)
+        }
         Commands::Read { file, component } => read::run(&file, component.as_deref()),
         Commands::DescribeImage {
             image,

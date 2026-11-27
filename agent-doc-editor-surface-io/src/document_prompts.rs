@@ -31,11 +31,11 @@ pub(crate) struct Evidence {
 }
 
 #[derive(Deserialize)]
-struct Submission {
-    revision: String,
-    target: String,
-    draft: String,
-    request_id: String,
+pub struct Submission {
+    pub revision: String,
+    pub target: String,
+    pub draft: String,
+    pub request_id: String,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
@@ -73,25 +73,47 @@ struct Projection<'a> {
     nodes: Vec<Target>,
 }
 
+#[derive(Serialize)]
+struct PromptEdit {
+    offset: usize,
+    text: String,
+    action: Action,
+    #[serde(skip)]
+    byte_offset: usize,
+}
+
+pub fn project_document_prompts(source: &str) -> Result<Value> {
+    let components = element::parse(source)?;
+    let projection = Projection::new(source, &components)?;
+    Ok(json!({"revision": content_hash(source), "nodes": projection.nodes}))
+}
+
+fn prepare_document_prompt(source: &str, submission: &Submission) -> Result<PromptEdit> {
+    ensure!(
+        content_hash(source) == submission.revision,
+        "The document changed. Select the target again."
+    );
+    let components = element::parse(source)?;
+    Projection::new(source, &components)?.submit(submission)
+}
+
+pub fn insert_document_prompt(source: &str, submission: &Submission) -> Result<String> {
+    let edit = prepare_document_prompt(source, submission)?;
+    let mut result = source.to_owned();
+    result.insert_str(edit.byte_offset, &edit.text);
+    Ok(result)
+}
+
 pub(crate) fn derive(evidence: Evidence) -> Value {
     let source = &evidence.source;
-    let result: Result<Value> = (|| {
-        let components = element::parse(source)?;
-        if let Some(request_id) = &evidence.answer {
-            return Ok(worker_answer(source, &components, request_id));
-        }
-        let revision = content_hash(source);
-        let projection = Projection::new(source, &components)?;
-        if let Some(submission) = evidence.submission {
-            ensure!(
-                revision == submission.revision,
-                "The document changed. Select the target again."
-            );
-            projection.submit(&submission)
-        } else {
-            Ok(json!({"revision": revision, "nodes": projection.nodes}))
-        }
-    })();
+    let result = if let Some(request_id) = &evidence.answer {
+        element::parse(source).map(|components| worker_answer(source, &components, request_id))
+    } else if let Some(submission) = &evidence.submission {
+        prepare_document_prompt(source, submission)
+            .and_then(|edit| serde_json::to_value(edit).map_err(Into::into))
+    } else {
+        project_document_prompts(source)
+    };
     result.unwrap_or_else(|error| json!({"error": error.to_string()}))
 }
 
@@ -461,7 +483,7 @@ impl<'a> Projection<'a> {
         Ok(())
     }
 
-    fn submit(&self, submission: &Submission) -> Result<Value> {
+    fn submit(&self, submission: &Submission) -> Result<PromptEdit> {
         let draft = submission.draft.trim();
         ensure!(
             !draft.is_empty() && draft.chars().count() <= 1500,
@@ -539,11 +561,12 @@ impl<'a> Projection<'a> {
         {
             insertion.insert_str(0, newline);
         }
-        Ok(json!({
-            "offset": self.source[..offset].encode_utf16().count(),
-            "text": insertion,
-            "action": node.action,
-        }))
+        Ok(PromptEdit {
+            offset: self.source[..offset].encode_utf16().count(),
+            text: insertion,
+            action: node.action,
+            byte_offset: offset,
+        })
     }
 }
 

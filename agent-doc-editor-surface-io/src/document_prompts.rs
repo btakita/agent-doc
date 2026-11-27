@@ -934,6 +934,42 @@ mod tests {
     }
 
     #[test]
+    fn explorer_followup_uses_its_own_receipt_when_the_target_includes_an_older_one() {
+        const FOLLOWUP: &str = "abcdef0123456789abcdef0123456789";
+        let projection = outline(DOCUMENT);
+        let parent = node(&projection, "Earlier work");
+        let inserted = apply(
+            DOCUMENT,
+            &edit(
+                DOCUMENT,
+                &projection["revision"],
+                &parent["id"],
+                "Check the change",
+            ),
+        );
+        let running = inserted.replacen(ANSWER_INSTRUCTION, &format!("🚧 {ANSWER_INSTRUCTION}"), 1);
+        let (projection, at) = task_projection(&running, RECEIPT, &[]);
+        let previous_task = &projection["nodes"][at];
+        assert_eq!(previous_task["action"], "exchange");
+        let followed = insert_document_prompt(
+            &running,
+            &Submission {
+                revision: projection["revision"].as_str().unwrap().into(),
+                target: previous_task["id"].as_str().unwrap().into(),
+                draft: "Is anything blocking this?".into(),
+                request_id: FOLLOWUP.into(),
+            },
+        )
+        .unwrap();
+        let (projection, at) = task_projection(&followed, FOLLOWUP, &[]);
+        assert_eq!(projection["nodes"][at - 1]["task"]["request_id"], RECEIPT);
+        assert_eq!(
+            projection["nodes"][at]["label"],
+            "Is anything blocking this?"
+        );
+    }
+
+    #[test]
     fn root_submission_uses_exchange_without_a_repository_source() {
         let source = DOCUMENT.replace('\n', "\r\n");
         let projection = outline(&source);

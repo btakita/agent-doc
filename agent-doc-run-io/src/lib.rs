@@ -680,6 +680,21 @@ pub fn run_once(
         )?;
     }
 
+    // Direct runs do not pass through full preflight. Publish the submitted
+    // targets before the backend starts so Explorer can show their activity.
+    if the_diff.contains("repo-context-answer:") {
+        let targets = match &queue_submission {
+            Some(submitted) => vec![submitted.clone()],
+            None => agent_doc_workflow::session_cycle::prompt_targets_from_changes(
+                &agent_doc_diff::classify_contextual_prompt_bearing_changes(
+                    &the_diff,
+                    &content_original,
+                ),
+            ),
+        };
+        agent_doc_cycle_state_io::record_turn_checkpoint(file, &targets, None, None)?;
+    }
+
     let fork = resume_id.is_none();
     let response = {
         let _heartbeat =

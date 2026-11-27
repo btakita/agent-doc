@@ -59,7 +59,7 @@ use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::{BTreeMap, VecDeque};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::sync::Arc;
@@ -77,6 +77,7 @@ const DEFAULT_HOST: &str = "127.0.0.1";
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024; // 4 MiB cap for the MVP
 const MAX_SAVED_REVISIONS: usize = 16;
 const SSE_POLL_INTERVAL_MS: u64 = 300;
+const SSE_HEARTBEAT: Duration = Duration::from_secs(15);
 
 pub struct ServeOptions {
     pub target: Option<PathBuf>,
@@ -1207,20 +1208,30 @@ fn handle_events(
             );
         }
     };
-    let headers = vec![
-        header("Content-Type", "text/event-stream; charset=utf-8")?,
-        header("Cache-Control", "no-cache")?,
-    ];
-    let response = Response::new(
-        StatusCode(200),
-        headers,
-        SsePollStream::new(doc),
-        None,
-        None,
-    )
-    .with_chunked_threshold(1);
-    request.respond(response)?;
-    Ok(())
+    // tiny_http's chunked response encoder buffers small frames until its
+    // buffer fills. An event stream must flush every frame while it stays open.
+    let mut connection = request.into_writer();
+    connection.write_all(
+        b"HTTP/1.1 200 OK\r\nContent-Type: text/event-stream; charset=utf-8\r\n\
+          Cache-Control: no-cache\r\nConnection: close\r\n\r\n",
+    )?;
+    connection.flush()?;
+    let mut events = SsePollStream::new(doc);
+    let mut frame = [0; 8192];
+    loop {
+        let length = events.read(&mut frame)?;
+        if let Err(error) = connection
+            .write_all(&frame[..length])
+            .and_then(|()| connection.flush())
+        {
+            return match error.kind() {
+                std::io::ErrorKind::BrokenPipe
+                | std::io::ErrorKind::ConnectionReset
+                | std::io::ErrorKind::ConnectionAborted => Ok(()),
+                _ => Err(error.into()),
+            };
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -1313,6 +1324,7 @@ struct SsePollStream {
     last_partial: Option<PartialResponseFingerprint>,
     buffer: VecDeque<u8>,
     sent_ready: bool,
+    last_frame: Instant,
 }
 
 impl SsePollStream {
@@ -1328,11 +1340,13 @@ impl SsePollStream {
             last_partial: None,
             buffer: VecDeque::new(),
             sent_ready: false,
+            last_frame: Instant::now(),
         }
     }
 
     fn enqueue_event(&mut self, event: &str, payload: serde_json::Value) {
         self.buffer.extend(format_sse_event(event, payload).bytes());
+        self.last_frame = Instant::now();
     }
 
     fn enqueue_ready(&mut self) {
@@ -1415,6 +1429,10 @@ impl Read for SsePollStream {
             }
             match self.poll_once() {
                 Ok(true) => continue,
+                Ok(false) if self.last_frame.elapsed() >= SSE_HEARTBEAT => {
+                    self.buffer.extend(b": keep-alive\n\n");
+                    self.last_frame = Instant::now();
+                }
                 Ok(false) => thread::sleep(self.interval),
                 Err(err) => {
                     self.enqueue_error(err);
@@ -2115,6 +2133,45 @@ mod tests {
         let changed = String::from_utf8_lossy(&buf[..changed_len]);
         assert!(changed.contains("event: doc-changed\n"), "got {changed:?}");
         assert!(changed.contains(r#""bytes":4"#), "got {changed:?}");
+    }
+
+    #[test]
+    fn serve_sse_flushes_small_document_events_over_http() {
+        use std::io::{BufRead, BufReader};
+        use std::net::{Shutdown, TcpStream};
+
+        let (dir, doc) = serve_save_project();
+        let state = browser_for(&doc);
+        let server = Server::http("127.0.0.1:0").unwrap();
+        let address = server.server_addr().to_ip().unwrap();
+        let handler = thread::spawn(move || {
+            handle_request(server.recv().unwrap(), &state).unwrap();
+        });
+
+        let mut connection = TcpStream::connect(address).unwrap();
+        connection
+            .set_read_timeout(Some(Duration::from_secs(3)))
+            .unwrap();
+        connection
+            .write_all(b"GET /events HTTP/1.1\r\nHost: localhost\r\n\r\n")
+            .unwrap();
+        let mut wire = BufReader::new(connection);
+        let mut expect_event = |event| {
+            assert!(
+                (&mut wire)
+                    .lines()
+                    .map(|line| line.expect("SSE frame flushed before timeout"))
+                    .any(|line| line == event),
+                "missing {event}"
+            );
+        };
+        expect_event("event: ready");
+        std::fs::write(&doc, format!("{SERVE_SAVE_DISK}\nshort reply\n")).unwrap();
+        expect_event("event: doc-changed");
+
+        wire.get_ref().shutdown(Shutdown::Both).unwrap();
+        drop(dir);
+        handler.join().unwrap();
     }
 
     #[test]

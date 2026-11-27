@@ -23,13 +23,16 @@ import com.intellij.openapi.wm.ToolWindowManager
 import com.intellij.psi.PsiElement
 import com.intellij.psi.PsiManager
 import com.intellij.psi.PsiRecursiveElementWalkingVisitor
+import com.intellij.ui.ColoredListCellRenderer
 import com.intellij.ui.JBSplitter
+import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.content.ContentFactory
+import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.FlowLayout
@@ -42,6 +45,7 @@ import java.util.concurrent.Future
 import javax.swing.BoxLayout
 import javax.swing.DefaultListModel
 import javax.swing.JButton
+import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.ListSelectionModel
 
@@ -84,6 +88,34 @@ private data class SourceSelection(
 private data class SubmittedQuestion(val id: String, val session: VirtualFile)
 private data class CurrentAnswer(val response: RepoContextAnswer, val stamp: Long)
 
+internal class RepoContextLocationRenderer : ColoredListCellRenderer<RepoContextLocation>() {
+    override fun customizeCellRenderer(
+        list: JList<out RepoContextLocation>,
+        value: RepoContextLocation?,
+        index: Int,
+        selected: Boolean,
+        hasFocus: Boolean,
+    ) {
+        font = JBFont.regular()
+        setIpad(JBUI.insets(3, 6))
+        append(value?.toString().orEmpty(), SimpleTextAttributes.REGULAR_ATTRIBUTES)
+    }
+}
+
+internal class RepoContextAnswerArea : JBTextArea(7, 20) {
+    init {
+        isEditable = false
+        lineWrap = true
+        wrapStyleWord = true
+        margin = JBUI.insets(4, 6)
+    }
+
+    override fun updateUI() {
+        super.updateUI()
+        font = JBFont.regular().asUIResource()
+    }
+}
+
 private class RepoContextExplorerPanel(private val project: Project, private val projectPath: Path) :
     JPanel(BorderLayout(JBUI.scale(8), JBUI.scale(8))), Disposable {
 
@@ -103,7 +135,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val sessionLabel = JBLabel("No session selected.")
     private val question = JBTextField()
     private val ask = JButton("Ask about selection")
-    private val answer = JBTextArea(7, 20)
+    private val answer = RepoContextAnswerArea()
     private val openAnswer = JButton("Open answer")
 
     private var root: Path? = null
@@ -128,10 +160,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             status.text = "Enter a search."
         }
         results.selectionMode = ListSelectionModel.SINGLE_SELECTION
+        results.cellRenderer = RepoContextLocationRenderer()
         related.selectionMode = ListSelectionModel.SINGLE_SELECTION
-        answer.isEditable = false
-        answer.lineWrap = true
-        answer.wrapStyleWord = true
+        related.cellRenderer = RepoContextLocationRenderer()
         add(JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
             add(mode, BorderLayout.WEST)
             add(query, BorderLayout.CENTER)

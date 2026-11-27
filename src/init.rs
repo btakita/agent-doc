@@ -717,31 +717,45 @@ fn strip_checkbox(text: &str) -> &str {
 }
 
 fn is_row_continuation(line: &str) -> bool {
-    top_level_list_payload(line).is_none()
+    // Nested lines are indented. A column-zero line is the next item
+    // (ordered row, prose prompt, fence, or slash command), not this row.
+    line.starts_with([' ', '\t'])
+}
+
+/// Drop the binary-owned `### ` navigation heading. Preflight inserts it on
+/// every top-level run row, so the path is no longer the first token.
+fn strip_navigation_heading(text: &str) -> &str {
+    text.trim_start().strip_prefix("### ").unwrap_or(text)
 }
 
 fn artifact_row_identity(payload: &str) -> String {
-    let unstruck = unwrap_strike(payload.trim()).to_string();
-    let mut work = agent_doc_element_queue::struck_work_text(&unstruck)
-        .trim()
-        .to_string();
+    let mut work = payload.trim().to_string();
     loop {
         let next = {
-            let (_, without_tree) = agent_doc_element_queue::split_leading_tree_indicators(&work);
+            let unstruck = unwrap_strike(work.trim());
+            let headed = strip_navigation_heading(unstruck).trim();
+            let checked = strip_checkbox(headed).trim();
+            let projected = agent_doc_element_queue::struck_work_text(checked).trim();
+            let headed = strip_navigation_heading(projected).trim();
+            let checked = strip_checkbox(headed).trim();
+            let (_, without_tree) = agent_doc_element_queue::split_leading_tree_indicators(checked);
             let without_tree = without_tree.trim();
             agent_doc_element_queue::strip_open_count_token(without_tree)
                 .map(str::trim)
                 .unwrap_or(without_tree)
                 .to_string()
         };
-        if next == work {
+        if next == work.trim() {
             break;
         }
         work = next;
     }
-    let without_id = agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(&work);
+    let without_id =
+        agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(work.trim());
     let bare = unwrap_strike(without_id.trim());
-    let identity = agent_doc_element_queue::strip_intent_tags(bare);
+    let headed = strip_navigation_heading(bare).trim();
+    let checked = strip_checkbox(headed).trim();
+    let identity = agent_doc_element_queue::strip_intent_tags(checked);
     normalize_artifact_label(&identity)
 }
 
@@ -1300,6 +1314,88 @@ mod tests {
         );
         assert_eq!(std::fs::read_to_string(&session).unwrap(), before);
         assert!(!queue_body(&before).contains(&other.display().to_string()));
+    }
+
+    #[test]
+    fn bind_and_unbind_match_a_row_after_navigation_heading_normalization() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
+        let artifact = dir.path().join("plans").join("one.md");
+        write_new_session(
+            &session,
+            Some("Control"),
+            Some("claude"),
+            None,
+            std::slice::from_ref(&artifact),
+            &Config::default(),
+        )
+        .unwrap();
+        let label = artifact.display().to_string();
+        let mut text = std::fs::read_to_string(&session).unwrap();
+        let plain = format!("- [ ] {label}\n");
+        let headed = format!("- ### [ ] {label}\n");
+        assert!(text.contains(&plain), "{text}");
+        text = text.replacen(&plain, &headed, 1);
+        std::fs::write(&session, &text).unwrap();
+
+        bind_artifacts_on_disk(&session, std::slice::from_ref(&artifact)).unwrap();
+        let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
+        assert_eq!(
+            queue.matches(&label).count(),
+            1,
+            "already bound after navigation heading: {queue}"
+        );
+
+        unbind_artifacts_on_disk(&session, std::slice::from_ref(&artifact)).unwrap();
+        let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
+        assert!(!queue.contains(&label), "{queue}");
+        assert!(artifact.exists());
+
+        let decorated = format!(
+            "- ### 🚧 [#subagent:action-aaaa#1] {label} [#q-e9d00e286b6c]\n- [ ] keep this other work\n"
+        );
+        let mut text = std::fs::read_to_string(&session).unwrap();
+        let queue_start = text
+            .find("<!-- agent:run")
+            .and_then(|start| text[start..].find('\n').map(|end| start + end + 1))
+            .unwrap();
+        let queue_end = text.find("<!-- /agent:run -->").unwrap();
+        text.replace_range(queue_start..queue_end, &decorated);
+        std::fs::write(&session, &text).unwrap();
+        unbind_artifacts_on_disk(&session, std::slice::from_ref(&artifact)).unwrap();
+        let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
+        assert_eq!(queue, "- [ ] keep this other work\n", "{queue}");
+    }
+
+    #[test]
+    fn unbind_keeps_sibling_rows_that_are_not_nested_under_the_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
+        let artifact = dir.path().join("plans").join("one.md");
+        write_new_session(
+            &session,
+            Some("Control"),
+            Some("claude"),
+            None,
+            std::slice::from_ref(&artifact),
+            &Config::default(),
+        )
+        .unwrap();
+        let label = artifact.display().to_string();
+        let mut text = std::fs::read_to_string(&session).unwrap();
+        let plain = format!("- [ ] {label}\n");
+        let mixed = format!(
+            "- [ ] {label}\n1. keep this ordered step\nwrite this prose\n- [ ] keep this other work\n"
+        );
+        text = text.replacen(&plain, &mixed, 1);
+        std::fs::write(&session, text).unwrap();
+
+        unbind_artifacts_on_disk(&session, std::slice::from_ref(&artifact)).unwrap();
+        let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
+        assert_eq!(
+            queue, "1. keep this ordered step\nwrite this prose\n- [ ] keep this other work\n",
+            "{queue}"
+        );
     }
 
     fn queue_body(session: &str) -> String {

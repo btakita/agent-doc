@@ -2219,6 +2219,28 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - The generation proxy calls `requireLosslessNativeStringArgs(method.name, args)` before every native call. A `String` argument with an unpaired UTF-16 surrogate, the one input that UTF-8 encoding also replaces with `?`, refuses the call with `LossyNativeStringException` and never crosses.
 - `NativeStringEncodingTest` forces JNA's default to US-ASCII. It proves the default is the issue's lossy encoder (`dispatched ? opus-5.5 ?`), and that the bound handler crosses the issue's text and 500 seeded random non-ASCII documents byte-exact (length and round trip). It also proves the surrogate and malformed-UTF-8 refusals, and source-scans the plugin so no un-encoded crossing returns.
 
+### Repo Context Explorer
+
+**Agent Doc: Repo Context Explorer** is a project action in Tools, Find
+Action, and the Agent Doc popup. It opens a native tool window in local
+IntelliJ IDEA. The classic plugin and the 262–263 modular backend use the
+same implementation.
+
+Code mode queries tsift for symbols and provides call-site navigation with
+unambiguous definitions. If the search has source hits only, it lists their
+locations as matches. Docs mode queries Markdown headings and outlines and
+shows links resolved by IDEA's Markdown PSI. A background query can be
+cancelled and has a 45-second limit to allow a cold index. Open source
+navigates to the selected location in the editor. Repository membership and
+the saved source fingerprint are verified before a question is accepted.
+
+Choose a saved Agent Doc session in the same repository to ask about the
+selection. The tool window inserts one source-scoped question into the exchange
+identified by the native component parser, then uses the usual Run Agent Doc
+action. It observes the local editor document for the matching answer receipt
+and links to its response heading. Lookup and response display are driven by
+operator actions and document changes.
+
 ### Session Operator Actions
 
 - `Show Session Status` runs `agent-doc session status <relative-path>` and surfaces the exact output in an IDE notification instead of re-deriving status inside the plugin. A successful status response deletes the saved route-error file for that document because the old failure is no longer the latest observed state.

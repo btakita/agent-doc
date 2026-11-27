@@ -73,4 +73,5 @@ class ResyncFixSessionsForwarder : ShellActionForwarder("AgentDoc.ResyncFixSessi
 class GcStaleSessionsForwarder : ShellActionForwarder("AgentDoc.GcStaleSessions")
 class AboutForwarder : ShellActionForwarder("AgentDoc.About")
 class DashboardForwarder : ShellActionForwarder("AgentDoc.Dashboard")
+class RepoContextExplorerForwarder : ShellActionForwarder("AgentDoc.RepoContextExplorer")
 class TreeStatusForwarder : ShellActionForwarder("AgentDoc.TreeStatus")

@@ -135,6 +135,7 @@ class AgentDocImplGeneration : ImplGeneration {
             "AgentDoc.About" to ::AboutAgentDocAction,
             "AgentDoc.Dashboard" to ::DashboardAction,
             "AgentDoc.TreeStatus" to ::TreeStatusAction,
+            "AgentDoc.RepoContextExplorer" to ::RepoContextExplorerAction,
         )
     }
 }

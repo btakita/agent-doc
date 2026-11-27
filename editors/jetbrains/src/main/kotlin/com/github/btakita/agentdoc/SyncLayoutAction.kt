@@ -91,7 +91,14 @@ class SyncLayoutAction : ImplAction {
             } catch (_: Exception) {
                 ""
             }
-            if (!process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)) {
+            val exited = try {
+                process.waitFor(timeoutMs, TimeUnit.MILLISECONDS)
+            } catch (interrupted: InterruptedException) {
+                process.destroyForcibly()
+                Thread.currentThread().interrupt()
+                throw interrupted
+            }
+            if (!exited) {
                 process.destroy()
                 if (!process.waitFor(500, TimeUnit.MILLISECONDS)) {
                     process.destroyForcibly()

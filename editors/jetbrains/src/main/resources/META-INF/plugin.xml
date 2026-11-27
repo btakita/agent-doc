@@ -306,5 +306,11 @@
             <add-to-group group-id="ToolsMenu" anchor="last"/>
             <add-to-group group-id="EditorPopupMenu" anchor="last"/>
         </action>
+        <action id="AgentDoc.RepoContextExplorer"
+                class="com.github.btakita.agentdoc.shell.RepoContextExplorerForwarder"
+                text="Agent Doc: Repo Context Explorer"
+                description="Search repository code and Markdown and ask about a selected source">
+            <add-to-group group-id="ToolsMenu" anchor="last"/>
+        </action>
     </actions>
 </idea-plugin>

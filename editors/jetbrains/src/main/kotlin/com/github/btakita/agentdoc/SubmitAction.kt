@@ -4,6 +4,8 @@ import com.github.btakita.agentdoc.shell.ImplAction
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.fileEditor.FileDocumentManager
+import com.intellij.openapi.project.Project
+import com.intellij.openapi.vfs.VirtualFile
 
 /**
  * Action that routes the active document through the Project Controller editor_route RPC.
@@ -25,7 +27,10 @@ class SubmitAction : ImplAction {
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
         val file = e.getData(CommonDataKeys.VIRTUAL_FILE) ?: return
+        submit(project, file)
+    }
 
+    internal fun submit(project: Project, file: VirtualFile) {
         LOG.warn("[run] actionPerformed: ${file.name}")
         val fileDocumentManager = FileDocumentManager.getInstance()
         val document = fileDocumentManager.getDocument(file)

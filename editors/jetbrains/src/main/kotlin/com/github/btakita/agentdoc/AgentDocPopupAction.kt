@@ -65,6 +65,7 @@ class AgentDocPopupAction : ImplAction {
             // #gh116: every declared AgentDoc.* action is reachable from the popup.
             "AgentDoc.StopAgent",
             "AgentDoc.KillSupervisor",
+            "AgentDoc.RepoContextExplorer",
             // `editoractionmenu`: which plugin/CLI/native library is running.
             "AgentDoc.About",
         )

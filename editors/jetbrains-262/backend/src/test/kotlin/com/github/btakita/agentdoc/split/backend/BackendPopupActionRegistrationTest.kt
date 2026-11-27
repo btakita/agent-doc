@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc.split.backend
 import com.github.btakita.agentdoc.AgentDocPopupAction
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 import org.w3c.dom.Element
 import java.io.File
@@ -44,6 +45,11 @@ class BackendPopupActionRegistrationTest {
         val clientOnly = AgentDocPopupAction.CLIENT_ONLY_ACTION_IDS
         assertEquals("client-only ids registered in the backend", emptySet<String>(), clientOnly intersect backendIds)
         assertEquals("client-only ids the frontend does not register", emptySet<String>(), clientOnly - frontendIds)
+    }
+
+    @Test
+    fun `local modular IDE can find the Repo Context Explorer backend action`() {
+        assertTrue("AgentDoc.RepoContextExplorer" in backendIds)
     }
 
     @Test

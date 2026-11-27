@@ -7,6 +7,8 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.util.concurrent.FutureTask
+import java.util.concurrent.TimeUnit
 
 class SyncLayoutActionTest {
 
@@ -152,6 +154,41 @@ class SyncLayoutActionTest {
 
         assertEquals(124, result.exitCode)
         assertTrue(result.timedOut)
+    }
+
+    @Test
+    fun `interrupting the subprocess wait terminates the child`() {
+        val pidFile = Files.createTempFile("agent-doc-command", ".pid")
+        val cancelled = FutureTask {
+            try {
+                SyncLayoutAction.runCommandWithTimeout(
+                    listOf("sh", "-c", "printf '%s' \"$$\" > \"$1\"; exec sleep 60", "sh", pidFile.toString()),
+                    File(".").absolutePath,
+                    timeoutMs = 60_000,
+                )
+                false
+            } catch (_: InterruptedException) {
+                Thread.currentThread().isInterrupted
+            }
+        }
+        val worker = Thread(cancelled).apply { start() }
+        var child: ProcessHandle? = null
+        try {
+            val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(5)
+            while (child == null && System.nanoTime() < deadline) {
+                child = Files.readString(pidFile).toLongOrNull()?.let { ProcessHandle.of(it).orElse(null) }
+                if (child == null) Thread.sleep(10)
+            }
+            val runningChild = checkNotNull(child) { "The child did not write its PID." }
+            worker.interrupt()
+            assertTrue(cancelled.get(5, TimeUnit.SECONDS))
+            runningChild.onExit().get(5, TimeUnit.SECONDS)
+            assertFalse(runningChild.isAlive)
+        } finally {
+            worker.interrupt()
+            child?.takeIf { it.isAlive }?.destroyForcibly()
+            Files.deleteIfExists(pidFile)
+        }
     }
 
     @Test

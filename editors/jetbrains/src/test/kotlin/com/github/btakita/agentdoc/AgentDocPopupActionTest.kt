@@ -61,6 +61,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.GcStaleSessions",
                 "AgentDoc.StopAgent",
                 "AgentDoc.KillSupervisor",
+                "AgentDoc.RepoContextExplorer",
                 "AgentDoc.About",
             ),
             AgentDocPopupAction.OVERFLOW_ACTION_IDS,

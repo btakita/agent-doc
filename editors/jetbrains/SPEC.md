@@ -2226,9 +2226,9 @@ Action, and the Agent Doc popup. It opens a native tool window in local
 IntelliJ IDEA. The classic plugin and the 262–263 modular backend use the
 same implementation.
 
-Explorer controls, labels, result lists, and answers use the IDE's UI font
-at two logical points below its configured size. The Explorer follows UI font
-and zoom changes. Result rows size themselves to the text with scaled padding.
+Explorer controls, labels, result lists, and answers use 70% of the IDE's UI
+font size and follow UI font and zoom changes. Result rows size themselves to
+the text with scaled padding.
 
 Code mode queries tsift for symbols and provides call-site navigation with
 unambiguous definitions. If the search has source hits only, it lists their

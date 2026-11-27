@@ -106,7 +106,8 @@ internal open class RepoContextTypography(layout: LayoutManager) : JPanel(layout
     private fun refreshFont() {
         val components = textComponents ?: return
         // Keep the local font when Swing subsequently updates the child delegates.
-        val font = JBFont.regular().lessOn(2f)
+        val uiFont = JBFont.regular()
+        val font = uiFont.deriveFont(uiFont.size2D * 0.7f)
         components.forEach { it.font = font }
     }
 }
@@ -120,7 +121,7 @@ internal class RepoContextLocationRenderer : ColoredListCellRenderer<RepoContext
         hasFocus: Boolean,
     ) {
         font = list.font
-        setIpad(JBUI.insets(3, 6))
+        setIpad(JBUI.insets(2, 6))
         append(value?.toString().orEmpty(), SimpleTextAttributes.REGULAR_ATTRIBUTES)
     }
 }

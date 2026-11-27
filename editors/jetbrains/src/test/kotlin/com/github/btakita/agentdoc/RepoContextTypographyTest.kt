@@ -1,7 +1,6 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.ui.ComboBox
-import com.intellij.ui.scale.JBUIScale
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBTextArea
@@ -40,8 +39,7 @@ class RepoContextTypographyTest {
             val otherLabel = JBLabel("Outside the Explorer")
             val originalRowHeight = list.getCellBounds(0, 0).height
 
-            val compactOffset = JBUIScale.scale(2f)
-            textComponents.forEach { assertEquals(14f - compactOffset, it.font.size2D, 0f) }
+            textComponents.forEach { assertEquals(9.8f, it.font.size2D, 0.01f) }
             assertEquals(list.font, renderer.font)
             assertEquals(14, otherLabel.font.size)
             assertTrue(originalRowHeight > renderer.getFontMetrics(renderer.font).height)
@@ -52,7 +50,7 @@ class RepoContextTypographyTest {
             val enlargedRowHeight = list.getCellBounds(0, 0).height
 
             textComponents.forEach {
-                assertEquals(24f - compactOffset, it.font.size2D, 0f)
+                assertEquals(16.8f, it.font.size2D, 0.01f)
                 assertEquals(Font.SERIF, it.font.family)
                 assertEquals(Font.BOLD, it.font.style)
             }

@@ -501,6 +501,23 @@
       promptTree.scrollTop = scroll;
     }
 
+    function followEditorCaret() {
+      if (document.activeElement !== editor || hasUnsavedEdits()
+          || savedRevision !== '"' + promptProjection?.revision + '"') return;
+      const line = editor.value.slice(0, editor.selectionStart).split("\n").length;
+      let target = null;
+      for (const node of promptProjection.nodes) {
+        if (node.action === "navigate" || node.line > line || node.end_line < line || node.end_line == null) continue;
+        if (!target || node.depth > target.depth || (node.depth === target.depth && node.line >= target.line)) {
+          target = node;
+        }
+      }
+      if (target && target !== promptTarget) {
+        selectPromptTarget(target);
+        promptRows.get(promptKey(target)).element.scrollIntoView({ block: "nearest" });
+      }
+    }
+
     async function submitPrompt(event) {
       event.preventDefault();
       if (promptSubmit.disabled) return;
@@ -683,6 +700,8 @@
     editor.addEventListener("scroll", () => {
       gutter.scrollTop = editor.scrollTop;
     });
+    editor.addEventListener("pointerup", followEditorCaret);
+    editor.addEventListener("keyup", followEditorCaret);
     saveBtn.addEventListener("click", saveDoc);
     reloadBtn.addEventListener("click", () => {
       if (saving) return;

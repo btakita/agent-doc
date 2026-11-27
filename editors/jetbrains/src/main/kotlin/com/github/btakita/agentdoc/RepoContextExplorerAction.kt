@@ -140,9 +140,9 @@ internal class RepoContextQuestionComposer(onSubmit: () -> Unit) : JPanel(Border
         lineWrap = true
         wrapStyleWord = true
         margin = JBUI.insets(4, 6)
-        emptyText.text = "Draft a question."
+        emptyText.text = "Draft a prompt."
     }
-    val label = JBLabel("Question").apply { labelFor = editor }
+    val label = JBLabel("Prompt").apply { labelFor = editor }
     val submit = JButton("Ask about selection").apply {
         isEnabled = false
         addActionListener { onSubmit() }
@@ -190,8 +190,8 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         margin = JBUI.insets(4, 6)
         emptyText.text = "A matching response appears here."
     }
-    private val answerLabel = JBLabel("Answer").apply { labelFor = answer }
-    private val openAnswer = JButton("Open answer")
+    private val answerLabel = JBLabel("Response").apply { labelFor = answer }
+    private val openAnswer = JButton("Open response")
 
     private var root: Path? = null
     private var selection: SourceSelection? = null
@@ -542,7 +542,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         if (background != null || disposed) return null
         val text = draft.trim()
         if (text.isEmpty() || text.length > 1_500) {
-            status.text = "Enter a question between 1 and 1500 characters."
+            status.text = "Enter a prompt between 1 and 1500 characters."
             return null
         }
         return text
@@ -616,8 +616,8 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private fun sendQuestion(submitted: SubmittedQuestion) {
         request = submitted
         matchingAnswer = null
-        answer.text = if (submitted.queued) "Waiting for the queue to run this prompt." else "Waiting for the matching answer."
-        status.text = if (submitted.queued) "Prompt added to the queue." else "Question added to ${submitted.session.name}."
+        answer.text = if (submitted.queued) "Waiting for the queue to run this prompt." else "Waiting for the matching response."
+        status.text = if (submitted.queued) "Prompt added to the queue." else "Prompt added to ${submitted.session.name}."
         SubmitAction().submit(project, submitted.session)
     }
 
@@ -635,7 +635,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                     return@invokeLater
                 }
                 matchingAnswer = response?.let { CurrentAnswer(it, revision) }
-                answer.text = response?.text ?: "Waiting for the matching answer in ${submitted.session.name}."
+                answer.text = response?.text ?: "Waiting for the matching response in ${submitted.session.name}."
                 answer.caretPosition = 0
                 updateControls()
             }

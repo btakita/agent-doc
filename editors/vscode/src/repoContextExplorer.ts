@@ -19,6 +19,15 @@ import {
     type SourceLocation,
 } from './repoContextModel.js';
 
+import {
+    explorerRows,
+    loadRepoContextViewRuntime,
+    RepoContextRealtimeView,
+    type ExplorerAction,
+    type ExplorerViewFrame,
+    type ExplorerViewTemplate,
+} from './repoContextRealtimeView.js';
+
 const searchLimit = '24';
 const maxSourceBytes = 4 * 1024 * 1024;
 const markdownFile = /\.(md|mdx|markdown)$/i;
@@ -29,7 +38,7 @@ interface RepoContextActions {
 }
 
 interface RepoContextSelection {
-    anchor: RepoContextAnchor;
+    anchor: RepoContextAnchor & { id: string };
     revision: string;
     links: RepoContextLink[];
 }
@@ -108,7 +117,9 @@ async function documentLinks(file: string): Promise<vscode.DocumentLink[]> {
     ) ?? [];
 }
 
-async function sourceLinks(root: string, file: string, anchor: RepoContextAnchor): Promise<RepoContextLink[]> {
+async function sourceLinks(
+    root: string, file: string, anchor: RepoContextAnchor, publish: (items: RepoContextLink[]) => Promise<void>,
+): Promise<void> {
     await vscode.extensions.getExtension('vscode.markdown-language-features')?.activate();
     const links = await documentLinks(file);
     const seen = new Set<string>();
@@ -122,6 +133,7 @@ async function sourceLinks(root: string, file: string, anchor: RepoContextAnchor
         seen.add(relative);
         result.push({ file: relative, name: relative, line: 1, endLine: 1, relation: 'Links to' });
     }
+    await publish(result.slice(0, 20));
     // A basename search produces candidates. Resolve their Markdown links
     // before reporting backlinks, since text and similarly named files match too.
     const candidates = parseRepoContextMarkdownFiles(await tsift(root, [
@@ -144,10 +156,11 @@ async function sourceLinks(root: string, file: string, anchor: RepoContextAnchor
             console.warn('[agent-doc] Repo Context Explorer could not inspect a backlink candidate', backlink.reason);
         }
     }
-    return result.slice(0, 20);
+    await publish(result.slice(0, 20));
 }
 
-async function selectAnchor(root: string, anchor: RepoContextAnchor): Promise<RepoContextSelection> {
+async function selectAnchor(root: string, anchor: RepoContextAnchor & { id: string }): Promise<RepoContextSelection> {
+    const id = anchor.id;
     const file = await checkedFile(root, anchor.file);
     const before = await fingerprint(file);
     if (anchor.line > before.lines || anchor.endLine > before.lines) {
@@ -164,13 +177,13 @@ async function selectAnchor(root: string, anchor: RepoContextAnchor): Promise<Re
             item => item.name === anchor.name && item.line === anchor.line,
         );
         if (!current) throw new Error('The heading changed or is outside the retained outline. Search by file path to refresh.');
-        anchor = current;
-        links = await sourceLinks(root, file, anchor);
+        anchor = { ...current, id };
+        links = [];
     } else {
         const detail = await tsift(root, ['explain', '--json', '--no-tagpath', '--limit', '6', '--path', root, '--', anchor.name]);
         const current = currentRepoContextDefinition(detail, root, anchor);
         if (!current) throw new Error('The symbol location changed. Search again before selecting it.');
-        anchor = current;
+        anchor = { ...current, id };
         links = parseRepoContextCalls(detail, root, anchor);
     }
     if (anchor.endLine > before.lines || (await fingerprint(file)).hash !== before.hash) {
@@ -302,58 +315,155 @@ export async function openRepoContextExplorer(
     let anchors: RepoContextAnchor[] = [];
     let selection: RepoContextSelection | undefined;
     let latestRequest: RepoContextRequest | undefined;
+    let latestAnswer: { body?: string; source: RepoContextAnchor } | undefined;
     let busy = false;
+    const runtime = await loadRepoContextViewRuntime();
+    const realtime = runtime && new RepoContextRealtimeView(runtime,
+        JSON.parse(await fs.readFile(vscode.Uri.joinPath(media, 'repoContextView.json').fsPath, 'utf8')) as ExplorerViewTemplate);
     const post = (message: object) => panel.webview.postMessage(message);
-    const showSession = () => post({ type: 'session', label: session && path.relative(root, session.fsPath) });
+    const resultRows = () => explorerRows('results', anchors);
+    const relatedRows = () => explorerRows('related', selection?.links ?? []);
+    const publishView = async (reconnect = false) => {
+        const messages = realtime?.publish(resultRows(), relatedRows(),
+            { selection: !!selection, session: !!session, answer: !!latestAnswer?.body }, reconnect) ?? [];
+        await Promise.all(messages.map(post));
+    };
+    const showSession = async () => {
+        await publishView();
+        await post({ type: 'session', label: session && path.relative(root, session.fsPath) });
+    };
+    const showSelection = async (loading = false) => {
+        await publishView();
+        await post({ type: 'selection', item: selection?.anchor, links: relatedRows(), loading });
+    };
+    const showResults = async (loading = false) => {
+        await publishView();
+        await post({ type: 'results', items: resultRows(), loading });
+    };
+    const streamSelectionLinks = async (selected: RepoContextSelection) => {
+        if (selected.anchor.kind !== 'heading') return;
+        try {
+            const file = await checkedFile(root, selected.anchor.file);
+            await sourceLinks(root, file, selected.anchor, async links => {
+                if (selection !== selected) return;
+                selected.links = links;
+                await showSelection();
+            });
+        } catch (error) {
+            if (selection === selected) {
+                console.warn('[agent-doc] Repo Context Explorer could not load related locations', error);
+                await post({ type: 'error', message: 'Some related locations are unavailable.' });
+            }
+        }
+    };
     const sessionSaved = vscode.workspace.onDidSaveTextDocument(document => {
         const request = latestRequest;
         if (!request || document.uri.toString() !== request.session.toString()) return;
         const answer = repoContextAnswer(document.getText(), request.id);
         const body = answer?.body;
-        Promise.resolve(post({ type: 'answer', source: request.anchor,
-            body: body && (body.length > 8000 ? body.slice(0, 8000) + '\n…' : body) }))
+        latestAnswer = { source: request.anchor, body: body && (body.length > 8000 ? body.slice(0, 8000) + '\n…' : body) };
+        publishView().then(() => post({ type: 'answer', ...latestAnswer }))
             .catch(error => console.warn('[agent-doc] Repo Context Explorer could not display the response', error));
     });
     panel.onDidDispose(() => sessionSaved.dispose());
 
-    panel.webview.onDidReceiveMessage(async (message: {
-        type?: unknown; mode?: unknown; query?: unknown; index?: unknown; question?: unknown;
-    } | null) => {
-        if (!message || typeof message.type !== 'string') return;
+    const viewCommand = (action: ExplorerAction, event: ExplorerViewFrame): {
+        type: ExplorerAction; query?: string; mode?: 'code' | 'docs'; question?: string; id?: string;
+    } | undefined => {
+        switch (action) {
+            case 'search': {
+                if (typeof event.payload !== 'string') return;
+                let input: unknown;
+                try { input = JSON.parse(event.payload); } catch { return; }
+                if (!input || typeof input !== 'object') return;
+                const { query, mode } = input as { query?: unknown; mode?: unknown };
+                if (typeof query !== 'string' || !query.trim() || query.length > 200 || (mode !== 'code' && mode !== 'docs')) return;
+                return { type: action, query, mode };
+            }
+            case 'ask':
+                if (!selection || typeof event.payload !== 'string' || !event.payload.trim() || event.payload.length > 1500) return;
+                return { type: action, question: event.payload };
+            case 'select':
+                return resultRows().some(row => row.id === event.node_id) ? { type: action, id: event.node_id } : undefined;
+            case 'openLink':
+                return relatedRows().some(row => row.id === event.node_id) ? { type: action, id: event.node_id } : undefined;
+            default:
+                return { type: action };
+        }
+    };
+    type PanelMessage = {
+        type?: unknown; mode?: unknown; query?: unknown; index?: unknown; question?: unknown; id?: unknown; frame?: unknown;
+    };
+    panel.webview.onDidReceiveMessage(async (received: PanelMessage | null) => {
+        if (!received || typeof received.type !== 'string') return;
+        let message = received;
+        let eventId: string | undefined;
         if (message.type === 'ready') {
+            await publishView(true);
             await post({ type: 'repository', name: path.basename(root) });
             await showSession();
+            await showResults();
+            await showSelection();
+            if (latestAnswer) await post({ type: 'answer', ...latestAnswer });
             return;
         }
-        if (busy) return;
+        if (message.type === 'view-event' && realtime) {
+            let command: ReturnType<typeof viewCommand>;
+            const frame = message.frame as ExplorerViewFrame;
+            eventId = typeof frame?.event_id === 'string' ? frame.event_id : undefined;
+            try {
+                const outcome = realtime.authorize(frame, (action, validated) => {
+                    command = viewCommand(action, validated);
+                    return !busy && command !== undefined;
+                });
+                if (outcome.status !== 'accepted' || !command) {
+                    await post({ type: 'settled', event_id: eventId, status: outcome.status });
+                    return;
+                }
+                message = command;
+            } catch (error) {
+                console.warn('[agent-doc] Repo Context Explorer rejected an invalid view event', error);
+                await post({ type: 'settled', event_id: eventId, status: 'invalid' });
+                return;
+            }
+        } else if (realtime || busy) {
+            return;
+        }
         busy = true;
+        let selectedToStream: RepoContextSelection | undefined;
         try {
             switch (message.type) {
                 case 'search': {
                     if ((message.mode !== 'code' && message.mode !== 'docs') || typeof message.query !== 'string') return;
                     const query = message.query.trim();
                     if (!query || query.length > 200) return;
-                    selection = undefined;
-                    anchors = [];
-                    await post({ type: 'results', items: [], loading: true });
+                    await showResults(true);
                     anchors = await search(root, message.mode, query);
-                    await post({ type: 'results', items: anchors });
+                    if (selection && !resultRows().some(row => row.id === selection?.anchor.id)) {
+                        selection = undefined;
+                        await showSelection();
+                    }
+                    await showResults();
                     break;
                 }
                 case 'select': {
-                    const anchor = typeof message.index === 'number' ? anchors[message.index] : undefined;
+                    const rows = resultRows();
+                    const anchor = typeof message.id === 'string' ? rows.find(row => row.id === message.id)
+                        : typeof message.index === 'number' ? rows[message.index] : undefined;
                     if (!anchor) return;
                     selection = undefined;
-                    await post({ type: 'selection', loading: true });
+                    await showSelection(true);
                     selection = await selectAnchor(root, anchor);
-                    await post({ type: 'selection', item: selection.anchor, links: selection.links });
+                    await showSelection();
+                    selectedToStream = selection;
                     break;
                 }
                 case 'openSource':
                     if (selection) await openSource(root, selection.anchor);
                     break;
                 case 'openLink': {
-                    const link = typeof message.index === 'number' ? selection?.links[message.index] : undefined;
+                    const link = typeof message.id === 'string' ? relatedRows().find(row => row.id === message.id)
+                        : typeof message.index === 'number' ? selection?.links[message.index] : undefined;
                     if (link) await openSource(root, link);
                     break;
                 }
@@ -394,7 +504,9 @@ export async function openRepoContextExplorer(
                     const prompt = formatRepoContextQuestion(selection.anchor, selection.revision, question, id);
                     await appendQuestion(session, prompt);
                     latestRequest = { id, prompt, session, anchor: selection.anchor };
-                    await post({ type: 'asked', file: path.relative(root, session.fsPath) });
+                    latestAnswer = undefined;
+                    await publishView();
+                    await post({ type: 'asked', file: path.relative(root, session.fsPath), event_id: eventId });
                     await actions.runSession(session);
                     break;
                 }
@@ -403,7 +515,9 @@ export async function openRepoContextExplorer(
             await post({ type: 'error', message: error instanceof Error ? error.message : String(error) });
         } finally {
             busy = false;
-            await post({ type: 'settled' });
+            await post({ type: 'settled', event_id: eventId });
+            if (selectedToStream) void streamSelectionLinks(selectedToStream)
+                .catch(error => console.warn('[agent-doc] Repo Context Explorer could not publish related locations', error));
         }
     });
     panel.webview.html = renderPanel(panel, media);

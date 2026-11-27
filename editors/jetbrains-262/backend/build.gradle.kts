@@ -249,6 +249,7 @@ sourceSets.main {
 }
 
 tasks.processResources {
+    from("../../vscode/media/repoContextView.json")
     dependsOn(generateBackendDescriptor)
 }
 

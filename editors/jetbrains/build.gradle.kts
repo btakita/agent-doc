@@ -12,6 +12,10 @@ plugins {
     id("org.jetbrains.intellij.platform") version "2.11.0"
 }
 
+tasks.processResources {
+    from("../vscode/media/repoContextView.json")
+}
+
 group = providers.gradleProperty("pluginGroup").get()
 version = providers.gradleProperty("pluginVersion").get()
 

@@ -14,6 +14,19 @@
 // (`npm run compile` / `npm test`).
 
 import esbuild from 'esbuild';
+import { createRequire } from 'node:module';
+
+const require = createRequire(import.meta.url);
+
+function realtimeViewInjection() {
+    try {
+        require.resolve('@lazily-hub/lazily-js/realtime-view');
+        return ['scripts/realtime-view-inject.js'];
+    } catch (error) {
+        if (error.code === 'ERR_PACKAGE_PATH_NOT_EXPORTED') return [];
+        throw error;
+    }
+}
 
 const production = process.argv.includes('--production');
 const watch = process.argv.includes('--watch');
@@ -21,6 +34,7 @@ const watch = process.argv.includes('--watch');
 async function main() {
     const ctx = await esbuild.context({
         entryPoints: ['src/extension.ts'],
+        inject: realtimeViewInjection(),
         bundle: true,
         format: 'esm',
         platform: 'node',

@@ -145,6 +145,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val chooseSession = JButton("Choose session")
     private val sessionLabel = JBLabel("No session selected.")
     private val question = JBTextField()
+    private val questionDraft = RepoContextQuestionDraft(question)
     private val ask = JButton("Ask about selection")
     private val answer = JBTextArea(7, 20).apply {
         isEditable = false
@@ -153,6 +154,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         margin = JBUI.insets(4, 6)
     }
     private val openAnswer = JButton("Open answer")
+
+    private val realtimeView = RepoContextRealtimeView.open()
+    private var reconcilingRows = false
 
     private var root: Path? = null
     private var selection: SourceSelection? = null
@@ -174,7 +178,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             query.emptyText.text = if (mode.selectedItem == RepoContextMode.DOCS) "Heading or Markdown path"
                 else "Symbol, function, or type"
             clearSelection()
-            resultsModel.clear()
+            updateRows("results", emptyList())
             status.text = "Enter a search."
         }
         results.selectionMode = ListSelectionModel.SINGLE_SELECTION
@@ -223,19 +227,30 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         }
         query.addActionListener { search() }
         results.addListSelectionListener { event ->
-            if (!event.valueIsAdjusting) {
+            if (!event.valueIsAdjusting && !reconcilingRows) {
                 clearSelection()
                 updateControls()
-                results.selectedValue?.let(::select)
+                results.selectedValue?.let { row ->
+                    if (accepts(repoContextRowId("results", row), "activate", "select")) select(row)
+                }
             }
         }
-        related.addListSelectionListener { if (!it.valueIsAdjusting) updateControls() }
-        openSource.addActionListener { selection?.anchor?.let(::open) }
-        openRelated.addActionListener { related.selectedValue?.let(::open) }
-        chooseSession.addActionListener { chooseSession() }
+        related.addListSelectionListener { if (!it.valueIsAdjusting && !reconcilingRows) updateControls() }
+        openSource.addActionListener {
+            if (accepts("open-source", "activate", "openSource")) selection?.anchor?.let(::open)
+        }
+        openRelated.addActionListener {
+            related.selectedValue?.let { row ->
+                if (accepts(repoContextRowId("related", row), "activate", "openLink")) open(row)
+            }
+        }
+        chooseSession.addActionListener {
+            if (accepts("choose-session", "activate", "chooseSession")) chooseSession()
+        }
         question.addActionListener { submitQuestion() }
         ask.addActionListener { submitQuestion() }
         openAnswer.addActionListener {
+            if (!accepts("open-answer", "activate", "openAnswer")) return@addActionListener
             val submitted = request ?: return@addActionListener
             val response = matchingAnswer ?: return@addActionListener
             val document = FileDocumentManager.getInstance().getCachedDocument(submitted.session)
@@ -256,6 +271,19 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private fun buttonRow(vararg components: java.awt.Component) = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0))
         .apply { components.forEach(::add) }
 
+    private fun updateRows(group: String, rows: List<RepoContextLocation>) {
+        reconcilingRows = true
+        try {
+            if (group == "results") setRepoContextRows(group, results, resultsModel, rows)
+            else setRepoContextRows(group, related, relatedModel, rows)
+        } finally {
+            reconcilingRows = false
+        }
+    }
+
+    private fun accepts(node: String, event: String, action: String, payload: String? = null): Boolean =
+        realtimeView?.accepts(node, event, action, payload) ?: true
+
     private fun updateControls() {
         val idle = background == null
         search.isEnabled = idle
@@ -267,9 +295,15 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openRelated.isEnabled = idle && related.selectedValue != null
         chooseSession.isEnabled = idle
         ask.isEnabled = idle && selection != null
-        question.isEnabled = ask.isEnabled
+        question.isEnabled = selection != null || question.hasFocus() || question.text.isNotEmpty()
         openAnswer.isEnabled = matchingAnswer != null
         sessionLabel.text = session?.name ?: "No session selected."
+        realtimeView?.publish(
+            (0 until resultsModel.size()).map(resultsModel::get),
+            (0 until relatedModel.size()).map(relatedModel::get),
+            selection != null, session != null, matchingAnswer != null,
+        )
+        realtimeView?.let { related.accessibleContext.accessibleDescription = "${it.relatedCount()} related sources" }
     }
 
     private fun <T> runTask(loading: String, task: () -> T, success: (T) -> Unit) {
@@ -299,8 +333,11 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             return
         }
         val selectedMode = mode.selectedItem as RepoContextMode
-        clearSelection()
-        resultsModel.clear()
+        val payload = JsonObject().apply {
+            addProperty("mode", selectedMode.name.lowercase())
+            addProperty("query", text)
+        }.toString()
+        if (!accepts("search", "submit", "search", payload)) return
         runTask("Searching…", {
             val repo = gitRoot(projectPath)
             val found = if (selectedMode == RepoContextMode.DOCS && RepoContextModel.isMarkdown(text)) {
@@ -317,8 +354,11 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             }
             repo to found
         }) { (repo, found) ->
+            val selected = results.selectedValue
+            val key = selected?.let { repoContextRowId("results", it) }
+            if (root != repo || key == null || found.none { repoContextRowId("results", it) == key }) clearSelection()
             root = repo
-            found.forEach(resultsModel::addElement)
+            updateRows("results", found)
             status.text = if (found.isEmpty()) "No results." else "${found.size} results."
         }
     }
@@ -350,7 +390,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         }) { selected ->
             selection = selected
             sourceLabel.text = "${selected.anchor.path}:${selected.anchor.line}–${selected.anchor.endLine}"
-            selected.related.forEach(relatedModel::addElement)
+            updateRows("related", selected.related)
             status.text = if (selected.related.isEmpty()) "Source selected." else "${selected.related.size} related locations."
             if (selected.anchor.kind == "heading") loadMarkdownLinks(repo, selected)
         }
@@ -361,7 +401,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         relatedWork = null
         selection = null
         relatedStatus.isVisible = false
-        relatedModel.clear()
+        updateRows("related", emptyList())
         sourceLabel.text = "Select a search result."
     }
 
@@ -387,9 +427,8 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     ) {
         GenerationWork.invokeLater {
             if (disposed || project.isDisposed || selection !== selected) return@invokeLater
-            locations.forEach { location ->
-                if (relatedModel.size() < 20 && !relatedModel.contains(location)) relatedModel.addElement(location)
-            }
+            val existing = (0 until relatedModel.size()).map(relatedModel::get)
+            updateRows("related", (existing + locations).distinct().take(20))
             if (done) {
                 relatedWork = null
                 relatedStatus.isVisible = error != null
@@ -424,11 +463,13 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private fun submitQuestion() {
         val selected = selection ?: return
         val repo = root ?: return
-        val text = question.text.trim()
+        val draft = questionDraft.submission() ?: return
+        val text = draft.trim()
         if (text.isEmpty() || text.length > 1_500) {
             status.text = "Enter a question between 1 and 1500 characters."
             return
         }
+        if (background != null || !accepts("submit-question", "submit", "ask", text)) return
         val selectedSession = session ?: chooseSession() ?: return
         runTask("Checking the selected revision…", {
             check(checkedFile(repo, selectedSession.path).toString() == selectedSession.path) {
@@ -458,7 +499,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             request = submitted
             matchingAnswer = null
             answer.text = "Question saved. Waiting for the matching answer."
-            question.text = ""
+            questionDraft.clearIfUnchanged(draft)
             status.text = "Question saved. Running Agent Doc for ${selectedSession.name}."
             SubmitAction().submit(project, selectedSession)
         }

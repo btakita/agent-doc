@@ -1,0 +1,35 @@
+{
+  "definition": {
+    "id": "repo-context-explorer",
+    "root": "explorer",
+    "signals": {
+      "relatedCount": { "initial": 0 }
+    },
+    "nodes": {
+      "explorer": {
+        "role": "region",
+        "children": ["search", "results", "related", "related-count", "question", "submit-question", "open-source", "choose-session", "open-session", "open-answer"],
+        "layout": { "flow": "column" }
+      },
+      "search": { "role": "field" },
+      "results": { "role": "list" },
+      "related": { "role": "list" },
+      "related-count": { "role": "text", "text": { "op": "ref", "args": ["relatedCount"] } },
+      "question": { "role": "field" },
+      "submit-question": { "role": "button", "text": "Ask agent" },
+      "open-source": { "role": "button", "text": "Open source" },
+      "choose-session": { "role": "button", "text": "Choose session" },
+      "open-session": { "role": "button", "text": "Open session" },
+      "open-answer": { "role": "button", "text": "Open answer" }
+    }
+  },
+  "bindings": { "relatedCount": 1 },
+  "actions": {
+    "search": { "submit": "search" },
+    "submit-question": { "submit": "ask" },
+    "open-source": { "activate": "openSource" },
+    "choose-session": { "activate": "chooseSession" },
+    "open-session": { "activate": "openSession" },
+    "open-answer": { "activate": "openAnswer" }
+  }
+}

@@ -22,6 +22,10 @@ use anyhow::{Result, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::collections::HashMap;
+use std::path::PathBuf;
+
+mod tasks;
+use tasks::PromptTask;
 
 #[derive(Default, Deserialize)]
 #[serde(default)]
@@ -29,6 +33,8 @@ pub(crate) struct Evidence {
     source: String,
     submission: Option<Submission>,
     answer: Option<String>,
+    active_prompts: Vec<String>,
+    file: Option<PathBuf>,
 }
 
 #[derive(Deserialize)]
@@ -59,6 +65,8 @@ struct Target {
     line: usize,
     depth: usize,
     action: Action,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<PromptTask>,
     #[serde(skip)]
     offset: usize,
     #[serde(skip)]
@@ -84,8 +92,16 @@ struct PromptEdit {
 }
 
 pub fn project_document_prompts(source: &str) -> Result<Value> {
+    project_document_prompts_with_active(source, &[])
+}
+
+pub fn project_document_prompts_with_active(
+    source: &str,
+    active_prompts: &[String],
+) -> Result<Value> {
     let components = element::parse(source)?;
-    let projection = Projection::new(source, &components)?;
+    let mut projection = Projection::new(source, &components)?;
+    tasks::project(&mut projection, active_prompts);
     Ok(json!({"revision": content_hash(source), "nodes": projection.nodes}))
 }
 
@@ -113,7 +129,26 @@ pub(crate) fn derive(evidence: Evidence) -> Value {
         prepare_document_prompt(source, submission)
             .and_then(|edit| serde_json::to_value(edit).map_err(Into::into))
     } else {
-        project_document_prompts(source)
+        let mut active = evidence.active_prompts;
+        if source.contains(tasks::ANSWER_PREFIX)
+            && let Some(file) = evidence.file.as_deref()
+        {
+            match agent_doc_cycle_state_io::load_with_closeout_projection(file) {
+                Ok(Some(cycle)) if cycle.is_open() => {
+                    active.extend(cycle.prompt_targets);
+                    active.extend(cycle.selected_free_text_queue_heads);
+                    active.extend(cycle.absorbed_steering_prompts);
+                }
+                Err(error) => {
+                    eprintln!(
+                        "[explorer] turn activity unavailable for {}: {error:#}",
+                        file.display()
+                    );
+                }
+                _ => {}
+            }
+        }
+        project_document_prompts_with_active(source, &active)
     };
     result.unwrap_or_else(|error| json!({"error": error.to_string()}))
 }
@@ -309,6 +344,7 @@ impl<'a> Projection<'a> {
             line,
             depth,
             action: Action::Navigate,
+            task: None,
             offset: start,
             indent: 0,
             context: None,
@@ -370,6 +406,7 @@ impl<'a> Projection<'a> {
         let mut offset = component.open_end;
         for node in parse_exchange_nodes(component.content(self.source)) {
             if !matches!(node.kind, ExchangeNodeKind::Salient { .. })
+                && !tasks::is_explorer_exchange_request(&node)
                 && let Some(line) = node.lines.iter().find(|line| {
                     let text = line.trim();
                     !text.is_empty() && !text.starts_with("<!--")
@@ -451,6 +488,11 @@ impl<'a> Projection<'a> {
                         compact_label(text)
                     };
                     let mut node = self.target(title, start, row_depth);
+                    node.task = tasks::queue_task(
+                        text.lines().next().unwrap_or(""),
+                        &prompt.text,
+                        matches!(entries[index], QueueEntry::Completed(_)),
+                    );
                     let lineage = document_queue::nest_vector_at(&entries, index, text)
                         .unwrap_or_else(|| text.to_string());
                     let work_key = strip_generated_queue_prompt_id_annotation(&lineage);
@@ -557,7 +599,11 @@ impl<'a> Projection<'a> {
                         node.line
                     ));
                 }
-                addition.push_str(&format!(". {receipt}{newline}"));
+                addition.push_str(&format!(". {receipt}"));
+                if let Some(key) = &node.selection_key {
+                    addition.push_str(&tasks::anchor_comment(key));
+                }
+                addition.push_str(newline);
                 for line in draft_lines {
                     addition.push_str(&line);
                     addition.push_str(newline);
@@ -613,38 +659,49 @@ fn worker_answer(source: &str, components: &[Component], request_id: &str) -> Va
     }
     let token = format!("repo-context-answer:{request_id}");
     let body = exchange.content(source);
-    let lines: Vec<usize> = std::iter::once(0)
-        .chain(body.match_indices('\n').map(|(offset, _)| offset + 1))
-        .collect();
     let scan = overlay::ComponentMarkerScan::new(body);
     let mut matches = Vec::new();
-    let mut record = |start: usize, item: &str, response: &str| {
-        if !scan.in_code(start)
-            && item.contains(&token)
+    visit_worker_exchange_answers(body, &scan, |start, item, response| {
+        if item.contains(&token)
             && let Some(text) = checked_worker_response(response, &token)
         {
             let offset = source[..exchange.open_end + start].encode_utf16().count();
             matches.push(json!({ "offset": offset, "text": text }));
         }
-    };
-
-    for range in subagent_completion::completion_cell_line_ranges(body) {
-        let start = lines[range.start];
-        let end = lines.get(range.end).copied().unwrap_or(body.len());
-        let cell = &body[start..end];
-        for evidence in subagent_completion::completion_evidence(cell) {
-            if let Some(response) = subagent_completion::completion_response(cell, &evidence.key) {
-                record(start, &evidence.item, &response);
-            }
-        }
-    }
-    for handback in subagent_completion::handback_records(body) {
-        record(lines[handback.line], &handback.item, &handback.response);
-    }
+    });
     if matches.len() == 1 {
         matches.pop().expect("one matching response")
     } else {
         Value::Null
+    }
+}
+
+fn visit_worker_exchange_answers(
+    body: &str,
+    scan: &overlay::ComponentMarkerScan,
+    mut visit: impl FnMut(usize, &str, &str),
+) {
+    let lines: Vec<_> = std::iter::once(0)
+        .chain(body.match_indices('\n').map(|(offset, _)| offset + 1))
+        .collect();
+    for range in subagent_completion::completion_cell_line_ranges(body) {
+        let start = lines[range.start];
+        if scan.in_code(start) {
+            continue;
+        }
+        let end = lines.get(range.end).copied().unwrap_or(body.len());
+        let cell = &body[start..end];
+        for evidence in subagent_completion::completion_evidence(cell) {
+            if let Some(response) = subagent_completion::completion_response(cell, &evidence.key) {
+                visit(start, &evidence.item, &response);
+            }
+        }
+    }
+    for handback in subagent_completion::handback_records(body) {
+        let start = lines[handback.line];
+        if !scan.in_code(start) {
+            visit(start, &handback.item, &handback.response);
+        }
     }
 }
 
@@ -772,6 +829,108 @@ mod tests {
             edit["text"].as_str().unwrap().encode_utf16(),
         );
         String::from_utf16(&text).unwrap()
+    }
+
+    fn task_projection(source: &str, receipt: &str, active: &[String]) -> (Value, usize) {
+        let value = project_document_prompts_with_active(source, active).unwrap();
+        let index = value["nodes"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .position(|node| node["task"]["request_id"] == receipt)
+            .unwrap_or_else(|| panic!("missing task {receipt} in {value:#}"));
+        (value, index)
+    }
+
+    #[test]
+    fn explorer_tasks_remain_under_their_target_through_live_activity_and_answer() {
+        let projection = outline(DOCUMENT);
+        let beta = node(&projection, "beta] Identical title");
+        let edit = edit(
+            DOCUMENT,
+            &projection["revision"],
+            &beta["id"],
+            "Review the change\nTest it",
+        );
+        let inserted = apply(DOCUMENT, &edit);
+        let shifted = format!("Preface added concurrently.\n{inserted}");
+        let (pending, at) = task_projection(&shifted, RECEIPT, &[]);
+        let nodes = pending["nodes"].as_array().unwrap();
+        assert_eq!(nodes[at - 1]["selection_key"], beta["selection_key"]);
+        assert_eq!(nodes[at]["label"], "Review the change");
+        assert_eq!(nodes[at]["action"], "navigate");
+        assert_eq!(nodes[at]["task"]["state"], "submitted");
+
+        let header = shifted
+            .lines()
+            .find(|line| line.contains(ANSWER_INSTRUCTION))
+            .unwrap();
+        let running = task_projection(&shifted, RECEIPT, &[header.into()]).0;
+        assert_eq!(running["revision"], pending["revision"]);
+        assert_eq!(running["nodes"][at]["task"]["state"], "running");
+        let marked = shifted.replace(
+            "❯ Repo Context Explorer question",
+            "❯ 🚧 Repo Context Explorer question",
+        );
+        assert_eq!(
+            task_projection(&marked, RECEIPT, &[]).0["nodes"][at]["task"]["state"],
+            "running"
+        );
+
+        let receipt = format!("<!-- repo-context-answer:{RECEIPT} -->");
+        let append = |answer: &str| {
+            shifted.replace(
+                "<!-- /agent:exchange -->",
+                &format!("\n### Re: Review\n{answer}\n<!-- /agent:exchange -->"),
+            )
+        };
+        let sample = append(&format!("\x60\x60\x60md\n{receipt}\n\x60\x60\x60"));
+        assert_eq!(
+            task_projection(&sample, RECEIPT, &[]).0["nodes"][at]["task"]["state"],
+            "submitted"
+        );
+        let answered = append(&format!("Review complete.\n{receipt}"));
+        let (result, at) = task_projection(&answered, RECEIPT, &[header.into()]);
+        assert_eq!(
+            result["nodes"][at - 1]["selection_key"],
+            beta["selection_key"]
+        );
+        assert_eq!(result["nodes"][at]["task"]["state"], "answered");
+    }
+
+    #[test]
+    fn explorer_queue_task_uses_the_real_queue_child_and_lifecycle() {
+        let projection = outline(DOCUMENT);
+        let parent = node(&projection, "Earlier work");
+        let inserted = apply(
+            DOCUMENT,
+            &edit(
+                DOCUMENT,
+                &projection["revision"],
+                &parent["id"],
+                "Check the change",
+            ),
+        );
+        let (queued, at) = task_projection(&inserted, RECEIPT, &[]);
+        assert_eq!(
+            queued["nodes"][at - 1]["selection_key"],
+            parent["selection_key"]
+        );
+        assert_eq!(queued["nodes"][at]["label"], "Check the change");
+        assert_eq!(queued["nodes"][at]["task"]["state"], "queued");
+        for (marker, expected) in [
+            ("🚧", "running"),
+            ("☑️", "reported"),
+            ("⛔", "blocked"),
+            ("⚠️", "interrupted"),
+        ] {
+            let marked = inserted.replace(
+                ANSWER_INSTRUCTION,
+                &format!("{marker} {ANSWER_INSTRUCTION}"),
+            );
+            let (projected, at) = task_projection(&marked, RECEIPT, &[]);
+            assert_eq!(projected["nodes"][at]["task"]["state"], expected);
+        }
     }
 
     #[test]

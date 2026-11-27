@@ -60,6 +60,26 @@ class RepoContextDocumentTreeTest {
         assertNull(view.selection)
     }
 
+    @Test
+    fun `working task reveals its parent and rerenders status without a document edit`() = SwingUtilities.invokeAndWait {
+        val view = RepoContextDocumentTree({}, {})
+        val root = DocumentPromptTarget("document", "document", "Document", 1, 0, DocumentPromptAction.EXCHANGE)
+        val parent = DocumentPromptTarget("target", "tracked:beta", "Review", 2, 1, DocumentPromptAction.EXCHANGE)
+        fun task(state: String) =
+            DocumentPromptTarget("task", "task", "Check the change", 4, 2, DocumentPromptAction.NAVIGATE, DocumentPromptTask("receipt", state))
+        view.show(RepoContextDocumentOutline("same-revision", listOf(root, parent, task("submitted"))))
+        val tree = view.components.asSequence().flatMap(::children).filterIsInstance<Tree>().single()
+        tree.setSelectionRow(1)
+
+        view.show(RepoContextDocumentOutline("same-revision", listOf(root, parent, task("running"))))
+        assertEquals(parent, view.selection)
+        assertEquals("Working · Check the change", tree.getPathForRow(2).lastPathComponent.toString())
+
+        view.show(RepoContextDocumentOutline("same-revision", listOf(root, parent, task("answered"))))
+        assertEquals(parent, view.selection)
+        assertEquals("Answered · Check the change", tree.getPathForRow(2).lastPathComponent.toString())
+    }
+
     private fun children(component: Component): Sequence<Component> = sequence {
         yield(component)
         if (component is Container) for (child in component.components) yieldAll(children(child))

@@ -36,6 +36,7 @@ import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.LayoutManager
 import java.io.File
 import java.nio.file.Files
 import java.nio.file.Path
@@ -45,6 +46,7 @@ import java.util.concurrent.Future
 import javax.swing.BoxLayout
 import javax.swing.DefaultListModel
 import javax.swing.JButton
+import javax.swing.JComponent
 import javax.swing.JList
 import javax.swing.JPanel
 import javax.swing.ListSelectionModel
@@ -88,6 +90,27 @@ private data class SourceSelection(
 private data class SubmittedQuestion(val id: String, val session: VirtualFile)
 private data class CurrentAnswer(val response: RepoContextAnswer, val stamp: Long)
 
+internal open class RepoContextTypography(layout: LayoutManager) : JPanel(layout) {
+    private var textComponents: List<JComponent>? = null
+
+    protected fun useCompactFont(vararg components: JComponent) {
+        textComponents = components.asList()
+        refreshFont()
+    }
+
+    override fun updateUI() {
+        super.updateUI()
+        refreshFont()
+    }
+
+    private fun refreshFont() {
+        val components = textComponents ?: return
+        // Keep the local font when Swing subsequently updates the child delegates.
+        val font = JBFont.regular().lessOn(2f)
+        components.forEach { it.font = font }
+    }
+}
+
 internal class RepoContextLocationRenderer : ColoredListCellRenderer<RepoContextLocation>() {
     override fun customizeCellRenderer(
         list: JList<out RepoContextLocation>,
@@ -96,28 +119,14 @@ internal class RepoContextLocationRenderer : ColoredListCellRenderer<RepoContext
         selected: Boolean,
         hasFocus: Boolean,
     ) {
-        font = JBFont.regular()
+        font = list.font
         setIpad(JBUI.insets(3, 6))
         append(value?.toString().orEmpty(), SimpleTextAttributes.REGULAR_ATTRIBUTES)
     }
 }
 
-internal class RepoContextAnswerArea : JBTextArea(7, 20) {
-    init {
-        isEditable = false
-        lineWrap = true
-        wrapStyleWord = true
-        margin = JBUI.insets(4, 6)
-    }
-
-    override fun updateUI() {
-        super.updateUI()
-        font = JBFont.regular().asUIResource()
-    }
-}
-
 private class RepoContextExplorerPanel(private val project: Project, private val projectPath: Path) :
-    JPanel(BorderLayout(JBUI.scale(8), JBUI.scale(8))), Disposable {
+    RepoContextTypography(BorderLayout(JBUI.scale(8), JBUI.scale(8))), Disposable {
 
     private val mode = ComboBox(RepoContextMode.entries.toTypedArray())
     private val query = JBTextField()
@@ -135,7 +144,12 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val sessionLabel = JBLabel("No session selected.")
     private val question = JBTextField()
     private val ask = JButton("Ask about selection")
-    private val answer = RepoContextAnswerArea()
+    private val answer = JBTextArea(7, 20).apply {
+        isEditable = false
+        lineWrap = true
+        wrapStyleWord = true
+        margin = JBUI.insets(4, 6)
+    }
     private val openAnswer = JButton("Open answer")
 
     private var root: Path? = null
@@ -190,6 +204,10 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             }
         }, BorderLayout.CENTER)
         add(status, BorderLayout.SOUTH)
+        useCompactFont(
+            mode, query, search, cancel, status, results, related, sourceLabel, openSource, openRelated,
+            chooseSession, sessionLabel, question, ask, answer, openAnswer,
+        )
         search.addActionListener { search() }
         cancel.addActionListener {
             taskRevision++

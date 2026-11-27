@@ -144,7 +144,7 @@ function normalizeAppendPatchContentForCompare(content: string): string {
         .trim();
 }
 
-function findComponentRange(doc: string, component: string): [number, number] | null {
+export function findComponentRange(doc: string, component: string): [number, number] | null {
     const openPattern = new RegExp(`<!-- agent:${escapeRegex(component)}(\\s[^>]*)? -->`, 'g');
     const closeTag = `<!-- /agent:${component} -->`;
     const codeRanges = findCodeBlockRanges(doc);
@@ -211,25 +211,24 @@ function leadingRunLength(value: string, char: string): number {
     return count;
 }
 
-function findCodeBlockRanges(doc: string): Array<[number, number]> {
+export function findCodeBlockRanges(doc: string): Array<[number, number]> {
     const ranges: Array<[number, number]> = [];
-    const fencePattern = /^[ \t]*```/gm;
-    let insideFence = false;
-    let fenceStart = 0;
+    const fencePattern = /^[ \t]*(`{3,}|~{3,})([^\r\n]*)/gm;
+    let openingFence: RegExpExecArray | null = null;
     let match: RegExpExecArray | null;
 
     while ((match = fencePattern.exec(doc)) !== null) {
-        if (!insideFence) {
-            insideFence = true;
-            fenceStart = match.index;
-        } else {
-            insideFence = false;
+        if (!openingFence) {
+            openingFence = match;
+        } else if (match[1][0] === openingFence[1][0]
+            && match[1].length >= openingFence[1].length && !match[2].trim()) {
             const lineEnd = doc.indexOf('\n', match.index);
-            ranges.push([fenceStart, lineEnd >= 0 ? lineEnd + 1 : doc.length]);
+            ranges.push([openingFence.index, lineEnd >= 0 ? lineEnd + 1 : doc.length]);
+            openingFence = null;
         }
     }
-    if (insideFence) {
-        ranges.push([fenceStart, doc.length]);
+    if (openingFence) {
+        ranges.push([openingFence.index, doc.length]);
     }
     return ranges;
 }

@@ -74,6 +74,12 @@ test('VSIX carries koffi runtime JavaScript and license', () => {
     }
 });
 
+test('VSIX carries the Repo Context Explorer webview assets', () => {
+    for (const file of ['repoContext.css', 'repoContext.js']) {
+        assert.ok(fs.existsSync(path.join(extensionDir, 'media', file)), `missing media/${file}`);
+    }
+});
+
 test('VSIX carries a koffi native for every published platform', () => {
     for (const platform of koffiPlatforms()) {
         const triplets = TRIPLETS[platform];

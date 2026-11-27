@@ -7,6 +7,7 @@ import * as net from 'net';
 import { execFile } from 'child_process';
 import * as native from './native.js';
 import { projectRoots } from './projectRoots.js';
+import { openRepoContextExplorer } from './repoContextExplorer.js';
 import {
     aboutMismatches,
     nativeAboutFacts,
@@ -4167,6 +4168,24 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.dashboard', dashboardAction)
     );
+    context.subscriptions.push(vscode.commands.registerCommand('agentDoc.repoContextExplorer', async () => {
+        try {
+            await openRepoContextExplorer(context.extensionUri, {
+                isSession: uri => {
+                    const root = getWorkspaceRoot(uri);
+                    return root !== undefined && native.isSessionDocument(uri.fsPath, root);
+                },
+                runSession: async uri => {
+                    const workspaceRoot = getWorkspaceRoot(uri);
+                    if (!workspaceRoot) throw new Error('Choose a session in an open workspace folder.');
+                    const { cwd, relativePath } = resolveProject(workspaceRoot, uri.fsPath);
+                    await startRunForDocument(cwd, relativePath, uri.fsPath);
+                },
+            });
+        } catch (error) {
+            showError(error instanceof Error ? error.message : String(error));
+        }
+    }));
     // `#treestatusvscode`: the queue subtree's tree status at the caret.
     context.subscriptions.push(
         vscode.commands.registerCommand('agentDoc.treeStatus', treeStatusAction)

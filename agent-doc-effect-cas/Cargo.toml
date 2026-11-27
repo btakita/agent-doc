@@ -12,5 +12,5 @@ name = "agent_doc_effect_cas"
 
 [dependencies]
 anyhow = "1"
-lazily = { version = "0.63.0" }
+lazily = { version = "0.64.0" }
 parking_lot = "0.12"

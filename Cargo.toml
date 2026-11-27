@@ -340,7 +340,7 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 libc = "0.2"
-lazily = { version = "0.63.0", features = ["ipc", "durable-sqlite"] }
+lazily = { version = "0.64.0", features = ["ipc", "durable-sqlite"] }
 tiny_http = { version = "0.12", default-features = false, features = ["ssl-rustls"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_System_Threading"] }
 
@@ -361,7 +361,7 @@ agent-doc-document-realtime-io = { path = "agent-doc-document-realtime-io", vers
 agent-doc-element-queue = { path = "agent-doc-element-queue", version = "0.35.594" }
 agent-doc-sim-net = { path = "agent-doc-sim-net", version = "0.35.594" }
 agent-doc-test-support = { path = "agent-doc-test-support", version = "0.35.594" }
-lazily-sim = { package = "lazily", git = "https://github.com/lazily-hub/lazily-rs.git", rev = "92656d6840e9171b3e55a9e6b11205f820ec984c" }
+lazily-sim = { package = "lazily", git = "https://github.com/lazily-hub/lazily-rs.git", rev = "086e51b0b96c2f550dce14db695ff4419fa0aa2c" }
 assert_cmd = "2"
 existence = "0.4"
 filetime = "0.2"

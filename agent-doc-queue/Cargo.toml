@@ -27,7 +27,7 @@ agent-doc-prompt-context = { path = "../agent-doc-prompt-context", version = "0.
 agent-doc-prompt-lines = { path = "../agent-doc-prompt-lines", version = "0.35.594" }
 agent-doc-queue-icons = { path = "../agent-doc-queue-icons", version = "0.35.594" }
 anyhow = "1"
-lazily = { version = "0.63.0", features = ["thread-safe"] }
+lazily = { version = "0.64.0", features = ["thread-safe"] }
 libc = "0.2"
 parking_lot = "0.12"
 pulldown-cmark = "0.13"

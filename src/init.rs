@@ -267,12 +267,15 @@ fn write_new_session(
     Ok(())
 }
 
-fn ensure_existing_artifact_stays_ordinary(artifact: &Path) -> Result<()> {
-    let text = std::fs::read_to_string(artifact)?;
-    if text.contains("agent_doc_session:")
+fn artifact_text_is_control_session(text: &str) -> bool {
+    text.contains("agent_doc_session:")
         || text.contains("agent_doc_format:")
         || text.contains("<!-- agent:")
-    {
+}
+
+fn ensure_existing_artifact_stays_ordinary(artifact: &Path) -> Result<()> {
+    let text = std::fs::read_to_string(artifact)?;
+    if artifact_text_is_control_session(&text) {
         anyhow::bail!(
             "artifact is already an agent-doc session: {}",
             artifact.display()
@@ -584,7 +587,7 @@ fn refuse_control_file_as_artifact(artifact: &Path) -> Result<()> {
     }
     let text = std::fs::read_to_string(artifact)
         .with_context(|| format!("failed to read {}", artifact.display()))?;
-    if text.contains("<!-- agent:") || text.contains("agent_doc_format:") {
+    if artifact_text_is_control_session(&text) {
         anyhow::bail!(
             "artifact must be ordinary markdown, not a control session: {}",
             artifact.display()
@@ -683,7 +686,14 @@ fn remove_artifact_rows(body: &str, labels: &[String]) -> (String, Vec<String>) 
         kept.push(lines[index]);
         index += 1;
     }
-    (kept.join("\n"), removed)
+    let mut next = kept.join("\n");
+    // The trailing empty split segment is the terminator, not a nested line.
+    // Dropping it welds `<!-- /agent:run -->` onto the previous row, which
+    // `document_queue::parse` then reads as stray close text instead of work.
+    if body.ends_with('\n') && !next.ends_with('\n') {
+        next.push('\n');
+    }
+    (next, removed)
 }
 
 fn top_level_list_payload(line: &str) -> Option<&str> {
@@ -1226,6 +1236,70 @@ mod tests {
         let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
         assert_eq!(queue, "- [ ] keep this other work\n");
         assert!(artifact.exists());
+    }
+
+    #[test]
+    fn unbind_of_the_last_row_keeps_the_closer_on_its_own_line() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
+        let first = dir.path().join("plans").join("one.md");
+        let second = dir.path().join("plans").join("two.md");
+        write_new_session(
+            &session,
+            Some("Control"),
+            Some("claude"),
+            None,
+            &[first.clone(), second.clone()],
+            &Config::default(),
+        )
+        .unwrap();
+
+        unbind_artifacts_on_disk(&session, std::slice::from_ref(&second)).unwrap();
+        let text = std::fs::read_to_string(&session).unwrap();
+        assert!(
+            !text
+                .lines()
+                .any(|line| line.contains("- [ ]") && line.contains("<!-- /agent:run -->")),
+            "{text}"
+        );
+        let queue = queue_body(&text);
+        assert!(queue.ends_with('\n'), "{queue:?}");
+        assert_eq!(queue, format!("- [ ] {}\n", first.display()));
+        let entries = agent_doc_queue::document_queue::parse(&queue).unwrap();
+        assert!(
+            !entries.iter().any(|entry| matches!(
+                entry,
+                agent_doc_queue::document_queue::QueueEntry::StrayCloseText(_)
+            )),
+            "{entries:?}"
+        );
+    }
+
+    #[test]
+    fn bind_refuses_an_append_mode_session_as_an_artifact() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
+        let plan = dir.path().join("plans").join("one.md");
+        let other = dir.path().join("other.md");
+        write_new_session(
+            &session,
+            Some("Control"),
+            Some("claude"),
+            None,
+            std::slice::from_ref(&plan),
+            &Config::default(),
+        )
+        .unwrap();
+        write_new_session(&other, Some("Other"), None, None, &[], &Config::default()).unwrap();
+        let before = std::fs::read_to_string(&session).unwrap();
+        let error = bind_artifacts_on_disk(&session, std::slice::from_ref(&other)).unwrap_err();
+        assert!(
+            error.to_string().contains("agent-doc session")
+                || error.to_string().contains("control session"),
+            "{error}"
+        );
+        assert_eq!(std::fs::read_to_string(&session).unwrap(), before);
+        assert!(!queue_body(&before).contains(&other.display().to_string()));
     }
 
     fn queue_body(session: &str) -> String {

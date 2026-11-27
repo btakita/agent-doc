@@ -27,8 +27,19 @@ internal data class DocumentPromptTarget(
     val line: Int,
     val depth: Int,
     val action: DocumentPromptAction,
+    val task: DocumentPromptTask? = null,
 ) {
-    override fun toString(): String = label
+    override fun toString(): String = task?.let { "${it.label} · $label" } ?: label
+}
+
+internal data class DocumentPromptTask(val requestId: String, val state: String) {
+    val label: String
+        get() = when (state) {
+            "running" -> "Working"
+            "waiting" -> "Waiting for you"
+            "interrupted" -> "Interrupted"
+            else -> state.replaceFirstChar { it.uppercase() }
+        }
 }
 
 internal data class RepoContextDocumentOutline(val revision: String, val targets: List<DocumentPromptTarget>)
@@ -43,8 +54,8 @@ internal data class RepoContextPromptEdit(val offset: Int, val text: String, val
 }
 
 internal class RepoContextDocumentPrompts(private val native: EditorDerivation = EditorDerivation.Native) {
-    fun outline(source: String): RepoContextDocumentOutline {
-        val output = derive(source)
+    fun outline(source: String, filePath: String? = null): RepoContextDocumentOutline {
+        val output = derive(source) { filePath?.let { addProperty("file", it) } }
         return RepoContextDocumentOutline(
             output.get("revision").asString,
             output.getAsJsonArray("nodes").map { entry ->
@@ -56,6 +67,9 @@ internal class RepoContextDocumentPrompts(private val native: EditorDerivation =
                     node.get("line").asInt,
                     node.get("depth").asInt,
                     action(node),
+                    node.getAsJsonObject("task")?.let { task ->
+                        DocumentPromptTask(task.get("request_id").asString, task.get("state").asString)
+                    },
                 )
             },
         )
@@ -186,7 +200,10 @@ internal class RepoContextDocumentTree(
     }
 
     fun show(outline: RepoContextDocumentOutline, draftScope: String = "") {
-        if (outline.revision == revision?.revision && draftScope == scope) return
+        if (outline == revision && draftScope == scope) return
+        val previouslyWorking = revision?.targets.orEmpty()
+            .mapNotNull { it.task?.takeIf { task -> task.state == "running" }?.requestId }
+            .toSet()
         val previous = (tree.model.root as DefaultMutableTreeNode)
         val expanded = tree.getExpandedDescendants(TreePath(previous.path))?.toList()
             ?.mapNotNull { path ->
@@ -201,6 +218,7 @@ internal class RepoContextDocumentTree(
         val lineage = mutableListOf<Pair<Int, DefaultMutableTreeNode>>()
         val nodes = mutableMapOf<String, DefaultMutableTreeNode>()
         val branches = mutableMapOf<String, DefaultMutableTreeNode>()
+        val newWorking = mutableListOf<DefaultMutableTreeNode>()
         for (target in outline.targets) {
             while (lineage.isNotEmpty() && lineage.last().first >= target.depth) lineage.removeLast()
             val branch = DefaultMutableTreeNode(target)
@@ -208,6 +226,9 @@ internal class RepoContextDocumentTree(
             lineage.add(target.depth to branch)
             target.selectionKey?.let { nodes[it] = branch }
             branches[target.id] = branch
+            if (target.task?.let { it.state == "running" && it.requestId !in previouslyWorking } == true) {
+                newWorking.add(branch)
+            }
         }
         revision = outline
         scope = draftScope
@@ -218,6 +239,7 @@ internal class RepoContextDocumentTree(
         for (id in expanded) nodes[id]?.let { tree.expandPath(TreePath(it.path)) }
         val first = if (root.childCount > 0) root.getChildAt(0) as DefaultMutableTreeNode else null
         if (first != null) tree.expandPath(TreePath(first.path))
+        for (branch in newWorking) tree.expandPath(TreePath(branch.path).parentPath)
         val current = nodes[selected] ?: first.takeIf { initial }
         current?.let { tree.selectionPath = TreePath(it.path) }
         replacingModel = false

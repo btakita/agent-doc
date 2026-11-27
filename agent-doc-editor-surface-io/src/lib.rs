@@ -33,6 +33,7 @@ pub use agent_doc_editor_surface::SurfaceObservationReceipt;
 mod document_prompts;
 pub use document_prompts::{
     Submission as DocumentPromptSubmission, insert_document_prompt, project_document_prompts,
+    project_document_prompts_with_active,
 };
 
 /// Compatibility consequence for a locally derived intent.

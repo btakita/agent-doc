@@ -15,6 +15,7 @@ import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.fileEditor.FileEditorManagerEvent
 import com.intellij.openapi.fileEditor.FileEditorManagerListener
+import com.intellij.openapi.util.Disposer
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
@@ -199,6 +200,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         .firstOrNull(AgentDocSessionFiles::isSessionDocument)
     private var pinnedSession = false
     private var currentOutline: CurrentOutline? = null
+    private var observedPromptTurn: Pair<String, TurnStateBridge.TurnStatePresentation>? = null
     private var outlineWork: Future<*>? = null
     private var outlineRevision = 0L
     private var request: SubmittedQuestion? = null
@@ -308,6 +310,15 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 }
             }
         }, this)
+        val turnState = TurnStateBannerRefresher.getInstance(project)
+        Disposer.register(this, turnState.addListener {
+            val file = session ?: return@addListener
+            val observed = file.path to turnState.cachedPresentationFor(file.path)
+            if (observed != observedPromptTurn) {
+                observedPromptTurn = observed
+                refreshOutline()
+            }
+        })
         refreshOutline()
     }
 
@@ -515,7 +526,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         val snapshot = document.immutableCharSequence
         val stamp = document.modificationStamp
         outlineWork = GenerationWork.schedule({
-            val projection = runCatching { documentPrompts.outline(snapshot.toString()) }
+            val projection = runCatching { documentPrompts.outline(snapshot.toString(), file.path) }
             GenerationWork.invokeLater {
                 if (disposed || project.isDisposed || outlineRevision != revision ||
                     session != file || document.modificationStamp != stamp) return@invokeLater

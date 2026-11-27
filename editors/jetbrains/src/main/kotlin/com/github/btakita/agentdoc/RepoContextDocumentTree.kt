@@ -27,6 +27,7 @@ internal data class DocumentPromptTarget(
     val line: Int,
     val depth: Int,
     val action: DocumentPromptAction,
+    val endLine: Int? = null,
 ) {
     override fun toString(): String = label
 }
@@ -56,6 +57,7 @@ internal class RepoContextDocumentPrompts(private val native: EditorDerivation =
                     node.get("line").asInt,
                     node.get("depth").asInt,
                     action(node),
+                    endLine = node.get("end_line")?.takeUnless { it.isJsonNull }?.asInt,
                 )
             },
         )

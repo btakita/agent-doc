@@ -40,6 +40,7 @@ import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
 import java.awt.FlowLayout
+import java.awt.KeyboardFocusManager
 import java.awt.LayoutManager
 import java.awt.event.InputEvent
 import java.awt.event.KeyEvent
@@ -209,6 +210,12 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private var taskRevision = 0L
     private var answerWork: Future<*>? = null
     @Volatile private var disposed = false
+    private val caretSync = RepoContextCaretSync(project, this, canFollow = {
+        !disposed && !submitting && documentTree.isShowing && tabs.selectedComponent === documentTree &&
+            !documentTree.isEditingPrompt &&
+            KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+                ?.let(documentTree::isAncestorOf) != true
+    }, selectTarget = documentTree::selectTarget)
 
     init {
         border = JBUI.Borders.empty(8)
@@ -250,6 +257,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 cancelTask()
                 status.text = ""
             }
+            caretSync.followSelectedEditor()
             updateControls()
         }
         add(tabs, BorderLayout.CENTER)
@@ -498,6 +506,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private fun setSession(file: VirtualFile) {
         if (session == file) return
         session = file
+        caretSync.clear()
         documentTree.clear("Reading the session document…")
         refreshOutline()
     }
@@ -508,6 +517,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         val revision = ++outlineRevision
         val file = session
         if (file == null || document == null) {
+            caretSync.clear()
             documentTree.clear("Choose an Agent Doc session.")
             updateControls()
             return
@@ -522,7 +532,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 projection.onSuccess { outline ->
                     currentOutline = CurrentOutline(file, stamp, outline)
                     documentTree.show(outline, file.url)
+                    caretSync.show(document, stamp, outline)
                 }.onFailure { error ->
+                    caretSync.clear()
                     documentTree.clear(error.message ?: "Could not read this session document.")
                 }
                 updateControls()
@@ -535,7 +547,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         val projection = currentOutline ?: return
         val document = readDocument(projection.session) ?: return
         if (document.modificationStamp != projection.stamp) return
-        OpenFileDescriptor(project, projection.session, target.line - 1, 0).navigate(true)
+        caretSync.openFromTree(target.line) {
+            OpenFileDescriptor(project, projection.session, target.line - 1, 0).navigate(true)
+        }
     }
 
     private fun questionText(draft: String): String? {

@@ -93,6 +93,7 @@ fn record_digest<'a>(lines: &[&'a str], next: usize, topic: &str) -> Option<(usi
         return Some((next, expected));
     }
     let item = topic.strip_prefix('“')?.strip_suffix('”')?;
+    let item = agent_doc_element_queue::strip_queue_report_state_annotation(item);
     let (index, prompt) =
         crate::subagent_completion::queue_prompt_echo_before_digest(lines, next, |line| {
             digest(line).is_some()
@@ -213,6 +214,9 @@ mod tests {
         let text = format!("Before.\n\n{decorated}\n\nAfter.\n");
         assert_eq!(record_heading_lines(&text), vec![2]);
         assert_eq!(strip_attested_queue_feedback(&text), "Before.\n\nAfter.\n");
+
+        let published = decorated.replace("“#review”", "“#review ⟦published⟧”");
+        assert_eq!(record_heading_lines(&published), vec![0]);
 
         for edited in [
             decorated.replace("#review\n\n", "#unrelated\n\n"),

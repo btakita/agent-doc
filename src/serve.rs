@@ -922,7 +922,19 @@ fn handle_projection(
             );
         }
     };
-    let projection = build_projection(&body)?;
+    let cycle = load_open_cycle(&doc).unwrap_or_else(|error| {
+        eprintln!(
+            "[serve] prompt activity unavailable for {}: {error:#}",
+            doc.display()
+        );
+        None
+    });
+    let active_prompts: Vec<_> = cycle
+        .iter()
+        .flat_map(explorer_active_prompts)
+        .cloned()
+        .collect();
+    let projection = build_projection(&body, &active_prompts)?;
     respond(
         request,
         &serde_json::to_string(&projection)?,
@@ -1154,7 +1166,7 @@ fn normalize_path(path: &Path) -> PathBuf {
     normalized
 }
 
-fn build_projection(doc: &str) -> Result<ServeProjection> {
+fn build_projection(doc: &str, active_prompts: &[String]) -> Result<ServeProjection> {
     let components = agent_doc_element::element::parse(doc)?;
     let names = ["exchange", "backlog", "queue", "review"];
     Ok(ServeProjection {
@@ -1162,8 +1174,11 @@ fn build_projection(doc: &str) -> Result<ServeProjection> {
             .into_iter()
             .map(|name| projection_component(doc, &components, name))
             .collect(),
-        document_prompts: agent_doc_editor_surface_io::project_document_prompts(doc)
-            .unwrap_or_else(|error| serde_json::json!({"error": error.to_string()})),
+        document_prompts: agent_doc_editor_surface_io::project_document_prompts_with_active(
+            doc,
+            active_prompts,
+        )
+        .unwrap_or_else(|error| serde_json::json!({"error": error.to_string()})),
     })
 }
 
@@ -1276,16 +1291,22 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
     })
 }
 
-fn active_partial_response(
-    doc: &Path,
-) -> Result<Option<agent_doc_capture_io::PartialCaptureRecord>> {
-    let Some(state) = agent_doc_cycle_state_io::load_with_closeout_projection(doc)? else {
-        return Ok(None);
-    };
-    if !state.is_open() {
-        return Ok(None);
-    }
-    agent_doc_capture_io::load_partial_by_cycle(doc, &state.cycle_id)
+fn load_open_cycle(doc: &Path) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
+    Ok(
+        agent_doc_cycle_state_io::load_with_closeout_projection(doc)?
+            .filter(|cycle| cycle.is_open()),
+    )
+}
+
+fn explorer_active_prompts(
+    cycle: &agent_doc_cycle_state_io::CycleState,
+) -> impl Iterator<Item = &String> {
+    cycle
+        .prompt_targets
+        .iter()
+        .chain(&cycle.selected_free_text_queue_heads)
+        .chain(&cycle.absorbed_steering_prompts)
+        .filter(|prompt| prompt.contains("repo-context-answer:"))
 }
 
 fn partial_response_fingerprint(
@@ -1322,6 +1343,7 @@ struct SsePollStream {
     interval: Duration,
     last: Option<DocFingerprint>,
     last_partial: Option<PartialResponseFingerprint>,
+    last_prompt_activity: Option<String>,
     buffer: VecDeque<u8>,
     sent_ready: bool,
     last_frame: Instant,
@@ -1338,6 +1360,7 @@ impl SsePollStream {
             interval,
             last: None,
             last_partial: None,
+            last_prompt_activity: None,
             buffer: VecDeque::new(),
             sent_ready: false,
             last_frame: Instant::now(),
@@ -1377,20 +1400,42 @@ impl SsePollStream {
             self.enqueue_event("doc-changed", doc_event_payload(&self.doc, &fingerprint));
             emitted = true;
         }
-        if self.poll_partial_response()? {
+        if self.poll_turn()? {
             emitted = true;
         }
         Ok(emitted)
     }
 
-    fn poll_partial_response(&mut self) -> Result<bool> {
-        let Some(record) = active_partial_response(&self.doc)? else {
+    fn poll_turn(&mut self) -> Result<bool> {
+        let cycle = load_open_cycle(&self.doc)?;
+        let activity = cycle.as_ref().and_then(|cycle| {
+            let prompts = explorer_active_prompts(cycle)
+                .map(String::as_str)
+                .collect::<Vec<_>>();
+            (!prompts.is_empty()).then(|| {
+                format!(
+                    "{}:{}",
+                    cycle.cycle_id,
+                    agent_doc_hash::content_hash(&prompts.join("\n"))
+                )
+            })
+        });
+        let activity_changed = self.last_prompt_activity != activity;
+        if activity_changed {
+            self.last_prompt_activity = activity;
+            self.enqueue_event("prompt-activity", serde_json::json!({}));
+        }
+        let Some(record) = cycle
+            .map(|cycle| agent_doc_capture_io::load_partial_by_cycle(&self.doc, &cycle.cycle_id))
+            .transpose()?
+            .flatten()
+        else {
             self.last_partial = None;
-            return Ok(false);
+            return Ok(activity_changed);
         };
         let fingerprint = partial_response_fingerprint(&record);
         if self.last_partial.as_ref() == Some(&fingerprint) {
-            return Ok(false);
+            return Ok(activity_changed);
         }
         self.last_partial = Some(fingerprint);
         self.enqueue_event("agent-response", partial_response_payload(&record));
@@ -1908,11 +1953,7 @@ fn active_cycle_in_scope(doc: &Path) -> Result<bool> {
 }
 
 fn active_cycle_id(doc: &Path) -> Result<Option<String>> {
-    Ok(
-        agent_doc_cycle_state_io::load_with_closeout_projection(doc)?
-            .filter(|state| state.is_open())
-            .map(|state| state.cycle_id),
-    )
+    Ok(load_open_cycle(doc)?.map(|cycle| cycle.cycle_id))
 }
 
 fn close_active_cycle(doc: &Path) -> Result<()> {
@@ -2213,6 +2254,47 @@ mod tests {
     }
 
     #[test]
+    fn serve_sse_notifies_when_an_explorer_prompt_enters_and_leaves_an_open_cycle() {
+        let (_dir, doc) = serve_save_project();
+        agent_doc_cycle_state_io::start_preflight(
+            &doc,
+            Some(SERVE_SAVE_DISK),
+            Some(SERVE_SAVE_DISK),
+        )
+        .unwrap();
+        let mut stream = SsePollStream::new(doc.clone());
+        assert!(!stream.poll_turn().unwrap());
+        agent_doc_cycle_state_io::record_turn_checkpoint(
+            &doc,
+            &["Prompt with repo-context-answer:0123456789abcdef0123456789abcdef".into()],
+            None,
+            None,
+        )
+        .unwrap();
+        assert!(stream.poll_turn().unwrap());
+        assert!(
+            String::from_utf8(stream.buffer.drain(..).collect())
+                .unwrap()
+                .contains("event: prompt-activity\n")
+        );
+        assert!(!stream.poll_turn().unwrap());
+        agent_doc_cycle_state_io::mark_committed(
+            &doc,
+            "test",
+            Some(SERVE_SAVE_DISK),
+            Some(SERVE_SAVE_DISK),
+        )
+        .unwrap();
+        assert!(stream.poll_turn().unwrap());
+        assert!(
+            String::from_utf8(stream.buffer.drain(..).collect())
+                .unwrap()
+                .contains("event: prompt-activity\n")
+        );
+        assert_eq!(std::fs::read_to_string(doc).unwrap(), SERVE_SAVE_DISK);
+    }
+
+    #[test]
     fn serve_detects_open_cycle_for_write_commit_path() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -2287,7 +2369,7 @@ mod tests {
             "<!-- /agent:queue -->\n"
         );
 
-        let projection = build_projection(doc).unwrap();
+        let projection = build_projection(doc, &[]).unwrap();
         let backlog = projection
             .components
             .iter()

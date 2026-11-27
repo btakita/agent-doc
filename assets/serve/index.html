@@ -46,10 +46,13 @@
     .document-prompts { height: 100%; display: flex; flex-direction: column; }
     .document-prompts[hidden] { display: none; }
     .prompt-tree { flex: 1; min-height: 65px; overflow: auto; padding: 5px; }
-    .prompt-tree button { min-height: 30px; width: 100%; text-align: left; overflow-wrap: anywhere; background: transparent; color: var(--fg); font-weight: 400; }
-    .prompt-tree button[aria-pressed="true"] { background: #263248; }
-    .prompt-tree button:hover { background: #1b202a; }
-    .prompt-composer { padding: 8px 10px; border-top: 1px solid #232735; display: grid; gap: 6px; }
+    .prompt-row-button { min-height: 30px; width: 100%; text-align: left; overflow-wrap: anywhere; background: transparent; color: var(--fg); font-weight: 400; }
+    .prompt-row-button[aria-pressed="true"] { background: #263248; }
+    .prompt-row-button:hover { background: #1b202a; }
+    .prompt-task-state { margin-inline-start: 7px; padding: 1px 5px; border: 1px solid #39465a; border-radius: 4px; color: #ccd6e6; font-size: 11px; white-space: nowrap; }
+    .prompt-task-state[data-state="running"] { color: #9acbff; border-color: #4777ae; }
+    .prompt-composer { margin: 4px 6px 8px var(--prompt-indent, 8px); padding: 6px 8px; border-inline-start: 1px solid #39465a; display: grid; gap: 6px; }
+    .prompt-composer[hidden] { display: none; }
     .prompt-composer textarea { height: auto; min-height: 60px; padding: 7px 9px; border: 1px solid #323b4a; border-radius: 4px; resize: vertical; }
     .prompt-composer textarea:focus-visible { outline: 2px solid var(--accent); }
     .prompt-composer button { justify-self: start; }
@@ -94,7 +97,8 @@
       <div class="panels">
         <section class="document-prompts" id="documentPrompts" aria-label="Document prompts">
           <div class="prompt-tree" id="promptTree" aria-label="Document structure"></div>
-          <form class="prompt-composer" id="promptForm">
+          <p class="component-meta" id="promptAccess" hidden></p>
+          <form class="prompt-composer" id="promptForm" hidden>
             <label for="promptDraft">Prompt</label>
             <textarea id="promptDraft" rows="3" aria-describedby="promptStatus" placeholder="Ask about the selected section or item"></textarea>
             <button id="promptSubmit" type="submit" disabled>Ask agent</button>
@@ -136,6 +140,7 @@
     const promptDraft = document.getElementById("promptDraft");
     const promptSubmit = document.getElementById("promptSubmit");
     const promptStatus = document.getElementById("promptStatus");
+    const promptAccess = document.getElementById("promptAccess");
 
     let savedContent = "";
     let savedRevision = "";
@@ -151,6 +156,7 @@
     let promptProjection = null;
     let promptTarget = null;
     const promptDrafts = new Map();
+    const promptRows = new Map();
     const authToken = (() => {
       const token = new URLSearchParams(window.location.search).get("token");
       if (token) {
@@ -244,7 +250,8 @@
         accessScope = auth.canWrite ? "edit" : "read-only";
         canRun = auth.canRun === true;
         if (!canRun) {
-          promptStatus.textContent = auth.canWrite
+          promptAccess.hidden = false;
+          promptAccess.textContent = auth.canWrite
             ? "Start the local server with --allow-run to submit prompts here."
             : "This connection is read-only.";
         }
@@ -310,12 +317,11 @@
     function selectDoc(path) {
       if (saving || path === selectedDoc) return;
       if (hasUnsavedEdits() && !confirm("Discard unsaved edits and switch documents?")) return;
-      promptDrafts.set(selectedDoc, promptDraft.value);
-      promptDraft.value = promptDrafts.get(path) || "";
       promptProjection = null;
       promptTarget = null;
+      promptRows.clear();
+      documentPrompts.append(promptForm);
       promptTree.replaceChildren();
-      if (canRun) promptStatus.textContent = "";
       selectedDoc = path;
       savedRevision = "";
       updateDirty();
@@ -389,47 +395,116 @@
         || savedRevision !== '"' + promptProjection?.revision + '"';
     }
 
+    function promptKey(target) {
+      return target.selection_key || promptProjection.revision + ":" + target.id;
+    }
+
+    function promptDraftState(target) {
+      const key = selectedDoc + "\u0000" + promptKey(target);
+      if (!promptDrafts.has(key)) promptDrafts.set(key, { text: "", status: "" });
+      return promptDrafts.get(key);
+    }
+
+    function selectPromptTarget(target) {
+      promptTarget = target;
+      for (const row of promptRows.values()) {
+        row.button.setAttribute("aria-pressed", String(row.target === target));
+      }
+      const row = target && promptRows.get(promptKey(target));
+      if (row) {
+        if (promptForm.parentElement !== row.element) row.button.after(promptForm);
+        const draft = promptDraftState(target);
+        if (promptDraft.value !== draft.text) promptDraft.value = draft.text;
+        promptStatus.textContent = draft.status;
+      } else {
+        documentPrompts.append(promptForm);
+      }
+      promptForm.hidden = !canRun || !target || target.action === "navigate";
+      updatePromptComposer();
+    }
+
+    function newPromptRow() {
+      const element = document.createElement("div");
+      const button = document.createElement("button");
+      const row = { element, button, target: null };
+      button.type = "button";
+      button.className = "prompt-row-button";
+      element.append(button);
+      button.addEventListener("click", () => selectPromptTarget(row.target));
+      button.addEventListener("dblclick", () => {
+        if (hasUnsavedEdits()) return;
+        const target = row.target;
+        const lines = savedContent.split("\n");
+        let start = 0;
+        for (let line = 1; line < target.line && line <= lines.length; line++) start += lines[line - 1].length + 1;
+        editor.focus();
+        editor.setSelectionRange(start, start + (lines[target.line - 1]?.length || 0));
+        editor.scrollTop = Math.max(0, (target.line - 3) * parseFloat(getComputedStyle(editor).lineHeight));
+      });
+      return row;
+    }
+
     function renderPromptTree(projection) {
       const scroll = promptTree.scrollTop;
       const previous = promptTarget;
       promptProjection = projection;
       const nodes = projection?.nodes || [];
-      promptTarget = nodes.find((target) => previous?.selection_key && target.selection_key === previous.selection_key)
-        || nodes.find((target) => target.id === previous?.id) || nodes[0] || null;
-      const buttons = document.createDocumentFragment();
+      const selected = nodes.find((target) => previous?.selection_key && target.selection_key === previous.selection_key)
+        || (!previous?.selection_key && nodes.find((target) => target.id === previous?.id)) || nodes[0] || null;
+      const remaining = new Set(promptRows.keys());
+      const ordered = [];
       for (const target of nodes) {
-        const button = document.createElement("button");
-        button.type = "button";
+        const key = promptKey(target);
+        const row = promptRows.get(key) || newPromptRow();
+        promptRows.set(key, row);
+        remaining.delete(key);
+        row.target = target;
+        const { element, button } = row;
+        const indent = (8 + Math.min(target.depth, 12) * 12) + "px";
+        element.style.setProperty("--prompt-indent", indent);
         button.textContent = target.label;
-        button.style.paddingInlineStart = (8 + Math.min(target.depth, 12) * 12) + "px";
-        button.setAttribute("aria-pressed", String(target === promptTarget));
+        if (target.task) {
+          const badge = document.createElement("span");
+          badge.className = "prompt-task-state";
+          badge.dataset.state = target.task.state;
+          badge.textContent = target.task.state === "running" ? "Working"
+            : target.task.state[0].toUpperCase() + target.task.state.slice(1).replaceAll("_", " ");
+          button.append(badge);
+        }
+        button.style.paddingInlineStart = indent;
         button.title = "Line " + target.line;
-        button.addEventListener("click", () => {
-          promptTarget = target;
-          promptTree.querySelector('[aria-pressed="true"]')?.setAttribute("aria-pressed", "false");
-          button.setAttribute("aria-pressed", "true");
-          updatePromptComposer();
-        });
-        button.addEventListener("dblclick", () => {
-          if (hasUnsavedEdits()) return;
-          const lines = savedContent.split("\n");
-          let start = 0;
-          for (let line = 1; line < target.line && line <= lines.length; line++) start += lines[line - 1].length + 1;
-          editor.focus();
-          editor.setSelectionRange(start, start + (lines[target.line - 1]?.length || 0));
-          editor.scrollTop = Math.max(0, (target.line - 3) * parseFloat(getComputedStyle(editor).lineHeight));
-        });
-        buttons.append(button);
+        ordered.push(element);
       }
-      promptTree.replaceChildren(buttons);
-      if (!nodes.length) promptTree.textContent = projection?.error || "No document structure available.";
+      for (const key of remaining) {
+        const row = promptRows.get(key);
+        if (promptForm.parentElement === row.element) documentPrompts.append(promptForm);
+        row.element.remove();
+        promptRows.delete(key);
+      }
+      if (!ordered.length) {
+        promptTree.textContent = projection?.error || "No document structure available.";
+      } else {
+        if (!promptTree.children.length) promptTree.textContent = "";
+        let next = promptTree.firstElementChild;
+        for (const element of ordered) {
+          if (element !== next) {
+            if (element.parentElement === promptTree && promptTree.moveBefore) {
+              promptTree.moveBefore(element, next);
+            } else {
+              promptTree.insertBefore(element, next);
+            }
+          }
+          next = element.nextElementSibling;
+        }
+      }
+      selectPromptTarget(selected);
       promptTree.scrollTop = scroll;
-      updatePromptComposer();
     }
 
     async function submitPrompt(event) {
       event.preventDefault();
       if (promptSubmit.disabled) return;
+      const draftState = promptDraftState(promptTarget);
       const draft = promptDraft.value;
       const revision = promptProjection.revision;
       const target = promptTarget.id;
@@ -440,7 +515,8 @@
       saving = true;
       ++loadEpoch;
       updateDirty();
-      promptStatus.textContent = "Submitting prompt…";
+      draftState.status = "Submitting prompt…";
+      promptStatus.textContent = draftState.status;
       try {
         const response = await fetch(path, {
           method: "POST",
@@ -458,15 +534,19 @@
         }
         acceptSavedText(result.content, currentRevision);
         refresh = true;
-        if (promptDraft.value === draft) promptDraft.value = "";
-        promptStatus.textContent = result.dispatch_error
+        if (draftState.text === draft) draftState.text = "";
+        draftState.status = result.dispatch_error
           ? "Prompt saved. Agent Doc could not start: " + result.dispatch_error
           : result.started ? "Prompt submitted. Agent Doc is starting."
           : "Prompt added to the running session.";
       } catch (error) {
-        promptStatus.textContent = "Submission could not be confirmed. " + error.message;
+        draftState.status = "Submission could not be confirmed. " + error.message;
       } finally {
         saving = false;
+        if (promptTarget && promptDraftState(promptTarget) === draftState) {
+          if (promptDraft.value !== draftState.text) promptDraft.value = draftState.text;
+          promptStatus.textContent = draftState.status;
+        }
         updateDirty();
         if (refresh) loadDoc();
       }
@@ -558,6 +638,9 @@
           setStatus("agent response stream error", "err");
         }
       });
+      events.addEventListener("prompt-activity", () => {
+        if (!saving) loadProjection();
+      });
       events.addEventListener("doc-error", (e) => {
         try {
           const payload = JSON.parse(e.data || "{}");
@@ -583,7 +666,10 @@
       documentPrompts.hidden = button.dataset.panel !== "document";
     });
     promptForm.addEventListener("submit", submitPrompt);
-    promptDraft.addEventListener("input", updatePromptComposer);
+    promptDraft.addEventListener("input", () => {
+      if (promptTarget) promptDraftState(promptTarget).text = promptDraft.value;
+      updatePromptComposer();
+    });
     promptDraft.addEventListener("keydown", (event) => {
       if ((event.ctrlKey || event.metaKey) && event.key === "Enter" && !promptSubmit.disabled) {
         event.preventDefault();

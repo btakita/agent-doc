@@ -732,7 +732,9 @@ fn artifact_row_identity(payload: &str) -> String {
     let mut work = payload.trim().to_string();
     loop {
         let next = {
-            let unstruck = unwrap_strike(work.trim());
+            // The auto-struck note sits outside `~~`, so the line does not end
+            // with the wrapper. A full-string unwrap misses that row.
+            let unstruck = agent_doc_element_queue::subprompts::unwrap_struck_parent(work.trim());
             let headed = strip_navigation_heading(unstruck).trim();
             let checked = strip_checkbox(headed).trim();
             let projected = agent_doc_element_queue::struck_work_text(checked).trim();
@@ -752,18 +754,11 @@ fn artifact_row_identity(payload: &str) -> String {
     }
     let without_id =
         agent_doc_element_queue::strip_generated_queue_prompt_id_annotation(work.trim());
-    let bare = unwrap_strike(without_id.trim());
+    let bare = agent_doc_element_queue::subprompts::unwrap_struck_parent(without_id.trim());
     let headed = strip_navigation_heading(bare).trim();
     let checked = strip_checkbox(headed).trim();
     let identity = agent_doc_element_queue::strip_intent_tags(checked);
     normalize_artifact_label(&identity)
-}
-
-fn unwrap_strike(text: &str) -> &str {
-    text.strip_prefix("~~")
-        .and_then(|inner| inner.strip_suffix("~~"))
-        .map(str::trim)
-        .unwrap_or(text)
 }
 
 fn normalize_artifact_label(label: &str) -> String {
@@ -1365,6 +1360,44 @@ mod tests {
         unbind_artifacts_on_disk(&session, std::slice::from_ref(&artifact)).unwrap();
         let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
         assert_eq!(queue, "- [ ] keep this other work\n", "{queue}");
+    }
+
+    #[test]
+    fn bind_and_unbind_match_an_auto_struck_artifact_row() {
+        let dir = tempfile::tempdir().unwrap();
+        let session = dir.path().join("session.md");
+        let artifact = dir.path().join("plans").join("one.md");
+        write_new_session(
+            &session,
+            Some("Control"),
+            Some("claude"),
+            None,
+            std::slice::from_ref(&artifact),
+            &Config::default(),
+        )
+        .unwrap();
+        let label = artifact.display().to_string();
+        let mut text = std::fs::read_to_string(&session).unwrap();
+        let plain = format!("- [ ] {label}\n");
+        let struck = format!(
+            "- ### ~~{label} [#q-e9d00e286b6c]~~ — auto-struck: answered this cycle (#ftstrike)\n- [ ] keep this other work\n"
+        );
+        assert!(text.contains(&plain), "{text}");
+        text = text.replacen(&plain, &struck, 1);
+        std::fs::write(&session, &text).unwrap();
+
+        bind_artifacts_on_disk(&session, std::slice::from_ref(&artifact)).unwrap();
+        let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
+        assert_eq!(
+            queue.matches(&label).count(),
+            1,
+            "already bound after auto-strike: {queue}"
+        );
+
+        unbind_artifacts_on_disk(&session, std::slice::from_ref(&artifact)).unwrap();
+        let queue = queue_body(&std::fs::read_to_string(&session).unwrap());
+        assert_eq!(queue, "- [ ] keep this other work\n", "{queue}");
+        assert!(artifact.exists());
     }
 
     #[test]

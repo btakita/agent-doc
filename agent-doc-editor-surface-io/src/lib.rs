@@ -30,6 +30,8 @@ pub use agent_doc_tmux_io::editor_view as editor_view_tmux;
 
 pub use agent_doc_editor_surface::SurfaceObservationReceipt;
 
+mod document_prompts;
+
 /// Compatibility consequence for a locally derived intent.
 pub type IntentRunner = Arc<dyn Fn(&Path, &SurfaceIntent) -> Result<String> + Send + Sync>;
 
@@ -307,6 +309,7 @@ pub const EDITOR_DERIVATIONS: &[&str] = &[
     "exchange_prefix_repair",
     "session_command_outcome",
     "editor_group_layout",
+    "document_prompts",
 ];
 
 #[derive(serde::Deserialize)]
@@ -448,6 +451,10 @@ pub fn derive_editor_from_json(request_json: &str) -> Result<serde_json::Value> 
             let evidence: agent_doc_editor_surface::GroupLayoutEvidence =
                 serde_json::from_value(input).context("parse editor group layout evidence")?;
             serde_json::to_value(agent_doc_editor_surface::resolve_group_layout(&evidence))?
+        }
+        "document_prompts" => {
+            let evidence = serde_json::from_value(input).context("parse document prompt evidence")?;
+            document_prompts::derive(evidence)
         }
         other => anyhow::bail!(
             "unknown editor derivation `{other}`; this library answers {}",

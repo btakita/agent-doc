@@ -13,6 +13,8 @@ import com.intellij.openapi.fileChooser.FileChooser
 import com.intellij.openapi.fileChooser.FileChooserDescriptor
 import com.intellij.openapi.fileEditor.FileDocumentManager
 import com.intellij.openapi.fileEditor.FileEditorManager
+import com.intellij.openapi.fileEditor.FileEditorManagerEvent
+import com.intellij.openapi.fileEditor.FileEditorManagerListener
 import com.intellij.openapi.fileEditor.OpenFileDescriptor
 import com.intellij.openapi.project.Project
 import com.intellij.openapi.ui.ComboBox
@@ -30,6 +32,7 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
+import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.content.ContentFactory
@@ -46,6 +49,7 @@ import java.nio.file.Path
 import java.security.MessageDigest
 import java.util.UUID
 import java.util.concurrent.Future
+import java.util.concurrent.TimeUnit
 import javax.swing.BoxLayout
 import javax.swing.DefaultListModel
 import javax.swing.JButton
@@ -91,8 +95,9 @@ private data class SourceSelection(
     val fingerprint: SourceFingerprint,
     val related: List<RepoContextLocation>,
 )
-private data class SubmittedQuestion(val id: String, val session: VirtualFile)
+private data class SubmittedQuestion(val id: String, val session: VirtualFile, val queued: Boolean = false)
 private data class CurrentAnswer(val response: RepoContextAnswer, val stamp: Long)
+private data class CurrentOutline(val session: VirtualFile, val stamp: Long, val outline: RepoContextDocumentOutline)
 
 internal open class RepoContextTypography(layout: LayoutManager) : JPanel(layout) {
     private var textComponents: List<JComponent>? = null
@@ -135,7 +140,7 @@ internal class RepoContextQuestionComposer(onSubmit: () -> Unit) : JPanel(Border
         lineWrap = true
         wrapStyleWord = true
         margin = JBUI.insets(4, 6)
-        emptyText.text = "Draft a question about a source."
+        emptyText.text = "Draft a question."
     }
     val label = JBLabel("Question").apply { labelFor = editor }
     val submit = JButton("Ask about selection").apply {
@@ -163,7 +168,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val query = JBTextField()
     private val search = JButton("Search")
     private val cancel = JButton("Cancel")
-    private val status = JBLabel("Search code symbols or Markdown headings.")
+    private val status = JBLabel()
     private val resultsModel = DefaultListModel<RepoContextLocation>()
     private val results = JBList(resultsModel)
     private val relatedModel = DefaultListModel<RepoContextLocation>()
@@ -174,6 +179,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val openRelated = JButton("Open related source")
     private val chooseSession = JButton("Choose session")
     private val sessionLabel = JBLabel("No session selected.")
+    private val tabs = JBTabbedPane()
+    private val documentTree = RepoContextDocumentTree(::updateControls, ::openDocumentTarget)
+    private val documentPrompts = RepoContextDocumentPrompts()
     private val question = RepoContextQuestionComposer(::submitQuestion)
     private val answer = JBTextArea(7, 20).apply {
         isEditable = false
@@ -189,9 +197,14 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private var selection: SourceSelection? = null
     private var session: VirtualFile? = FileEditorManager.getInstance(project).selectedFiles
         .firstOrNull(AgentDocSessionFiles::isSessionDocument)
+    private var pinnedSession = false
+    private var currentOutline: CurrentOutline? = null
+    private var outlineWork: Future<*>? = null
+    private var outlineRevision = 0L
     private var request: SubmittedQuestion? = null
     private var matchingAnswer: CurrentAnswer? = null
     private var background: Future<*>? = null
+    private var submitting = false
     private var relatedWork: Future<*>? = null
     private var taskRevision = 0L
     private var answerWork: Future<*>? = null
@@ -211,41 +224,50 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         results.cellRenderer = RepoContextLocationRenderer()
         related.selectionMode = ListSelectionModel.SINGLE_SELECTION
         related.cellRenderer = RepoContextLocationRenderer()
-        add(JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
-            add(mode, BorderLayout.WEST)
-            add(query, BorderLayout.CENTER)
-            add(buttonRow(search, cancel), BorderLayout.EAST)
-        }, BorderLayout.NORTH)
-        add(JBSplitter(true, 0.35f).apply {
-            firstComponent = JBScrollPane(results)
-            secondComponent = JPanel(BorderLayout(0, JBUI.scale(5))).apply {
-                add(JPanel().apply {
-                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                    add(sourceLabel)
-                    add(buttonRow(openSource, openRelated))
-                    add(relatedStatus)
-                }, BorderLayout.NORTH)
-                add(JBScrollPane(related), BorderLayout.CENTER)
-                add(JPanel().apply {
-                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                    add(buttonRow(chooseSession, sessionLabel))
-                    add(question)
-                    add(answerLabel)
-                    add(JBScrollPane(answer))
-                    add(buttonRow(openAnswer))
-                }, BorderLayout.SOUTH)
+        add(buttonRow(chooseSession, sessionLabel), BorderLayout.NORTH)
+        tabs.addTab("Document", documentTree)
+        tabs.addTab("Repository", JPanel(BorderLayout(0, JBUI.scale(5))).apply {
+            add(JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
+                add(mode, BorderLayout.WEST)
+                add(query, BorderLayout.CENTER)
+                add(buttonRow(search, cancel), BorderLayout.EAST)
+            }, BorderLayout.NORTH)
+            add(JBSplitter(true, 0.45f).apply {
+                firstComponent = JBScrollPane(results)
+                secondComponent = JPanel(BorderLayout(0, JBUI.scale(5))).apply {
+                    add(JPanel().apply {
+                        layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                        add(sourceLabel)
+                        add(buttonRow(openSource, openRelated))
+                        add(relatedStatus)
+                    }, BorderLayout.NORTH)
+                    add(JBScrollPane(related), BorderLayout.CENTER)
+                }
+            }, BorderLayout.CENTER)
+        })
+        tabs.addChangeListener {
+            if (tabs.selectedComponent == documentTree && background != null && !submitting) {
+                cancelTask()
+                status.text = ""
             }
-        }, BorderLayout.CENTER)
-        add(status, BorderLayout.SOUTH)
+            updateControls()
+        }
+        add(tabs, BorderLayout.CENTER)
+        add(JPanel().apply {
+            layout = BoxLayout(this, BoxLayout.Y_AXIS)
+            add(question)
+            add(answerLabel)
+            add(JBScrollPane(answer))
+            add(buttonRow(openAnswer))
+            add(status)
+        }, BorderLayout.SOUTH)
         useCompactFont(
             mode, query, search, cancel, status, results, related, sourceLabel, relatedStatus, openSource, openRelated,
             chooseSession, sessionLabel, question.label, question.editor, question.submit, answerLabel, answer, openAnswer,
         )
         search.addActionListener { search() }
         cancel.addActionListener {
-            taskRevision++
-            background?.cancel(true)
-            background = null
+            cancelTask()
             status.text = "Cancelled."
             updateControls()
         }
@@ -261,6 +283,12 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openSource.addActionListener { selection?.anchor?.let(::open) }
         openRelated.addActionListener { related.selectedValue?.let(::open) }
         chooseSession.addActionListener { chooseSession() }
+        GenerationListeners.subscribe(project, FileEditorManagerListener.FILE_EDITOR_MANAGER, object : FileEditorManagerListener {
+            override fun selectionChanged(event: FileEditorManagerEvent) {
+                val file = event.newFile ?: return
+                if (!pinnedSession && AgentDocSessionFiles.isSessionDocument(file)) setSession(file)
+            }
+        }, this)
         openAnswer.addActionListener {
             val submitted = request ?: return@addActionListener
             val response = matchingAnswer ?: return@addActionListener
@@ -270,13 +298,17 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         }
         GenerationListeners.addDocumentListener(object : DocumentListener {
             override fun documentChanged(event: DocumentEvent) {
-                val submitted = request ?: return
-                if (FileDocumentManager.getInstance().getFile(event.document) == submitted.session) {
-                    refreshAnswer(event.document, submitted)
+                val document = event.document
+                GenerationWork.invokeLater {
+                    if (disposed) return@invokeLater
+                    val file = FileDocumentManager.getInstance().getFile(document)
+                    if (file != null && file == session) refreshOutline(document)
+                    val submitted = request
+                    if (submitted != null && file == submitted.session) refreshAnswer(document, submitted)
                 }
             }
         }, this)
-        updateControls()
+        refreshOutline()
     }
 
     private fun buttonRow(vararg components: java.awt.Component) = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0))
@@ -292,20 +324,37 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openSource.isEnabled = idle && selection != null
         openRelated.isEnabled = idle && related.selectedValue != null
         chooseSession.isEnabled = idle
-        question.submit.isEnabled = idle && selection != null
+        val target = documentTree.selection
+        if (tabs.selectedComponent == documentTree) {
+            question.submit.text = target?.action?.button ?: "Ask agent"
+            question.submit.isEnabled = idle && currentOutline != null &&
+                target != null && target.action != DocumentPromptAction.NAVIGATE
+        } else {
+            question.submit.text = "Ask about source"
+            question.submit.isEnabled = idle && selection != null
+        }
         openAnswer.isEnabled = matchingAnswer != null
         sessionLabel.text = session?.name ?: "No session selected."
     }
 
-    private fun <T> runTask(loading: String, task: () -> T, success: (T) -> Unit) {
+    private fun cancelTask() {
+        taskRevision++
+        background?.cancel(true)
+        background = null
+        submitting = false
+    }
+
+    private fun <T> runTask(loading: String, task: () -> T, submission: Boolean = false, success: (T) -> Unit) {
         if (background != null || disposed) return
         status.text = loading
         val revision = ++taskRevision
+        submitting = submission
         background = GenerationWork.executeOnPooledThread {
             val outcome = runCatching(task)
             GenerationWork.invokeLater {
                 if (disposed || project.isDisposed || taskRevision != revision) return@invokeLater
                 background = null
+                submitting = false
                 outcome.fold(
                     { value -> runCatching { success(value) }.onFailure { status.text = it.message ?: "Explorer failed." } },
                     { error -> status.text = error.message ?: "Explorer failed." },
@@ -441,21 +490,99 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             withFileFilter { it.isDirectory || AgentDocSessionFiles.isSessionDocument(it) }
         }
         val file = FileChooser.chooseFile(descriptor, project, session) ?: return null
-        session = file
-        updateControls()
+        if (!AgentDocSessionFiles.isSessionDocument(file)) return null
+        pinnedSession = true
+        setSession(file)
         return file
+    }
+
+    private fun setSession(file: VirtualFile) {
+        if (session == file) return
+        session = file
+        documentTree.clear("Reading the session document…")
+        refreshOutline()
+    }
+
+    private fun refreshOutline(document: Document? = session?.let(FileDocumentManager.getInstance()::getDocument)) {
+        currentOutline = null
+        outlineWork?.cancel(false)
+        val revision = ++outlineRevision
+        val file = session
+        if (file == null || document == null) {
+            documentTree.clear("Choose an Agent Doc session.")
+            updateControls()
+            return
+        }
+        val snapshot = document.immutableCharSequence
+        val stamp = document.modificationStamp
+        outlineWork = GenerationWork.schedule({
+            val projection = runCatching { documentPrompts.outline(snapshot.toString()) }
+            GenerationWork.invokeLater {
+                if (disposed || project.isDisposed || outlineRevision != revision ||
+                    session != file || document.modificationStamp != stamp) return@invokeLater
+                projection.onSuccess { outline ->
+                    currentOutline = CurrentOutline(file, stamp, outline)
+                    documentTree.show(outline)
+                }.onFailure { error ->
+                    documentTree.clear(error.message ?: "Could not read this session document.")
+                }
+                updateControls()
+            }
+        }, 125, TimeUnit.MILLISECONDS)
+        updateControls()
+    }
+
+    private fun openDocumentTarget(target: DocumentPromptTarget) {
+        val projection = currentOutline ?: return
+        val document = FileDocumentManager.getInstance().getDocument(projection.session) ?: return
+        if (document.modificationStamp != projection.stamp) return
+        OpenFileDescriptor(project, projection.session, target.line - 1, 0).navigate(true)
     }
 
     private fun submitQuestion() {
         if (background != null || disposed) return
-        val selected = selection ?: return
-        val repo = root ?: return
         val draft = question.editor.text
         val text = draft.trim()
         if (text.isEmpty() || text.length > 1_500) {
             status.text = "Enter a question between 1 and 1500 characters."
             return
         }
+        if (tabs.selectedComponent == documentTree) {
+            submitDocumentQuestion(draft)
+        } else {
+            submitSourceQuestion(draft, text)
+        }
+    }
+
+    private fun submitDocumentQuestion(draft: String) {
+        val target = documentTree.selection ?: return
+        val projection = currentOutline ?: return
+        val file = projection.session
+        val document = FileDocumentManager.getInstance().getDocument(file) ?: return
+        if (document.modificationStamp != projection.stamp) {
+            status.text = "The session changed. Select the target and try again."
+            refreshOutline(document)
+            return
+        }
+        val snapshot = document.immutableCharSequence
+        val submitted = SubmittedQuestion(
+            UUID.randomUUID().toString().replace("-", ""), file, target.action != DocumentPromptAction.EXCHANGE,
+        )
+        runTask("Preparing the prompt…", {
+            documentPrompts.edit(snapshot.toString(), projection.outline.revision, target.id, draft, submitted.id)
+        }, submission = true) { edit ->
+            check(session == file && documentTree.selection?.id == target.id) {
+                "The prompt target changed. Select it and try again."
+            }
+            check(edit.action == target.action) { "The prompt action changed. Select it and try again." }
+            WriteCommandAction.runWriteCommandAction(project, Runnable { edit.applyTo(document, projection.stamp) })
+            sendQuestion(submitted, draft)
+        }
+    }
+
+    private fun submitSourceQuestion(draft: String, text: String) {
+        val selected = selection ?: return
+        val repo = root ?: return
         val selectedSession = session ?: chooseSession() ?: return
         runTask("Checking the selected revision…", {
             check(checkedFile(repo, selectedSession.path).toString() == selectedSession.path) {
@@ -465,12 +592,12 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             check(fingerprint(file, selected.source) == selected.fingerprint) {
                 "The selected source changed. Search again before asking."
             }
-        }) {
+        }, submission = true) {
             val documents = FileDocumentManager.getInstance()
             check(!isUnsaved(selected.source)) { "Save the source and search again before asking." }
             val doc = documents.getDocument(selectedSession) ?: error("The session cannot be opened.")
-            check(AgentDocSessionFiles.isSessionDocument(selectedSession) && !documents.isDocumentUnsaved(doc)) {
-                "Choose a saved Agent Doc session in this repository."
+            check(AgentDocSessionFiles.isSessionDocument(selectedSession)) {
+                "Choose an Agent Doc session in this repository."
             }
             val snapshot = doc.text
             val exchange = exchange(snapshot) ?: error("The session does not have one native exchange component.")
@@ -480,15 +607,17 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 check(doc.text == snapshot) { "The session changed. Try again." }
                 doc.insertString(exchange.closeStart, RepoContextModel.insertion(snapshot, exchange, prompt))
             })
-            documents.saveDocument(doc)
-            check(!documents.isDocumentUnsaved(doc)) { "The question could not be saved. Run it from the editor after saving." }
-            request = submitted
-            matchingAnswer = null
-            answer.text = "Question saved. Waiting for the matching answer."
-            question.clearSubmittedDraft(draft)
-            status.text = "Question saved. Running Agent Doc for ${selectedSession.name}."
-            SubmitAction().submit(project, selectedSession)
+            sendQuestion(submitted, draft)
         }
+    }
+
+    private fun sendQuestion(submitted: SubmittedQuestion, draft: String) {
+        request = submitted
+        matchingAnswer = null
+        answer.text = if (submitted.queued) "Waiting for the queue to run this prompt." else "Waiting for the matching answer."
+        question.clearSubmittedDraft(draft)
+        status.text = if (submitted.queued) "Prompt added to the queue." else "Question added to ${submitted.session.name}."
+        SubmitAction().submit(project, submitted.session)
     }
 
     private fun refreshAnswer(doc: Document, submitted: SubmittedQuestion) {
@@ -496,7 +625,10 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         val revision = doc.modificationStamp
         answerWork?.cancel(false)
         answerWork = GenerationWork.executeOnPooledThread {
-            val response = exchange(snapshot)?.let { RepoContextModel.answer(snapshot, it, submitted.id) }
+            val response = exchange(snapshot)?.let {
+                RepoContextModel.answer(snapshot, it, submitted.id)
+                    ?: if (submitted.queued) documentPrompts.workerAnswer(snapshot, submitted.id) else null
+            }
             GenerationWork.invokeLater {
                 if (disposed || project.isDisposed || request != submitted || doc.modificationStamp != revision) {
                     return@invokeLater
@@ -562,6 +694,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         background?.cancel(true)
         relatedWork?.cancel(true)
         answerWork?.cancel(false)
+        outlineWork?.cancel(false)
     }
 
     companion object {

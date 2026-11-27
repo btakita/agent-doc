@@ -897,9 +897,15 @@ name = "agent-doc-editor-surface-io"
 version = "0.35.594"
 dependencies = [
  "agent-doc-controller-io",
+ "agent-doc-document",
  "agent-doc-editor-surface",
+ "agent-doc-element",
+ "agent-doc-element-queue",
  "agent-doc-fs",
+ "agent-doc-hash",
+ "agent-doc-markdown-ast",
  "agent-doc-merge",
+ "agent-doc-queue",
  "agent-doc-state-scope",
  "agent-doc-tmux-io",
  "anyhow",

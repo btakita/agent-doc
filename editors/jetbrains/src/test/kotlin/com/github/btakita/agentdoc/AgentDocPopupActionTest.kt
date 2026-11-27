@@ -24,6 +24,7 @@ class AgentDocPopupActionTest {
                 "AgentDoc.RestartSupervisorProcess",
                 "AgentDoc.RestartAgent",
                 "AgentDoc.ClearSessionContext",
+                "AgentDoc.ClaimArtifact",
                 "AgentDoc.LintDocument",
                 "AgentDoc.CancelTurn",
                 "AgentDoc.CopySessionDiagnostics",
@@ -36,7 +37,9 @@ class AgentDocPopupActionTest {
             AgentDocPopupAction.PRIMARY_ACTION_IDS,
         )
         assertEquals("AgentDoc.ClearSessionContext", AgentDocPopupAction.PRIMARY_ACTION_IDS[8])
+        assertEquals("AgentDoc.ClaimArtifact", AgentDocPopupAction.PRIMARY_ACTION_IDS[9])
         assertEquals(1, AgentDocPopupAction.PRIMARY_ACTION_IDS.count { it == "AgentDoc.ClearSessionContext" })
+        assertFalse(AgentDocPopupAction.OVERFLOW_ACTION_IDS.contains("AgentDoc.ClaimArtifact"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.InterruptClearSessionContext"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.RunWithJunie"))
         assertFalse(AgentDocPopupAction.PRIMARY_ACTION_IDS.contains("AgentDoc.ForceClaim"))
@@ -51,10 +54,9 @@ class AgentDocPopupActionTest {
                 "AgentDoc.UpdateChannel",
                 "AgentDoc.RunWithJunie",
                 "AgentDoc.ForceClaim",
-                "AgentDoc.ClaimArtifact",
                 "AgentDoc.InterruptClearSessionContext",
                 // #plugin-cleanup-menu-command: operator session-hygiene commands
-                // live in the overflow group (occasional, project-scoped cleanup).
+                // stay on the same popup, after the numbered block.
                 "AgentDoc.ResyncFixSessions",
                 "AgentDoc.GcStaleSessions",
                 "AgentDoc.StopAgent",
@@ -67,6 +69,14 @@ class AgentDocPopupActionTest {
 
     private class StubAction(val id: String) : AnAction() {
         override fun actionPerformed(e: AnActionEvent) = Unit
+    }
+
+    @Test
+    fun `alt space popup lists every action on the first screen`() {
+        val source = File("src/main/kotlin/com/github/btakita/agentdoc/AgentDocPopupAction.kt").readText()
+        assertFalse("the Alt+Space popup must not nest a More Actions menu", source.contains("More Actions"))
+        assertTrue(source.contains("resolve(PRIMARY_ACTION_IDS)"))
+        assertTrue(source.contains("resolve(OVERFLOW_ACTION_IDS)"))
     }
 
     @Test

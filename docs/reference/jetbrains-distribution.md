@@ -63,7 +63,7 @@ classic one.
 Builds below 242 or above `263.*` are offered nothing.
 
 The plugin also exposes **Tools → Enable Agent Doc GitHub Updates** (and the
-same command under **Agent Doc Actions → More Actions**). Like IdeaVim's EAP
+same command on the **Agent Doc Actions** popup). Like IdeaVim's EAP
 toggle, it adds the compatibility-matched repository URL to JetBrains'
 `storedPluginHosts`; running it again removes the Agent Doc URL without touching
 other custom repositories. In a modular Remote Dev installation the action is

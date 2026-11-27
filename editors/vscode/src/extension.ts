@@ -67,7 +67,6 @@ import {
     type SessionOutcomeCommand,
 } from './sessionCommandOutcome.js';
 import {
-    buildOverflowPopupMenuItems,
     buildPrimaryPopupMenuItems,
 } from './popupMenu.js';
 import { DASHBOARD_COMMAND_ARGS, dashboardPath } from './dashboard.js';
@@ -2760,6 +2759,9 @@ async function popupMenuAction(): Promise<void> {
         case 'claim':
             await claimAction();
             break;
+        case 'claimArtifact':
+            await claimArtifactAction();
+            break;
         case 'fixDocument':
             await fixDocumentAction();
             break;
@@ -2796,46 +2798,30 @@ async function popupMenuAction(): Promise<void> {
         case 'treeStatus':
             await treeStatusAction();
             break;
-        case 'more': {
-            const overflow = await vscode.window.showQuickPick(buildOverflowPopupMenuItems(), {
-                title: 'Agent Doc More Actions',
-                placeHolder: 'Select action',
-            });
-            if (!overflow) return;
-            switch (overflow.id) {
-                case 'runWithJunie':
-                    await runWithJunieAction();
-                    break;
-                case 'startAgentDoc':
-                    await startAgentDocAction();
-                    break;
-                case 'forceClaim':
-                    await forceClaimAction();
-                    break;
-                case 'claimArtifact':
-                    await claimArtifactAction();
-                    break;
-                case 'stopAgent':
-                    await stopAgentAction();
-                    break;
-                case 'cancelTurn':
-                    await cancelTurnAction();
-                    break;
-                case 'killSupervisor':
-                    await killSupervisorAction();
-                    break;
-                case 'resyncFixSessions':
-                    await resyncFixSessionsAction();
-                    break;
-                case 'gcStaleSessions':
-                    await gcStaleSessionsAction();
-                    break;
-                case 'about':
-                    await aboutAction();
-                    break;
-            }
+        case 'runWithJunie':
+            await runWithJunieAction();
             break;
-        }
+        case 'forceClaim':
+            await forceClaimAction();
+            break;
+        case 'stopAgent':
+            await stopAgentAction();
+            break;
+        case 'cancelTurn':
+            await cancelTurnAction();
+            break;
+        case 'killSupervisor':
+            await killSupervisorAction();
+            break;
+        case 'resyncFixSessions':
+            await resyncFixSessionsAction();
+            break;
+        case 'gcStaleSessions':
+            await gcStaleSessionsAction();
+            break;
+        case 'about':
+            await aboutAction();
+            break;
     }
 }
 

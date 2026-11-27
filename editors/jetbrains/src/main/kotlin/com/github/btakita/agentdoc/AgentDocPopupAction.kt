@@ -34,6 +34,9 @@ class AgentDocPopupAction : ImplAction {
             // Keep the routine, non-interrupting context reset on the first
             // numbered page. Position nine is the last single-key selection.
             "AgentDoc.ClearSessionContext",
+            // Claim Artifact Session stays on this same Alt+Space popup, just
+            // after Clear, so it does not take Clear's single key.
+            "AgentDoc.ClaimArtifact",
             "AgentDoc.LintDocument",
             "AgentDoc.CancelTurn",
             "AgentDoc.CopySessionDiagnostics",
@@ -54,8 +57,8 @@ class AgentDocPopupAction : ImplAction {
             "AgentDoc.UpdateChannel",
             "AgentDoc.RunWithJunie",
             "AgentDoc.ForceClaim",
-            "AgentDoc.ClaimArtifact",
-            // The explicit interrupting clear remains behind More Actions.
+            // The explicit interrupting clear stays on this popup, after the
+            // numbered block, not in a nested menu.
             "AgentDoc.InterruptClearSessionContext",
             "AgentDoc.ResyncFixSessions",
             "AgentDoc.GcStaleSessions",
@@ -110,12 +113,11 @@ class AgentDocPopupAction : ImplAction {
 
         val group = DumbAwareGroup().apply {
             resolve(PRIMARY_ACTION_IDS).forEach { add(it) }
-            addSeparator()
-            add(
-                DumbAwareGroup("More Actions", true).apply {
-                    resolve(OVERFLOW_ACTION_IDS).forEach { add(it) }
-                }
-            )
+            val overflow = resolve(OVERFLOW_ACTION_IDS)
+            if (overflow.isNotEmpty()) {
+                addSeparator()
+                overflow.forEach { add(it) }
+            }
         }
 
         val popup = JBPopupFactory.getInstance()

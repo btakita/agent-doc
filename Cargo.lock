@@ -750,6 +750,7 @@ version = "0.35.594"
 dependencies = [
  "agent-doc-debounce",
  "agent-doc-diff",
+ "agent-doc-document",
  "agent-doc-fs",
  "agent-doc-hash",
  "anyhow",

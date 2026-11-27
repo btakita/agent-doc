@@ -321,6 +321,35 @@ mod tests {
     }
 
     #[test]
+    fn a_nested_queue_response_with_prompt_echo_keeps_the_patchback_guard_on_real_responses() {
+        let snapshot = session_doc("### Re: earlier — gpt-5\n\nDone.\n");
+        let record = agent_doc_document::queue_response_record::record(
+            "#review",
+            "[#r-0123456789ab]",
+            &["- **Summary:** Reviewed the change.".to_string()],
+        )
+        .unwrap();
+        let (heading, digest_and_body) = record.split_once('\n').unwrap();
+        let current = session_doc(&format!(
+            "### Re: earlier — gpt-5\n\nDone.\n\n{heading}\n\n> **Queue prompt:**\n>\n> Verify the feature: #review\n\n{digest_and_body}\n"
+        ));
+        assert_eq!(
+            detect_bypassed_response_write_between(&snapshot, &current),
+            None
+        );
+
+        let bypass = "### Re: A manual answer — gpt-5";
+        let mixed = current.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{bypass}\n\nA direct response.\n<!-- /agent:exchange -->"),
+        );
+        assert_eq!(
+            detect_bypassed_response_write_between(&snapshot, &mixed).as_deref(),
+            Some(bypass)
+        );
+    }
+
+    #[test]
     fn bypassed_response_write_ignores_non_response_local_drift() {
         let snapshot = concat!(
             "---\nagent_doc_session: test\nagent_doc_format: template\n---\n\n",

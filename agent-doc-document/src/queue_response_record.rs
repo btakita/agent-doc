@@ -65,15 +65,15 @@ pub fn record(item: &str, response_id: &str, body_lines: &[String]) -> Option<St
     ))
 }
 
-fn is_record_heading(line: &str) -> bool {
+fn record_heading_topic(line: &str) -> Option<&str> {
     let line = line.trim();
     let line = line.strip_suffix(" (HEAD)").unwrap_or(line);
     let (base, id) = crate::subagent_completion::split_heading_response_id(line);
-    id.is_some()
-        && base
-            .strip_prefix(HEADING_PREFIX)
-            .and_then(|rest| rest.strip_suffix(HEADING_ATTRIBUTION_SUFFIX))
-            .is_some_and(|topic| !topic.trim().is_empty())
+    id?;
+    let topic = base
+        .strip_prefix(HEADING_PREFIX)?
+        .strip_suffix(HEADING_ATTRIBUTION_SUFFIX)?;
+    (!topic.trim().is_empty()).then_some(topic)
 }
 
 fn digest(line: &str) -> Option<&str> {
@@ -88,22 +88,42 @@ fn digest(line: &str) -> Option<&str> {
         })
 }
 
-/// Line ranges (0-based, over `text.lines()`) of every attested record:
-/// heading, digest, and the quoted body that hashes to the digest.
+fn record_digest<'a>(lines: &[&'a str], next: usize, topic: &str) -> Option<(usize, &'a str)> {
+    if let Some(expected) = digest(lines.get(next)?) {
+        return Some((next, expected));
+    }
+    let item = topic.strip_prefix('“')?.strip_suffix('”')?;
+    let (index, prompt) =
+        crate::subagent_completion::queue_prompt_echo_before_digest(lines, next, |line| {
+            digest(line).is_some()
+        })?;
+    // The record heading names the response's leaf. The generated echo
+    // qualifies a nested leaf with its parent lineage.
+    (prompt == item
+        || prompt
+            .strip_suffix(item)
+            .and_then(|prefix| prefix.strip_suffix(": "))
+            .is_some_and(|parent| !parent.trim().is_empty()))
+    .then_some((index, digest(lines[index])?))
+}
+
+/// Line ranges (0-based, over `text.lines()`) of every attested record.
+/// A canonical prompt echo may appear between the heading and the digest.
+/// The quoted response below the digest must still hash to it.
 pub fn record_line_ranges(text: &str) -> Vec<Range<usize>> {
     let lines: Vec<&str> = text.lines().collect();
     let mut ranges = Vec::new();
     let mut index = 0;
     while index < lines.len() {
-        if !is_record_heading(lines[index]) {
-            index += 1;
-            continue;
-        }
-        let Some(expected) = lines.get(index + 1).copied().and_then(digest) else {
+        let Some(topic) = record_heading_topic(lines[index]) else {
             index += 1;
             continue;
         };
-        let body_start = index + 2;
+        let Some((digest_index, expected)) = record_digest(&lines, index + 1, topic) else {
+            index += 1;
+            continue;
+        };
+        let body_start = digest_index + 1;
         let body_end = body_start
             + lines[body_start..]
                 .iter()
@@ -130,6 +150,18 @@ pub fn record_heading_lines(text: &str) -> Vec<usize> {
         .into_iter()
         .map(|range| range.start)
         .collect()
+}
+
+/// Comparison projection without binary-attested queue records or completion
+/// cells. Callers still retain the original document for persistence and for
+/// delivery evidence.
+pub fn strip_attested_queue_feedback(text: &str) -> String {
+    let mut ranges = record_line_ranges(text);
+    ranges.extend(crate::subagent_completion::completion_cell_line_ranges(
+        text,
+    ));
+    ranges.sort_unstable_by_key(|range| range.start);
+    crate::subagent_completion::strip_attested_line_ranges(text, ranges)
 }
 
 #[cfg(test)]
@@ -170,6 +202,27 @@ mod tests {
         let forged =
             "### Re: Queue response: “x” — agent-doc [#r-0123456789ab]\n> - **Summary:** hi\n";
         assert!(record_line_ranges(forged).is_empty());
+    }
+
+    #[test]
+    fn attested_record_accepts_its_canonical_nested_prompt_echo() {
+        let record = record("#review", ID, &body()).unwrap();
+        let (heading, attestation) = record.split_once('\n').unwrap();
+        let prompt_echo = "> **Queue prompt:**\n>\n> Review the change: #review";
+        let decorated = format!("{heading}\n\n{prompt_echo}\n\n{attestation}");
+        let text = format!("Before.\n\n{decorated}\n\nAfter.\n");
+        assert_eq!(record_heading_lines(&text), vec![2]);
+        assert_eq!(strip_attested_queue_feedback(&text), "Before.\n\nAfter.\n");
+
+        for edited in [
+            decorated.replace("#review\n\n", "#unrelated\n\n"),
+            decorated.replace(prompt_echo, "> Some arbitrary prose"),
+            decorated.replace(prompt_echo, &format!("{prompt_echo}\n\nNew prompt.")),
+            decorated.replace("Applied", "Reverted"),
+        ] {
+            assert!(record_line_ranges(&edited).is_empty(), "{edited}");
+            assert_eq!(strip_attested_queue_feedback(&edited), edited);
+        }
     }
 
     #[test]

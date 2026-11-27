@@ -95,8 +95,8 @@ pub fn proven_external_done_archive_drains<S: DocumentBaselineStore + ?Sized>(
 /// Compute a unified diff between the snapshot and the current document, and
 /// return the exact snapshot/current content used to compute it.
 ///
-/// Both snapshot and current content are comment-stripped and informational
-/// component bodies are neutralized before comparison.
+/// Both snapshot and current content are comment-stripped, with binary-attested
+/// queue feedback and informational component bodies normalized before comparison.
 pub fn compute_with_current<S: DocumentBaselineStore + ?Sized>(
     snapshots: &S,
     doc: &Path,
@@ -133,9 +133,14 @@ pub fn compute_with_current<S: DocumentBaselineStore + ?Sized>(
 
     let proven_archive_drains =
         proven_external_done_archive_drains(snapshots, doc, &previous, &current);
+    // Validate before comment stripping removes the digests. Keep the
+    // authoritative cuts in the result for capture and persistence.
+    let strip = agent_doc_document::queue_response_record::strip_attested_queue_feedback;
+    let previous_for_diff = strip(&previous);
+    let current_for_diff = strip(&current);
     let Some(output) = unified_diff_from_contents_with_proven_external_done_archive_drains(
-        &previous,
-        &current,
+        &previous_for_diff,
+        &current_for_diff,
         &proven_archive_drains,
     ) else {
         eprintln!(
@@ -770,5 +775,45 @@ mod tests {
             diff.contains("reactive addition"),
             "diff must reflect the reactive-sourced current, got: {diff}"
         );
+    }
+
+    #[test]
+    fn attested_queue_response_echo_is_not_an_operator_prompt() {
+        let dir = tempfile::TempDir::new().unwrap();
+        std::fs::create_dir_all(dir.path().join(".agent-doc/snapshots")).unwrap();
+        let doc = dir.path().join("task.md");
+        let baseline = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        std::fs::write(&doc, baseline).unwrap();
+        save_test_snapshot(&doc, baseline).unwrap();
+        let record = agent_doc_document::queue_response_record::record(
+            "#review",
+            "[#r-0123456789ab]",
+            &["- **Summary:** Reviewed the change.".to_string()],
+        )
+        .unwrap();
+        let (heading, digest_and_body) = record.split_once('\n').unwrap();
+        let feedback = format!(
+            "{heading}\n\n> **Queue prompt:**\n>\n> Verify the feature: #review\n\n{digest_and_body}"
+        );
+        let current = format!("<!-- agent:exchange -->\n{feedback}\n<!-- /agent:exchange -->\n");
+        std::fs::write(&doc, &current).unwrap();
+        let result = compute_with_current(&TestBaselineStore, &doc, None).unwrap();
+        assert_eq!(result.current, current);
+        assert!(result.diff.is_none(), "{:?}", result.diff);
+
+        let current = current.replace(
+            "<!-- /agent:exchange -->",
+            "\n❯ Please inspect the latest change.\n<!-- /agent:exchange -->",
+        );
+        let live = FixedLiveSource {
+            reactive: Some(current),
+            seen_disk: std::cell::RefCell::new(None),
+        };
+        let result = compute_with_current(&TestBaselineStore, &doc, Some(&live)).unwrap();
+        let diff = result.diff.unwrap();
+        let prompts = agent_doc_diff::classify_prompt_bearing_changes(&diff);
+        assert_eq!(prompts.len(), 1, "{prompts:#?}");
+        assert!(prompts[0].text.contains("inspect the latest change"));
+        assert!(!diff.contains("Verify the feature"), "{diff}");
     }
 }

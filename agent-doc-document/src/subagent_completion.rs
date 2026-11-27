@@ -402,7 +402,19 @@ fn completion_response_digest_index(lines: &[&str], heading_index: usize) -> Opt
     }
 
     let (_, heading_item) = completion_heading_owner_item(lines.get(heading_index)?.trim())?;
-    let mut index = next_index;
+    let (index, prompt) =
+        queue_prompt_echo_before_digest(lines, next_index, |line| response_digest(line).is_some())?;
+    (prompt == heading_item).then_some(index)
+}
+
+/// A canonical multiline queue prompt echo inserted between an attested
+/// heading and its digest. Each caller also checks the quoted item against
+/// the heading before recognizing the cell as binary feedback.
+pub(crate) fn queue_prompt_echo_before_digest(
+    lines: &[&str],
+    mut index: usize,
+    is_digest: impl Fn(&str) -> bool,
+) -> Option<(usize, String)> {
     while lines.get(index).is_some_and(|line| line.trim().is_empty()) {
         index += 1;
     }
@@ -414,7 +426,7 @@ fn completion_response_digest_index(lines: &[&str], heading_index: usize) -> Opt
     let mut prompt_lines = Vec::new();
     loop {
         let line = *lines.get(index)?;
-        if response_digest(line).is_some() {
+        if is_digest(line) {
             break;
         }
         if line.trim().is_empty() {
@@ -430,9 +442,9 @@ fn completion_response_digest_index(lines: &[&str], heading_index: usize) -> Opt
     if prompt_lines.is_empty() {
         return None;
     }
-    let prompt = heading_item_text(&prompt_lines.join(" "));
-    let prompt = agent_doc_element_queue::strip_queue_report_state_annotation(&prompt);
-    (prompt == heading_item).then_some(index)
+    let prompt = prompt_lines.join(" ");
+    let prompt = agent_doc_element_queue::strip_queue_report_state_annotation(prompt.trim_end());
+    Some((index, heading_item_text(prompt)))
 }
 
 fn response_digest(line: &str) -> Option<&str> {
@@ -679,6 +691,10 @@ pub fn strip_completion_cells_matching(
                 .is_some_and(|evidence| should_strip(&evidence))
         })
         .collect::<Vec<_>>();
+    strip_attested_line_ranges(text, ranges)
+}
+
+pub(crate) fn strip_attested_line_ranges(text: &str, ranges: Vec<Range<usize>>) -> String {
     if ranges.is_empty() {
         return text.to_string();
     }

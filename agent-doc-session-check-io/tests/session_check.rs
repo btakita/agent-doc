@@ -2503,6 +2503,49 @@ Body\n\
                 .is_none()
         );
     }
+
+    #[test]
+    fn session_check_exempts_attested_queue_feedback_with_a_nested_prompt_echo() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let doc = make_project(tmp.path());
+        let snapshot = "<!-- agent:exchange -->\n<!-- /agent:exchange -->\n";
+        fs::write(&doc, snapshot).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            snapshot,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+        let record = agent_doc_document::queue_response_record::record(
+            "#review",
+            "[#r-0123456789ab]",
+            &["- **Summary:** Reviewed the change.".into()],
+        )
+        .unwrap();
+        let (heading, attestation) = record.split_once('\n').unwrap();
+        let current = format!(
+            "<!-- agent:exchange -->\n{heading}\n\n> **Queue prompt:**\n>\n> Verify the feature: #review\n\n{attestation}\n<!-- /agent:exchange -->\n"
+        );
+        fs::write(&doc, &current).unwrap();
+
+        assert!(
+            agent_doc_session_check_io::detect_bypassed_response_write(&doc)
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            agent_doc_session_check_io::detect_uncommitted_exchange_drift(&doc)
+                .unwrap()
+                .is_none()
+        );
+
+        fs::write(&doc, current.replace("Reviewed", "Skipped")).unwrap();
+        assert!(
+            agent_doc_session_check_io::detect_bypassed_response_write(&doc)
+                .unwrap()
+                .is_some()
+        );
+    }
     #[test]
     fn detect_bypassed_response_write_reports_bare_prompt_target() {
         let tmp = tempfile::TempDir::new().unwrap();

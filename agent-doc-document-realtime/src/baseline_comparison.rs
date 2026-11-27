@@ -369,11 +369,9 @@ pub fn closed_cycle_steering_between(
     baseline: Option<&str>,
     current: &str,
 ) -> RealtimeSteeringSet {
-    // Binary-attested worker completion cells are controller feedback, not an
-    // operator directive. Strip them from every side of this admission
-    // comparison so real operator prose added beside a cell remains visible
-    // without the cell's response-shaped heading swallowing the diff hunk.
-    let strip = agent_doc_document::subagent_completion::strip_completion_cells;
+    // Strip binary-attested queue feedback from every side so a response
+    // heading or its prompt echo cannot swallow adjacent operator prose.
+    let strip = agent_doc_document::queue_response_record::strip_attested_queue_feedback;
     let head = head.map(strip);
     let baseline = baseline.map(strip);
     let current = strip(current);

@@ -391,11 +391,10 @@ fn detect_uncommitted_exchange_drift_inner(file: &Path) -> Result<Option<String>
         return Ok(None);
     };
     let current = crate::resolve_current_document_content(file, "uncommitted_exchange_drift")?;
-    // `#subagentcompletionfeedback`: binary-attested completion cells are
-    // binary-owned feedback that the next preflight's document-only commit (or
-    // the coordinator's closeout) lands. They are not an interrupted agent
-    // cycle, so they never count as uncommitted exchange drift here.
-    let strip = agent_doc_document::subagent_completion::strip_completion_cells;
+    // The next document-only preflight commit or coordinator closeout lands
+    // binary-attested completion cells and queue response records. They do not
+    // count as an interrupted agent cycle.
+    let strip = agent_doc_document::queue_response_record::strip_attested_queue_feedback;
     let (snapshot, current) = (strip(&snapshot), strip(&current));
     if let Some(head) = agent_doc_git_io::revision::show_head(file)? {
         let head = strip(&head);

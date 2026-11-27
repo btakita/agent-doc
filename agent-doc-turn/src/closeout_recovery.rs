@@ -698,14 +698,15 @@ pub fn classify_snapshot_visible_drift(snapshot: &str, visible: &str) -> Closeou
 }
 
 fn closeout_content_signature_after_artifact_normalization(doc: &str) -> String {
+    // Binary-attested queue feedback is recovery metadata. It must not turn a
+    // stale projection into `UnsafeUserContentDrift`. The recovery still
+    // preserves and commits the authoritative visible records.
+    let without_feedback =
+        agent_doc_document::queue_response_record::strip_attested_queue_feedback(doc);
     let normalized =
-        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(doc);
-    // Binary-attested subagent completion cells are recovery metadata. They are
-    // durable evidence used to reconcile a reported claim, but they are not an
-    // assistant response and must not turn a stale projection into
-    // `UnsafeUserContentDrift`. The recovery still preserves and commits the
-    // authoritative visible cell; stripping is classification-only.
-    let normalized = agent_doc_document::subagent_completion::strip_completion_cells(&normalized);
+        agent_doc_document::commit_normalization::normalize_committed_exchange_artifacts(
+            &without_feedback,
+        );
     closeout_content_component_signature(&normalized)
 }
 

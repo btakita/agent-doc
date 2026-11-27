@@ -118,16 +118,19 @@ class RepoContextDocumentTreeTest {
         fun task(state: String) =
             DocumentPromptTarget("task", "task", "Check the change", 4, 2, DocumentPromptAction.NAVIGATE, DocumentPromptTask("receipt", state))
         view.show(RepoContextDocumentOutline("same-revision", listOf(root, parent, task("submitted"))))
-        val tree = view.components.asSequence().flatMap(::children).filterIsInstance<Tree>().single()
-        tree.setSelectionRow(1)
+        val tree = tree(view)
+        fun taskLabel(): String = (0 until tree.rowCount).asSequence()
+            .map { tree.getPathForRow(it).lastPathComponent.toString() }
+            .single { it.endsWith(" · Check the change") }
+        view.selectTarget(parent.id)
 
         view.show(RepoContextDocumentOutline("same-revision", listOf(root, parent, task("running"))))
         assertEquals(parent, view.selection)
-        assertEquals("Working · Check the change", tree.getPathForRow(2).lastPathComponent.toString())
+        assertEquals("Working · Check the change", taskLabel())
 
         view.show(RepoContextDocumentOutline("same-revision", listOf(root, parent, task("answered"))))
         assertEquals(parent, view.selection)
-        assertEquals("Answered · Check the change", tree.getPathForRow(2).lastPathComponent.toString())
+        assertEquals("Answered · Check the change", taskLabel())
     }
 
     private fun children(component: Component): Sequence<Component> = sequence {

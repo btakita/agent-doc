@@ -7050,6 +7050,15 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         );
     }
 
+    // Resolve tombstone eligibility through the same effective-preset policy
+    // as dispatch. Legacy ledgers can still contain preset-only names, including
+    // on named runs that bypass the implicit mirror's tombstone reconciliation.
+    let preset_only_ids = preset_only_identity_ids(&current_content, &effective_prompt_presets);
+    let tombstone_candidate_id = |entry: &agent_doc_queue::document_queue::QueueEntry| {
+        agent_doc_queue::queue_projection::queue_entry_do_id(entry)
+            .filter(|id| !preset_only_ids.contains(id))
+    };
+
     // Backlog→queue sync (#backlog-queue-sync-attr): when an `agent:backlog`
     // component carries a `queue` attribute, regenerate the queue `do [#id]`
     // prompts from its active items BEFORE activation so a freshly synced queue
@@ -7116,19 +7125,17 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                                         agent_doc_queue::document_queue::QueueEntry::Prompt(_)
                                     )
                                 })
-                                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+                                .filter_map(tombstone_candidate_id)
                                 .collect(),
                         )
                     })
                     .unwrap_or_default();
-            let current_all_ids: std::collections::HashSet<String> = entries
-                .iter()
-                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
-                .collect();
+            let current_all_ids: std::collections::HashSet<String> =
+                entries.iter().filter_map(tombstone_candidate_id).collect();
             let current_active_ids: std::collections::HashSet<String> = entries
                 .iter()
                 .filter(|e| matches!(e, agent_doc_queue::document_queue::QueueEntry::Prompt(_)))
-                .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+                .filter_map(tombstone_candidate_id)
                 .collect();
             effect_phase.stage_tombstones(
                 agent_doc_queue_io::queue_tombstone::plan_reconcile_for_file(
@@ -7644,11 +7651,13 @@ fn run_queue_maintenance_with_options_under_apply_guard(
         &snapshot_queue_entries,
         &activation.entries_after,
     )?;
+    let mut deleted_directive_ids = effect_phase.current_tombstones(file);
+    deleted_directive_ids.retain(|id| !preset_only_ids.contains(id));
     if let Some(converged_entries) =
         agent_doc_queue::document_queue::converge_queue_via_lifecycle_with_operator_evidence(
             &activation.entries_after,
             &snapshot_queue_entries,
-            &effect_phase.current_tombstones(file),
+            &deleted_directive_ids,
             &operator_rearmed,
             &operator_repeat_allowances,
         )
@@ -10007,7 +10016,7 @@ fn run_queue_maintenance_with_options_under_apply_guard(
                 agent_doc_queue::document_queue::QueueEntry::Prompt(_)
             )
         })
-        .filter_map(agent_doc_queue::queue_projection::queue_entry_do_id)
+        .filter_map(tombstone_candidate_id)
         .collect();
     queue_maintenance_effect_step(file, effect_fence, QueueMaintenanceEffectStep::Ledger)?;
     agent_doc_queue_io::queue_tombstone::record_observed_active_ids(
@@ -14747,6 +14756,88 @@ mod tests {
                 .component
                 .content(&updated)
                 .contains("do [#audit]")
+        );
+    }
+
+    #[test]
+    fn named_run_keeps_inherited_preset_with_a_legacy_delete_tombstone() {
+        let dir = setup_project();
+        std::fs::write(
+            dir.path().join(".agent-doc/project.md"),
+            "---\npresets:\n  '#review-work': Review the change.\n  '#tracked': Check the change.\n---\n",
+        )
+        .unwrap();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: go\n---\n\n",
+            "<!-- agent:exchange patch=append -->\n<!-- /agent:exchange -->\n\n",
+            "<!-- agent:run id=main subagents priority go -->\n<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog priority queue=\"main\" -->\n",
+            "- [ ] [#tracked] Handle the tracked item.\n<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, baseline, |_, _| {}).unwrap();
+        let deleted = ["review-work".to_string(), "tracked".to_string()].into();
+        assert_eq!(
+            agent_doc_queue_io::queue_tombstone::reconcile_for_file(
+                &doc,
+                &deleted,
+                &Default::default(),
+                &Default::default(),
+            ),
+            deleted
+        );
+        let live = baseline.replace(
+            "<!-- /agent:run -->",
+            "- #review-work\n- do [#tracked]\n<!-- /agent:run -->",
+        );
+        std::fs::write(&doc, live).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        let current = std::fs::read_to_string(&doc).unwrap();
+        let rows = queue_entries_for_id(&current, "main");
+        let work: Vec<_> = agent_doc_queue::document_queue::prompts(&rows)
+            .iter()
+            .map(|prompt| without_admitted_queue_ids(&strip_in_progress_marker(&prompt.text)))
+            .collect();
+        assert_eq!(work, ["#review-work"], "{current}");
+        let dispatch =
+            agent_doc_queue_io::subagent_dispatch::pending_subagent_dispatch_for_content(
+                &doc, &current,
+            )
+            .unwrap();
+        assert_eq!(
+            dispatch
+                .iter()
+                .map(|row| without_admitted_queue_ids(row))
+                .collect::<Vec<_>>(),
+            ["#review-work"]
+        );
+    }
+
+    #[test]
+    fn backlog_sync_tombstones_deleted_tracked_rows_but_not_preset_names() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let baseline = concat!(
+            "---\nagent_doc_session: test\nagent_doc_format: template\nqueue: go\n",
+            "presets:\n  '#review-work': Review the change.\n---\n\n",
+            "<!-- agent:run go -->\n",
+            "- #review-work\n- do [#tracked]\n- do [#kept]\n<!-- /agent:run -->\n\n",
+            "<!-- agent:backlog queue -->\n",
+            "- [ ] [#tracked] Handle the tracked item.\n",
+            "- [ ] [#kept] Handle the remaining item.\n",
+            "<!-- /agent:backlog -->\n",
+        );
+        std::fs::write(&doc, baseline).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(&doc, baseline, |_, _| {}).unwrap();
+        let live = baseline.replace("- #review-work\n- do [#tracked]\n", "");
+        std::fs::write(&doc, live).unwrap();
+
+        run_queue_maintenance(&doc, None).unwrap();
+        assert_eq!(
+            agent_doc_queue_io::queue_tombstone::current_tombstones(&doc),
+            ["tracked".to_string()].into()
         );
     }
 

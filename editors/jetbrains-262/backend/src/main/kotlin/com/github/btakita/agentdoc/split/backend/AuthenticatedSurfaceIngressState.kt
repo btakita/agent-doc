@@ -549,7 +549,18 @@ internal class AuthenticatedSurfaceIngressState(
         val backend = backendActivationReceiptProvider()
         if (!backend.activated()) {
             // Legacy snapshots and a shell-only frontend remain valid in R1.
-            return receipt == null || !receipt.activated()
+            if (receipt == null || !receipt.activated()) return true
+            // GH #450: a Client that already activated its own generation keeps
+            // publishing that receipt after this backend's shell moves on. The
+            // receipt does not claim this backend's generation when its shell
+            // differs, and the snapshot still carries the Client's measured
+            // columns. An activated receipt that names this shell is an unpaired
+            // claim and stays refused until this peer activates.
+            return receipt.role == ActivationReceipt.ROLE_FRONTEND &&
+                receipt.jvmInstanceId.isNotBlank() &&
+                receipt.jvmInstanceId != backend.jvmInstanceId &&
+                SHA_256.matches(receipt.shellDigest) &&
+                receipt.shellDigest != backend.shellDigest
         }
         if (receipt == null || backend.role != ActivationReceipt.ROLE_BACKEND ||
             receipt.role != ActivationReceipt.ROLE_FRONTEND ||

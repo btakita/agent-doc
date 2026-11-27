@@ -524,7 +524,11 @@ rather than acting on a half-upgraded pair.
   metadata and an activation receipt carry no authority to change local signer
   trust.
 - **Ingress fence.** A shell-only backend accepts legacy and shell-only
-  snapshots. When the backend host reports an implementation digest and
+  snapshots. It also accepts a schema-5 snapshot whose activated receipt
+  names another shell (GH #450): that is the Client's own prior generation,
+  still running after this backend's shell moved on, and its measured columns
+  are published. An activated receipt that names this shell stays refused
+  until this peer activates. When the backend host reports an implementation digest and
   epoch, ingress requires a matching schema-5 receipt from a distinct frontend
   JVM before it publishes either presentation or measured layout. The receipt
   must agree on shell digest, SPI, implementation digest and epoch. A mismatch

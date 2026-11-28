@@ -1,5 +1,6 @@
 //! Terminal host for the shared Lazily View-backed Document Explorer.
 
+mod editor;
 mod highlight;
 
 use crate::document_explorer::{
@@ -43,7 +44,7 @@ pub(crate) fn run(file: &Path) -> Result<()> {
     ensure!(file.is_file(), "expected a document file");
     let mut explorer = Explorer::open(file)?;
     let mut screen = Terminal::enter()?;
-    explorer.interact(&mut screen.output)
+    explorer.interact(&mut screen)
 }
 
 #[derive(Deserialize)]
@@ -305,10 +306,17 @@ struct Explorer {
     search: Search,
     pane_sizes: PaneSizes,
     status: String,
-    composing: bool,
+    review_top: Option<usize>,
     draft: String,
     draft_attempt: Option<DraftAttempt>,
     running: Option<Receiver<Result<std::process::ExitStatus, io::Error>>>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum KeyAction {
+    Continue,
+    EditDraft,
+    Quit,
 }
 
 impl Explorer {
@@ -332,7 +340,7 @@ impl Explorer {
             search: Search::default(),
             pane_sizes: PaneSizes::default(),
             status: String::new(),
-            composing: false,
+            review_top: None,
             draft: String::new(),
             draft_attempt: None,
             running: None,
@@ -367,31 +375,26 @@ impl Explorer {
             .get(&row.action)
     }
 
-    fn interact(&mut self, output: &mut impl Write) -> Result<()> {
+    fn interact(&mut self, screen: &mut Terminal) -> Result<()> {
         loop {
             self.observe_run();
             let (width, height) = terminal::size()?;
-            self.render(output, width, height)?;
+            self.render(&mut screen.output, width, height)?;
             // The dispatch receipt is sent by a background worker. Wait on
             // input outright when no other event source needs servicing.
             while self.running.is_some() && !event::poll(Duration::from_millis(150))? {
                 self.observe_run();
                 if self.running.is_none() {
-                    self.render(output, width, height)?;
+                    self.render(&mut screen.output, width, height)?;
                 }
             }
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
-                    if self.key(key, width, height) {
-                        return Ok(());
+                    match self.key(key, width, height) {
+                        KeyAction::Continue => {}
+                        KeyAction::EditDraft => self.edit_draft(screen)?,
+                        KeyAction::Quit => return Ok(()),
                     }
-                }
-                Event::Paste(text) if self.composing => {
-                    let text = text.replace("\r\n", "\n").replace('\r', "\n");
-                    self.draft.extend(
-                        text.chars()
-                            .filter(|c| matches!(c, '\n' | '\t') || !c.is_control()),
-                    );
                 }
                 Event::Paste(text) => {
                     if let Some(input) = &mut self.search.input {
@@ -403,24 +406,39 @@ impl Explorer {
         }
     }
 
-    fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> bool {
+    fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> KeyAction {
         let control = key.modifiers.contains(KeyModifiers::CONTROL);
         if control && key.code == KeyCode::Char('c') {
-            return true;
+            return KeyAction::Quit;
         }
-        if self.composing {
+        if let Some(top) = self.review_top {
             match key.code {
-                KeyCode::Esc => self.composing = false,
+                KeyCode::Esc => {
+                    self.review_top = None;
+                    self.status = if self.draft.trim().is_empty() {
+                        String::new()
+                    } else {
+                        "Draft kept. Press p on a promptable item to edit it.".into()
+                    };
+                }
                 KeyCode::Char('s') if control => self.submit(),
                 KeyCode::Char('r') if control => self.refresh(),
-                KeyCode::Enter => self.draft.push('\n'),
-                KeyCode::Backspace => {
-                    self.draft.pop();
+                KeyCode::Char('p') if key.modifiers.is_empty() => return KeyAction::EditDraft,
+                KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
+                    let page = usize::from(height.saturating_sub(5)).max(1);
+                    let last = wrap(&self.draft, usize::from(width))
+                        .len()
+                        .saturating_sub(page);
+                    self.review_top = Some(match key.code {
+                        KeyCode::PageUp => top.min(last).saturating_sub(page),
+                        KeyCode::PageDown => top.saturating_add(page).min(last),
+                        KeyCode::Home => 0,
+                        _ => last,
+                    });
                 }
-                KeyCode::Char(c) if !control && !c.is_control() => self.draft.push(c),
                 _ => {}
             }
-            return false;
+            return KeyAction::Continue;
         }
 
         let panes = self.pane_sizes.fit(width, height);
@@ -442,7 +460,7 @@ impl Explorer {
                 KeyCode::Char(c) if !control && !c.is_control() => input.push(c),
                 _ => {}
             }
-            return false;
+            return KeyAction::Continue;
         }
 
         if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right)
@@ -453,11 +471,11 @@ impl Explorer {
             {
                 self.show_selection(index);
             }
-            return false;
+            return KeyAction::Continue;
         }
 
         match key.code {
-            KeyCode::Char('q') | KeyCode::Esc => return true,
+            KeyCode::Char('q') | KeyCode::Esc => return KeyAction::Quit,
             KeyCode::Char('/') => self.search.input = Some(String::new()),
             KeyCode::Char('n') => self.find(&panes, false),
             KeyCode::Char('N') => self.find(&panes, true),
@@ -471,20 +489,45 @@ impl Explorer {
             KeyCode::Char(']') => self.pane_sizes.resize(&panes, true),
             KeyCode::Char('=') => self.pane_sizes = PaneSizes::default(),
             KeyCode::Char('r') => self.refresh(),
-            KeyCode::Char('p') => {
+            KeyCode::Char('p') if key.modifiers.is_empty() => {
                 if self
                     .selected_action()
                     .is_some_and(|action| !action.disabled)
                 {
-                    self.composing = true;
-                    self.status.clear();
+                    self.review_top = Some(0);
+                    return KeyAction::EditDraft;
                 } else if let Some(action) = self.selected_action() {
                     self.status = action.hint.clone();
                 }
             }
             _ => self.navigate(key, &panes),
         }
-        false
+        KeyAction::Continue
+    }
+
+    fn edit_draft(&mut self, screen: &mut Terminal) -> Result<()> {
+        let outcome = match editor::DraftEditor::prepare(&self.draft) {
+            Ok(mut editor) => {
+                screen.suspend()?;
+                let outcome = editor.edit();
+                screen.resume()?;
+                outcome
+            }
+            Err(error) => Err(error),
+        };
+        self.status = match outcome {
+            Ok(draft) => {
+                self.draft = draft;
+                self.review_top = Some(0);
+                if self.draft.trim().is_empty() {
+                    "No draft to send. Press p to reopen the editor.".into()
+                } else {
+                    "Review your draft before sending.".into()
+                }
+            }
+            Err(error) => format!("Editor did not save a draft. Previous draft kept. {error:#}"),
+        };
+        Ok(())
     }
 
     fn find(&mut self, panes: &Panes, backward: bool) {
@@ -608,8 +651,7 @@ impl Explorer {
             self.selected = self
                 .selected
                 .min(snapshot.projection.nodes.len().saturating_sub(1));
-            if self.composing {
-                self.composing = false;
+            if self.review_top.take().is_some() {
                 self.status =
                     "Selected item changed. Your draft is kept. Select a target and press p."
                         .into();
@@ -622,6 +664,10 @@ impl Explorer {
     }
 
     fn submit(&mut self) {
+        if self.draft.trim().is_empty() {
+            self.status = "No draft to send. Press p to reopen the editor.".into();
+            return;
+        }
         if self.running.is_some() {
             self.status = "The previous dispatch is still running. Your draft is kept.".into();
             return;
@@ -675,7 +721,7 @@ impl Explorer {
     fn finish_draft(&mut self) {
         self.draft.clear();
         self.draft_attempt = None;
-        self.composing = false;
+        self.review_top = None;
     }
 
     fn start_run(&mut self) -> String {
@@ -734,8 +780,8 @@ impl Explorer {
             )?;
         }
         if height >= 5 && width > 0 {
-            if self.composing {
-                self.render_composer(output, width, height)?;
+            if let Some(top) = self.review_top {
+                self.render_review(output, width, height, top)?;
             } else {
                 self.render_panes(output, self.pane_sizes.fit(width, height))?;
             }
@@ -753,8 +799,8 @@ impl Explorer {
             print_at(output, 0, height - 2, width, status)?;
         }
         if height >= 2 && width > 0 {
-            let keys = if self.composing {
-                "Ctrl+S send · Ctrl+R refresh · Esc keep draft and return"
+            let keys = if self.review_top.is_some() {
+                "Ctrl+S send · p edit · PgUp/Dn review · Ctrl+R refresh · Esc back"
             } else if self.search.input.is_some() {
                 "Enter find · Esc cancel"
             } else {
@@ -808,7 +854,13 @@ impl Explorer {
         Ok(())
     }
 
-    fn render_composer(&self, output: &mut impl Write, width: u16, height: u16) -> io::Result<()> {
+    fn render_review(
+        &self,
+        output: &mut impl Write,
+        width: u16,
+        height: u16,
+        top: usize,
+    ) -> io::Result<()> {
         let view = &self.snapshot.projection.view;
         if let (Some(row), Some(action)) = (self.selected_row(), self.selected_action()) {
             print_at(
@@ -822,7 +874,7 @@ impl Explorer {
         }
         let available = height.saturating_sub(5);
         let draft = wrap(&self.draft, usize::from(width));
-        let first = draft.len().saturating_sub(available.into());
+        let first = top.min(draft.len().saturating_sub(available.into()));
         for (index, line) in draft.iter().skip(first).take(available.into()).enumerate() {
             print_at(output, 0, index as u16 + 3, width, line)?;
         }
@@ -1020,23 +1072,26 @@ struct Terminal {
 
 impl Terminal {
     fn enter() -> Result<Self> {
-        terminal::enable_raw_mode().context("enable terminal raw mode")?;
         let mut session = Self {
             output: io::stdout(),
         };
+        session.resume()?;
+        Ok(session)
+    }
+
+    fn resume(&mut self) -> Result<()> {
+        terminal::enable_raw_mode().context("enable terminal raw mode")?;
         execute!(
-            session.output,
+            self.output,
             EnterAlternateScreen,
             DisableLineWrap,
             EnableBracketedPaste,
             Hide
-        )?;
-        Ok(session)
+        )
+        .context("enter Explorer screen")
     }
-}
 
-impl Drop for Terminal {
-    fn drop(&mut self) {
+    fn suspend(&mut self) -> Result<()> {
         // Try both operations even if the emulator has stopped accepting output.
         let screen = execute!(
             self.output,
@@ -1046,11 +1101,15 @@ impl Drop for Terminal {
             EnableLineWrap,
             LeaveAlternateScreen
         );
-        if let Err(error) = terminal::disable_raw_mode() {
-            eprintln!("[explore] could not restore terminal input: {error}");
-        }
-        if let Err(error) = screen {
-            eprintln!("[explore] could not restore terminal screen: {error}");
+        terminal::disable_raw_mode().context("restore terminal input")?;
+        screen.context("restore terminal screen")
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        if let Err(error) = self.suspend() {
+            eprintln!("[explore] could not restore terminal: {error:#}");
         }
     }
 }
@@ -1151,7 +1210,10 @@ mod tests {
         };
         let mut explorer = Explorer::new(PathBuf::new(), snapshot);
         let mut press = |code, modifiers| {
-            assert!(!explorer.key(KeyEvent::new(code, modifiers), 66, 11));
+            assert_eq!(
+                explorer.key(KeyEvent::new(code, modifiers), 66, 11),
+                KeyAction::Continue
+            );
             (explorer.selected, explorer.source_scroll)
         };
         let plain = KeyModifiers::NONE;
@@ -1225,7 +1287,10 @@ mod tests {
         };
         let mut explorer = Explorer::new(PathBuf::new(), snapshot);
         let press = |explorer: &mut Explorer, code| {
-            assert!(!explorer.key(KeyEvent::new(code, KeyModifiers::NONE), 66, 11));
+            assert_eq!(
+                explorer.key(KeyEvent::new(code, KeyModifiers::NONE), 66, 11),
+                KeyAction::Continue
+            );
         };
         for c in "/MaTcH".chars() {
             press(&mut explorer, KeyCode::Char(c));
@@ -1296,7 +1361,10 @@ mod tests {
             snapshot("first", &["Document", "Alpha", "unstable", "Gamma"]),
         );
         let press = |explorer: &mut Explorer, code, modifiers| {
-            assert!(!explorer.key(KeyEvent::new(code, modifiers), 66, 11));
+            assert_eq!(
+                explorer.key(KeyEvent::new(code, modifiers), 66, 11),
+                KeyAction::Continue
+            );
         };
         let plain = KeyModifiers::NONE;
         let alt = KeyModifiers::ALT;
@@ -1346,7 +1414,7 @@ mod tests {
         press(&mut explorer, KeyCode::Char('/'), plain);
         back(&mut explorer);
         press(&mut explorer, KeyCode::Esc, plain);
-        explorer.composing = true;
+        explorer.review_top = Some(0);
         back(&mut explorer);
         assert_eq!(explorer.selected, 3);
     }

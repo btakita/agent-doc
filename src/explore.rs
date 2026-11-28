@@ -1,5 +1,7 @@
 //! Terminal host for the shared Lazily View-backed Document Explorer.
 
+mod highlight;
+
 use crate::document_explorer::{
     PromptFailure, explorer_active_prompts, load_open_cycle, persist_prompt, spawn_prompt_run,
 };
@@ -16,6 +18,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use crossterm::{execute, queue};
+use highlight::SourcePreview;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
@@ -81,7 +84,7 @@ struct PromptAction {
 }
 
 struct Snapshot {
-    content: String,
+    preview: SourcePreview,
     projection: Projection,
 }
 
@@ -105,7 +108,7 @@ impl Snapshot {
         )?)
         .context("decode the Document Explorer view")?;
         Ok(Self {
-            content,
+            preview: SourcePreview::new(content, highlight::enabled()),
             projection,
         })
     }
@@ -487,21 +490,16 @@ impl Explorer {
         if let Some(row) = self.selected_row() {
             let first = row.line.saturating_sub(1) + self.source_scroll;
             let last = row.end_line.unwrap_or(row.line).max(row.line);
-            for (offset, line) in self
-                .snapshot
-                .content
-                .lines()
-                .take(last)
-                .skip(first)
-                .take(panes.source_height.into())
-                .enumerate()
+            let preview = &self.snapshot.preview;
+            for (offset, line) in
+                (0..panes.source_height).zip(first..last.min(preview.line_count()))
             {
-                print_at(
+                preview.print_line(
                     output,
                     panes.source_left,
-                    panes.source_top + offset as u16,
+                    panes.source_top + offset,
                     panes.source_width,
-                    &format!("{:>4}  {line}", first + offset + 1),
+                    line,
                 )?;
             }
         }
@@ -572,21 +570,27 @@ impl Panes {
 fn printable(text: &str) -> impl Iterator<Item = char> + '_ {
     // Terminal markup always comes from Crossterm, even when document text,
     // view labels, paths, or error messages contain their own controls.
-    text.chars().map(|c| if c.is_control() { ' ' } else { c })
+    text.chars().map(terminal_char)
+}
+
+fn terminal_char(c: char) -> char {
+    if c.is_control() { ' ' } else { c }
+}
+
+fn clip_to_width<'a>(text: &'a str, space: &mut usize) -> &'a str {
+    for (offset, c) in text.char_indices() {
+        let cells = terminal_char(c).width().unwrap_or_default();
+        if cells > *space {
+            return &text[..offset];
+        }
+        *space -= cells;
+    }
+    text
 }
 
 fn print_at(output: &mut impl Write, x: u16, y: u16, width: u16, text: &str) -> io::Result<()> {
-    let mut space = usize::from(width);
-    let text: String = printable(text)
-        .take_while(|c| {
-            let cells = c.width().unwrap_or_default();
-            if cells > space {
-                return false;
-            }
-            space -= cells;
-            true
-        })
-        .collect();
+    let mut columns = usize::from(width);
+    let text: String = printable(clip_to_width(text, &mut columns)).collect();
     queue!(output, MoveTo(x, y), Print(text))
 }
 

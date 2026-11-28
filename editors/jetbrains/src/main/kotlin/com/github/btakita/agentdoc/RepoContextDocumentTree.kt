@@ -171,10 +171,7 @@ internal class RepoContextDocumentTree(
         get() = question.editor.isFocusOwner
 
     init {
-        add(JPanel(BorderLayout(0, JBUI.scale(4))).apply {
-            add(followEditorCaret, BorderLayout.NORTH)
-            add(links, BorderLayout.CENTER)
-        }, BorderLayout.NORTH)
+        add(links, BorderLayout.NORTH)
         add(JBScrollPane(tree), BorderLayout.CENTER)
         add(JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
             add(hint, BorderLayout.CENTER)

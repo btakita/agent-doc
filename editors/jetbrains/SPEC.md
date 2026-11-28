@@ -2224,13 +2224,13 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 **Agent Doc: Document Context Explorer** is a project action in Tools, Find
 Action, and the Agent Doc popup. It opens a native tool window in local
 IntelliJ IDEA. The classic plugin and the 262–263 modular backend use the
-same implementation. The Document tab's **Follow editor caret** option is on by
-default and remembered per IDE project. Turn it off to keep the selected tree
-row when the editor caret moves. Manual selection and **Open in editor** work
-in either mode. The Document tab lists in-project Markdown links from the
-current session snapshot. Open a linked document in the editor or switch the
-document tree to a linked Agent Doc session. The Repository tab provides the
-code and Docs search described below.
+same implementation. The Document tab shows **Follow editor caret** in the tab
+row. The option starts on and is remembered per IDE project. Turn it off to
+keep the selected tree row when the editor caret moves. Manual selection and
+**Open in editor** work in either mode. The Document tab lists in-project
+Markdown links from the current session snapshot. Open a linked document in
+the editor or switch the document tree to a linked Agent Doc session. The
+Repository tab provides the code and Docs search described below.
 
 Explorer controls, labels, result lists, and answers use 70% of the IDE's UI
 font size and follow UI font and zoom changes. Result rows size themselves to

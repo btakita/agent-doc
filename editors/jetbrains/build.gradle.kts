@@ -3,6 +3,7 @@ import java.util.jar.JarInputStream
 import java.util.zip.ZipFile
 import org.jetbrains.intellij.platform.gradle.tasks.VerifyPluginTask
 import org.jetbrains.intellij.platform.gradle.IntelliJPlatformType
+import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
     id("java")
@@ -34,6 +35,7 @@ dependencies {
     intellijPlatform {
         intellijIdeaCommunity(providers.gradleProperty("platformVersion").get())
         bundledPlugin("org.jetbrains.plugins.terminal")
+        testFramework(TestFrameworkType.Platform)
     }
     // S5: the canonical lazily reactive StateGraphMirror. In the monorepo the
     // composite build in settings.gradle.kts substitutes this with the sibling
@@ -61,6 +63,7 @@ dependencies {
     // needs the same API on its non-IDE JavaExec runtime classpath.
     testRuntimeOnly("com.google.code.gson:gson:2.11.0")
     testImplementation("junit:junit:4.13.2")
+    testRuntimeOnly("org.opentest4j:opentest4j:1.3.0")
     testImplementation("org.mockito:mockito-core:5.14.2")
 }
 

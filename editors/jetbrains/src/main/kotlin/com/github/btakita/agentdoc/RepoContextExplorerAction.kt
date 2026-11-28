@@ -34,10 +34,13 @@ import com.intellij.ui.SimpleTextAttributes
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBList
 import com.intellij.ui.components.JBScrollPane
-import com.intellij.ui.components.JBTabbedPane
 import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.components.JBTextField
 import com.intellij.ui.content.ContentFactory
+import com.intellij.ui.tabs.JBTabs
+import com.intellij.ui.tabs.JBTabsFactory
+import com.intellij.ui.tabs.TabInfo
+import com.intellij.ui.tabs.TabsListener
 import com.intellij.util.ui.JBFont
 import com.intellij.util.ui.JBUI
 import java.awt.BorderLayout
@@ -166,6 +169,17 @@ internal class RepoContextQuestionComposer(onSubmit: () -> Unit) : JPanel(Border
 
 private const val FOLLOW_EDITOR_CARET_KEY = "agentDoc.documentContextExplorer.followEditorCaret"
 
+internal fun createRepoContextTabs(
+    project: Project?,
+    disposable: Disposable,
+    documentTree: RepoContextDocumentTree,
+    repository: JComponent,
+): JBTabs = JBTabsFactory.createTabs(project, disposable).apply {
+    presentation.setSideComponentVertical(false).setSideComponentOnTabs(true)
+    addTab(TabInfo(documentTree).setText("Document").setSideComponent(documentTree.followEditorCaret))
+    addTab(TabInfo(repository).setText("Repository"))
+}
+
 private class RepoContextExplorerPanel(private val project: Project, private val projectPath: Path) :
     RepoContextTypography(BorderLayout(JBUI.scale(8), JBUI.scale(8))), Disposable {
 
@@ -184,10 +198,10 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val openRelated = JButton("Open related source")
     private val chooseSession = JButton("Choose session")
     private val sessionLabel = JBLabel("No session selected.")
-    private val tabs = JBTabbedPane()
     private val documentTree = RepoContextDocumentTree(
         ::updateControls, ::openDocumentTarget, ::submitDocumentQuestion, ::openLinkedDocument,
     )
+    private val tabs = createRepoContextTabs(project, this, documentTree, repositoryPanel())
     private val documentPrompts = RepoContextDocumentPrompts()
     private val question = RepoContextQuestionComposer(::submitSourceQuestion)
     private val answer = JBTextArea(7, 20).apply {
@@ -219,7 +233,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     @Volatile private var disposed = false
     private val caretSync = RepoContextCaretSync(project, this, canFollow = {
         documentTree.followEditorCaret.isSelected && !disposed && !submitting &&
-            documentTree.isShowing && tabs.selectedComponent === documentTree &&
+            documentTree.isShowing && tabs.selectedInfo?.component === documentTree &&
             !documentTree.isEditingPrompt &&
             KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
                 ?.let(documentTree::isAncestorOf) != true
@@ -245,35 +259,17 @@ private class RepoContextExplorerPanel(private val project: Project, private val
             isSelected = preferences.getBoolean(FOLLOW_EDITOR_CARET_KEY, true)
             addActionListener { preferences.setValue(FOLLOW_EDITOR_CARET_KEY, isSelected, true) }
         }
-        tabs.addTab("Document", documentTree)
-        tabs.addTab("Repository", JPanel(BorderLayout(0, JBUI.scale(5))).apply {
-            add(JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
-                add(mode, BorderLayout.WEST)
-                add(query, BorderLayout.CENTER)
-                add(buttonRow(search, cancel), BorderLayout.EAST)
-            }, BorderLayout.NORTH)
-            add(JBSplitter(true, 0.45f).apply {
-                firstComponent = JBScrollPane(results)
-                secondComponent = JPanel(BorderLayout(0, JBUI.scale(5))).apply {
-                    add(JPanel().apply {
-                        layout = BoxLayout(this, BoxLayout.Y_AXIS)
-                        add(sourceLabel)
-                        add(buttonRow(openSource, openRelated))
-                        add(relatedStatus)
-                    }, BorderLayout.NORTH)
-                    add(JBScrollPane(related), BorderLayout.CENTER)
+        tabs.addListener(object : TabsListener {
+            override fun selectionChanged(oldSelection: TabInfo?, newSelection: TabInfo?) {
+                if (newSelection?.component === documentTree && background != null && !submitting) {
+                    cancelTask()
+                    status.text = ""
                 }
-            }, BorderLayout.CENTER)
-        })
-        tabs.addChangeListener {
-            if (tabs.selectedComponent == documentTree && background != null && !submitting) {
-                cancelTask()
-                status.text = ""
+                caretSync.followSelectedEditor()
+                updateControls()
             }
-            caretSync.followSelectedEditor()
-            updateControls()
-        }
-        add(tabs, BorderLayout.CENTER)
+        }, this)
+        add(tabs.component, BorderLayout.CENTER)
         add(JPanel().apply {
             layout = BoxLayout(this, BoxLayout.Y_AXIS)
             add(question)
@@ -341,6 +337,26 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         refreshOutline()
     }
 
+    private fun repositoryPanel() = JPanel(BorderLayout(0, JBUI.scale(5))).apply {
+        add(JPanel(BorderLayout(JBUI.scale(6), 0)).apply {
+            add(mode, BorderLayout.WEST)
+            add(query, BorderLayout.CENTER)
+            add(buttonRow(search, cancel), BorderLayout.EAST)
+        }, BorderLayout.NORTH)
+        add(JBSplitter(true, 0.45f).apply {
+            firstComponent = JBScrollPane(results)
+            secondComponent = JPanel(BorderLayout(0, JBUI.scale(5))).apply {
+                add(JPanel().apply {
+                    layout = BoxLayout(this, BoxLayout.Y_AXIS)
+                    add(sourceLabel)
+                    add(buttonRow(openSource, openRelated))
+                    add(relatedStatus)
+                }, BorderLayout.NORTH)
+                add(JBScrollPane(related), BorderLayout.CENTER)
+            }
+        }, BorderLayout.CENTER)
+    }
+
     private fun buttonRow(vararg components: java.awt.Component) = JPanel(FlowLayout(FlowLayout.LEFT, JBUI.scale(4), 0))
         .apply { components.forEach(::add) }
 
@@ -354,7 +370,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openSource.isEnabled = idle && selection != null
         openRelated.isEnabled = idle && related.selectedValue != null
         chooseSession.isEnabled = idle
-        val documentSelected = tabs.selectedComponent == documentTree
+        val documentSelected = tabs.selectedInfo?.component == documentTree
         val target = documentTree.selection
         question.isVisible = !documentSelected
         question.submit.text = "Ask about source"

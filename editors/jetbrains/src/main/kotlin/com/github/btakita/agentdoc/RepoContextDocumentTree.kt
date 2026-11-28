@@ -176,6 +176,7 @@ internal class RepoContextDocumentTree(
     onOpen: (DocumentPromptTarget) -> Unit,
     onSubmit: () -> Unit = {},
     onOpenLink: (String) -> Unit = {},
+    onTreeSelection: () -> Unit = {},
 ) : RepoContextTypography(BorderLayout(0, JBUI.scale(4))) {
     val question = RepoContextQuestionComposer(onSubmit)
     val followEditorCaret = JBCheckBox("Follow editor caret", true)
@@ -231,7 +232,10 @@ internal class RepoContextDocumentTree(
         )
         tree.model = DefaultTreeModel(DefaultMutableTreeNode())
         tree.addTreeSelectionListener {
-            if (!replacingModel) updateSelection()
+            if (!replacingModel) {
+                onTreeSelection()
+                updateSelection()
+            }
         }
     }
 

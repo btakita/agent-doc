@@ -9,22 +9,26 @@ import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 
-internal fun promptTargetAtCaret(
+internal fun documentTargetAtCaret(
     targets: List<DocumentPromptTarget>,
     line: Int,
-    allowsPrompt: (DocumentPromptAction) -> Boolean = { it != DocumentPromptAction.NAVIGATE },
-): DocumentPromptTarget? =
-    targets.asSequence()
-        .filter { target ->
-            allowsPrompt(target.action) && line >= target.line && line <= (target.endLine ?: target.line)
-        }
+): DocumentPromptTarget? {
+    val matches = targets.filter { target -> line in target.line..(target.endLine ?: target.line) }
+    val sourceLines = matches.filterNot { it.isPromptHistory() }.mapTo(mutableSetOf()) { it.line }
+    return matches.asSequence()
+        .filterNot { it.isPromptHistory() && it.line in sourceLines }
         .maxWithOrNull(compareBy(DocumentPromptTarget::depth, DocumentPromptTarget::line))
+}
+
+private fun DocumentPromptTarget.isPromptHistory(): Boolean =
+    id.startsWith("prompt-task:") || id.startsWith("prompt-answer:")
 
 /** Applies caret changes to the tree for the selected editor and the same document revision. */
 internal class RepoContextCaretSync(
     private val project: Project,
     parent: Disposable,
     private val canFollow: () -> Boolean,
+    private val canFollowOnOpen: () -> Boolean,
     private val selectTarget: (String) -> Unit,
 ) {
     private data class Projection(val document: Document, val stamp: Long, val outline: RepoContextDocumentOutline)
@@ -33,6 +37,7 @@ internal class RepoContextCaretSync(
     private var queuedEditor: Editor? = null
     private var awaitingOutline = false
     private var openedLine: Int? = null
+    private var openingEditor: Editor? = null
 
     init {
         GenerationListeners.addCaretListener(object : CaretListener {
@@ -49,13 +54,26 @@ internal class RepoContextCaretSync(
         projection = null
         awaitingOutline = false
         openedLine = null
+        cancelOpeningFollow()
     }
 
     fun show(document: Document, stamp: Long, outline: RepoContextDocumentOutline) {
         val changedDocument = projection?.document !== document
         if (changedDocument) openedLine = null
         projection = Projection(document, stamp, outline)
-        if (changedDocument || awaitingOutline) followSelectedEditor()
+        val opening = openingEditor
+        if (opening != null) follow(opening, opening = true)
+        else if (changedDocument || awaitingOutline) followSelectedEditor()
+    }
+
+    fun openAtCaret(editor: Editor) {
+        openedLine = null
+        openingEditor = editor
+        follow(editor, opening = true)
+    }
+
+    fun cancelOpeningFollow() {
+        openingEditor = null
     }
 
     fun followSelectedEditor() {
@@ -66,6 +84,7 @@ internal class RepoContextCaretSync(
     }
 
     fun openFromTree(line: Int, navigate: () -> Unit) {
+        cancelOpeningFollow()
         openedLine = line
         navigate()
     }
@@ -83,16 +102,22 @@ internal class RepoContextCaretSync(
         }
     }
 
-    private fun follow(editor: Editor) {
-        if (!canFollow() || project.isDisposed || editor.isDisposed) return
+    private fun follow(editor: Editor, opening: Boolean = false) {
+        if (!opening && openingEditor != null) return
+        val allowed = if (opening) canFollowOnOpen() else canFollow()
+        if (!allowed || project.isDisposed || editor.isDisposed) {
+            if (opening) cancelOpeningFollow()
+            return
+        }
         val current = projection ?: return
         val target = ReadAction.compute<DocumentPromptTarget?, RuntimeException> {
             if (editor.document !== current.document ||
-                editor !== FileEditorManager.getInstance(project).selectedTextEditor) return@compute null
+                (!opening && editor !== FileEditorManager.getInstance(project).selectedTextEditor)) return@compute null
             if (current.document.modificationStamp != current.stamp) {
                 awaitingOutline = true
                 return@compute null
             }
+            if (opening) cancelOpeningFollow()
             awaitingOutline = false
             val line = editor.caretModel.primaryCaret.logicalPosition.line + 1
             if (openedLine != null) {
@@ -100,9 +125,7 @@ internal class RepoContextCaretSync(
                 openedLine = null
                 if (fromTree) return@compute null
             }
-            promptTargetAtCaret(current.outline.targets, line) { action ->
-                !current.outline.promptControl(action).disabled
-            }
+            documentTargetAtCaret(current.outline.targets, line)
         }
         target?.id?.let(selectTarget)
     }

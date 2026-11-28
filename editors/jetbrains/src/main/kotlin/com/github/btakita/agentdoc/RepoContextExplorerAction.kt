@@ -5,9 +5,11 @@ import com.google.gson.JsonObject
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
+import com.intellij.openapi.actionSystem.CommonDataKeys
 import com.intellij.openapi.application.ReadAction
 import com.intellij.openapi.command.WriteCommandAction
 import com.intellij.openapi.editor.Document
+import com.intellij.openapi.editor.Editor
 import com.intellij.openapi.editor.event.DocumentEvent
 import com.intellij.openapi.editor.event.DocumentListener
 import com.intellij.openapi.fileChooser.FileChooser
@@ -70,6 +72,7 @@ class RepoContextExplorerAction : ImplAction {
     @Suppress("DEPRECATION") // The overload ties the registration to the plugin's project service.
     override fun actionPerformed(e: AnActionEvent) {
         val project = e.project ?: return
+        val editor = e.getData(CommonDataKeys.EDITOR) ?: FileEditorManager.getInstance(project).selectedTextEditor
         val manager = ToolWindowManager.getInstance(project)
         val parent = project.getService(ProjectPluginLifecycleService::class.java)
         val window = manager.getToolWindow(TOOL_WINDOW_ID) ?: manager.registerToolWindow(
@@ -77,14 +80,17 @@ class RepoContextExplorerAction : ImplAction {
         )
         window.setTitle(TITLE)
         window.setStripeTitle(TITLE)
-        if (window.contentManager.contentCount == 0) {
+        val panel = if (window.contentManager.contentCount == 0) {
             val basePath = project.basePath ?: return
             val panel = RepoContextExplorerPanel(project, Path.of(basePath))
             val content = ContentFactory.getInstance().createContent(panel, "", false)
             content.setDisposer(panel)
             window.contentManager.addContent(content)
+            panel
+        } else {
+            window.contentManager.selectedContent?.component as? RepoContextExplorerPanel
         }
-        window.show()
+        window.show { panel?.followOpeningEditor(editor) }
     }
 
     override fun update(e: AnActionEvent) {
@@ -207,6 +213,7 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private val sessionLabel = JBLabel("No session selected.")
     private val documentTree = RepoContextDocumentTree(
         ::updateControls, ::openDocumentTarget, ::submitDocumentQuestion, ::openLinkedDocument,
+        onTreeSelection = { caretSync.cancelOpeningFollow() },
     )
     private val tabs = createRepoContextTabs(project, this, documentTree, repositoryPanel())
     private val documentPrompts = RepoContextDocumentPrompts()
@@ -238,13 +245,11 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private var taskRevision = 0L
     private var answerWork: Future<*>? = null
     @Volatile private var disposed = false
-    private val caretSync = RepoContextCaretSync(project, this, canFollow = {
-        documentTree.followEditorCaret.isSelected && !disposed && !submitting &&
-            documentTree.isShowing && tabs.selectedInfo?.component === documentTree &&
-            !documentTree.isEditingPrompt &&
+    private val caretSync: RepoContextCaretSync = RepoContextCaretSync(project, this, canFollow = {
+        canFollowCaret() && documentTree.isShowing &&
             KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
                 ?.let(documentTree::isAncestorOf) != true
-    }, selectTarget = documentTree::selectTarget)
+    }, canFollowOnOpen = ::canFollowCaret, selectTarget = documentTree::selectTarget)
 
     init {
         border = JBUI.Borders.empty(8)
@@ -264,10 +269,14 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         val preferences = PropertiesComponent.getInstance(project)
         documentTree.followEditorCaret.apply {
             isSelected = preferences.getBoolean(FOLLOW_EDITOR_CARET_KEY, true)
-            addActionListener { preferences.setValue(FOLLOW_EDITOR_CARET_KEY, isSelected, true) }
+            addActionListener {
+                preferences.setValue(FOLLOW_EDITOR_CARET_KEY, isSelected, true)
+                if (!isSelected) caretSync.cancelOpeningFollow()
+            }
         }
         tabs.addListener(object : TabsListener {
             override fun selectionChanged(oldSelection: TabInfo?, newSelection: TabInfo?) {
+                if (newSelection?.component !== documentTree) caretSync.cancelOpeningFollow()
                 if (newSelection?.component === documentTree && background != null && !submitting) {
                     cancelTask()
                     status.text = ""
@@ -554,6 +563,17 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         caretSync.clear()
         documentTree.clear("Reading the session document…")
         refreshOutline()
+    }
+
+    private fun canFollowCaret(): Boolean =
+        documentTree.followEditorCaret.isSelected && !disposed && !submitting &&
+            tabs.selectedInfo?.component === documentTree && !documentTree.isEditingPrompt
+
+    fun followOpeningEditor(editor: Editor?) {
+        if (!canFollowCaret() || editor == null || editor.isDisposed || editor.project !== project) return
+        val file = FileDocumentManager.getInstance().getFile(editor.document) ?: return
+        if (!pinnedSession && file != session && AgentDocSessionFiles.isSessionDocument(file)) setSession(file)
+        if (file == session) caretSync.openAtCaret(editor)
     }
 
     private fun refreshOutline(document: Document? = session?.let(::readDocument)) {

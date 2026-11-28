@@ -7,6 +7,7 @@ use crate::document_explorer::{
     PromptFailure, explorer_active_prompts, load_open_cycle, persist_prompt, spawn_prompt_run,
 };
 use agent_doc_editor_surface_io::{DocumentPromptSubmission, project_document_prompts_with_active};
+use agent_doc_markdown_ast::overlay::parse_open_marker_line;
 use anyhow::{Context, Result, ensure};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
@@ -375,6 +376,23 @@ impl Explorer {
             .get(&row.action)
     }
 
+    fn selected_prompt_context(&self) -> &str {
+        let Some(row) = self.selected_row() else {
+            return "";
+        };
+        if row.id == "document" {
+            return &row.label;
+        }
+        self.source_lines()
+            .map(|line| self.snapshot.preview.line(line))
+            .find(|line| {
+                let text = line.trim_start();
+                !text.is_empty()
+                    && (!text.starts_with("<!--") || parse_open_marker_line(text).is_some())
+            })
+            .unwrap_or(&row.label)
+    }
+
     fn interact(&mut self, screen: &mut Terminal) -> Result<()> {
         loop {
             self.observe_run();
@@ -418,12 +436,14 @@ impl Explorer {
                     self.status = if self.draft.trim().is_empty() {
                         String::new()
                     } else {
-                        "Draft kept. Press p on a promptable item to edit it.".into()
+                        "Draft kept. Press Enter on a promptable item to edit it.".into()
                     };
                 }
                 KeyCode::Char('s') if control => self.submit(),
                 KeyCode::Char('r') if control => self.refresh(),
-                KeyCode::Char('p') if key.modifiers.is_empty() => return KeyAction::EditDraft,
+                KeyCode::Enter | KeyCode::Char('p') if key.modifiers.is_empty() => {
+                    return KeyAction::EditDraft;
+                }
                 KeyCode::PageUp | KeyCode::PageDown | KeyCode::Home | KeyCode::End => {
                     let page = usize::from(height.saturating_sub(5)).max(1);
                     let last = wrap(&self.draft, usize::from(width))
@@ -489,7 +509,7 @@ impl Explorer {
             KeyCode::Char(']') => self.pane_sizes.resize(&panes, true),
             KeyCode::Char('=') => self.pane_sizes = PaneSizes::default(),
             KeyCode::Char('r') => self.refresh(),
-            KeyCode::Char('p') if key.modifiers.is_empty() => {
+            KeyCode::Enter | KeyCode::Char('p') if key.modifiers.is_empty() => {
                 if self
                     .selected_action()
                     .is_some_and(|action| !action.disabled)
@@ -506,21 +526,22 @@ impl Explorer {
     }
 
     fn edit_draft(&mut self, screen: &mut Terminal) -> Result<()> {
-        let outcome = match editor::DraftEditor::prepare(&self.draft) {
-            Ok(mut editor) => {
-                screen.suspend()?;
-                let outcome = editor.edit();
-                screen.resume()?;
-                outcome
-            }
-            Err(error) => Err(error),
-        };
+        let outcome =
+            match editor::DraftEditor::prepare(&self.draft, self.selected_prompt_context()) {
+                Ok(mut editor) => {
+                    screen.suspend()?;
+                    let outcome = editor.edit();
+                    screen.resume()?;
+                    outcome
+                }
+                Err(error) => Err(error),
+            };
         self.status = match outcome {
             Ok(draft) => {
                 self.draft = draft;
                 self.review_top = Some(0);
                 if self.draft.trim().is_empty() {
-                    "No draft to send. Press p to reopen the editor.".into()
+                    "No draft to send. Press Enter to reopen the editor.".into()
                 } else {
                     "Review your draft before sending.".into()
                 }
@@ -653,7 +674,7 @@ impl Explorer {
                 .min(snapshot.projection.nodes.len().saturating_sub(1));
             if self.review_top.take().is_some() {
                 self.status =
-                    "Selected item changed. Your draft is kept. Select a target and press p."
+                    "Selected item changed. Your draft is kept. Select a target and press Enter."
                         .into();
             }
         }
@@ -665,7 +686,7 @@ impl Explorer {
 
     fn submit(&mut self) {
         if self.draft.trim().is_empty() {
-            self.status = "No draft to send. Press p to reopen the editor.".into();
+            self.status = "No draft to send. Press Enter to reopen the editor.".into();
             return;
         }
         if self.running.is_some() {
@@ -800,16 +821,16 @@ impl Explorer {
         }
         if height >= 2 && width > 0 {
             let keys = if self.review_top.is_some() {
-                "Ctrl+S send · p edit · PgUp/Dn review · Ctrl+R refresh · Esc back"
+                "Ctrl+S send · Enter edit · PgUp/Dn · Ctrl+R refresh · Esc back"
             } else if self.search.input.is_some() {
                 "Enter find · Esc cancel"
             } else {
                 match self.focus {
                     Focus::Outline => {
-                        "Outline · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · = reset · p prompt · r refresh"
+                        "Outline · Enter prompt · / find · Tab switch · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · PgUp/Dn · = reset · r refresh"
                     }
                     Focus::Preview => {
-                        "Preview · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · = reset · p prompt · r refresh"
+                        "Preview · Enter prompt · / find · Tab switch · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · PgUp/Dn · = reset · r refresh"
                     }
                 }
             };
@@ -1117,6 +1138,40 @@ impl Drop for Terminal {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn enter_opens_the_editor_with_the_selected_source_row() {
+        let row = "- ### 📥 Prompt on **exact Markdown** [#sample]";
+        let source = format!(
+            "# Sample\n\n## Run <!-- agent:run -->\n{row}\n<!-- /agent:run -->\n\n## Exchange <!-- agent:exchange -->\n\n<!-- /agent:exchange -->\n"
+        );
+        let projection =
+            serde_json::from_value(project_document_prompts_with_active(&source, &[]).unwrap())
+                .unwrap();
+        let snapshot = Snapshot {
+            preview: SourcePreview::new(source, false),
+            projection,
+        };
+        let mut explorer = Explorer::new(PathBuf::new(), snapshot);
+        assert_eq!(explorer.selected_prompt_context(), "Document");
+
+        let press = |explorer: &mut Explorer, code| {
+            explorer.key(KeyEvent::new(code, KeyModifiers::NONE), 80, 30)
+        };
+        for character in "/exact".chars() {
+            assert_eq!(
+                press(&mut explorer, KeyCode::Char(character)),
+                KeyAction::Continue
+            );
+        }
+        assert_eq!(press(&mut explorer, KeyCode::Enter), KeyAction::Continue);
+        assert_eq!(explorer.selected_prompt_context(), row);
+        assert_eq!(press(&mut explorer, KeyCode::Enter), KeyAction::EditDraft);
+        assert_eq!(press(&mut explorer, KeyCode::Enter), KeyAction::EditDraft);
+        assert_eq!(press(&mut explorer, KeyCode::Esc), KeyAction::Continue);
+        assert_eq!(press(&mut explorer, KeyCode::Tab), KeyAction::Continue);
+        assert_eq!(press(&mut explorer, KeyCode::Enter), KeyAction::EditDraft);
+    }
 
     #[test]
     fn receipt_is_reused_only_for_an_exact_draft_and_target() {

@@ -7,13 +7,14 @@ use std::process::Command;
 pub(super) struct DraftEditor {
     command: Command,
     path: PathBuf,
+    context_marker: String,
     _directory: tempfile::TempDir,
     #[cfg(unix)]
     _interrupt: InterruptGuard,
 }
 
 impl DraftEditor {
-    pub(super) fn prepare(draft: &str) -> Result<Self> {
+    pub(super) fn prepare(draft: &str, selected_row: &str) -> Result<Self> {
         let command = editor_command(std::env::var_os("VISUAL"), std::env::var_os("EDITOR"))?;
         let mut builder = tempfile::Builder::new();
         builder.prefix("agent-doc-prompt-");
@@ -26,10 +27,19 @@ impl DraftEditor {
             .tempdir()
             .context("create private editor directory")?;
         let path = directory.path().join("prompt.md");
-        fs::write(&path, draft).context("write temporary draft")?;
+        let context_marker = format!(
+            "<!-- Agent Doc: write your prompt above this line. Selected row for reference. {} -->",
+            uuid::Uuid::new_v4().simple()
+        );
+        fs::write(
+            &path,
+            format!("{draft}\n{context_marker}\n> {selected_row}\n"),
+        )
+        .context("write temporary draft")?;
         Ok(Self {
             command,
             path,
+            context_marker,
             _directory: directory,
             #[cfg(unix)]
             _interrupt: InterruptGuard::install()?,
@@ -37,8 +47,25 @@ impl DraftEditor {
     }
 
     pub(super) fn edit(&mut self) -> Result<String> {
-        read_edited_draft(&mut self.command, &self.path)
+        let contents = read_edited_draft(&mut self.command, &self.path)?;
+        Ok(without_context(contents, &self.context_marker))
     }
+}
+
+fn without_context(mut contents: String, marker: &str) -> String {
+    // The editor may normalize line endings. Strip the single separator we
+    // inserted before the generated footer and keep the prompt itself verbatim.
+    if let Some((before, _)) = contents.split_once(marker) {
+        if before.is_empty() {
+            contents.clear();
+        } else if let Some(body) = before
+            .strip_suffix("\r\n")
+            .or_else(|| before.strip_suffix('\n'))
+        {
+            contents.truncate(body.len());
+        }
+    }
+    contents
 }
 
 fn editor_command(visual: Option<OsString>, editor: Option<OsString>) -> Result<Command> {
@@ -111,6 +138,25 @@ impl Drop for InterruptGuard {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn editor_context_is_removed_without_changing_the_authored_markdown() {
+        let marker = "<!-- Agent Doc: write your prompt above this line. Selected row for reference. test -->";
+        let footer = format!("{marker}\n> - ### A **row** with an <!-- inline note -->\n");
+        let untouched = format!("\n{footer}");
+        assert_eq!(without_context(untouched, marker), "");
+
+        let authored = "> Quoted text\n\n<!-- Authored comment -->\n  ";
+        let edited = format!("{authored}\n{footer}");
+        assert_eq!(without_context(edited, marker), authored);
+
+        let authored = "A **prompt**\r\n";
+        let edited = format!("{authored}\r\n{}", footer.replace('\n', "\r\n"));
+        assert_eq!(without_context(edited, marker), authored);
+
+        let replaced = "A **new** prompt\n> Kept quotation\n";
+        assert_eq!(without_context(replaced.to_owned(), marker), replaced);
+    }
 
     #[test]
     fn preferred_editor_and_quoted_arguments_are_resolved_without_a_shell() {

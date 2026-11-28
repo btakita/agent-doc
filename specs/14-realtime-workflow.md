@@ -827,6 +827,10 @@ source-of-truth document, including editor-buffer changes, pluginless disk
 saves, backlog mirror inputs, priority markers, auto-DAG dependencies, and
 exchange body additions/edits.
 
+A bare queued `agent-doc <FILE>` invocation can wake the owning harness.
+Mid-turn steering omits that trigger from both sides of queue alignment,
+including when the trigger row is pinned, edited, or in a subagents queue.
+
 A route-owned queue mutation retained by the editor/CRDT plane has three
 distinct settled observations. The exact target continues route dispatch; the
 unchanged expected-current baseline remains pending because the retained target

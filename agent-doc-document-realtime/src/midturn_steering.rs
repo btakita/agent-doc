@@ -1459,13 +1459,23 @@ fn queue_alignment(
     boundary: bool,
     prompt_presets: &agent_doc_frontmatter::frontmatter::PromptPresets,
 ) -> QueueAlignment {
-    let old = &watermark.acknowledged_queue;
     // `#steeringclaimparity`: only claimable queue heads can become steering
     // work. In particular, the binary-owned Waiting-on-you mirror contains
     // context parents and completed response metadata; aligning the raw tree
     // offered those rows as fresh subagent dispatch even though `queue claim`
     // correctly refused every one of them.
-    let new = executable_queue_items(current);
+    // A queued session trigger wakes the owning harness. Exclude it on both
+    // sides so it cannot steer the active turn or pair with an actual edit.
+    let old: Vec<String> = watermark
+        .acknowledged_queue
+        .iter()
+        .filter(|norm| !agent_doc_queue::session_trigger::is_session_trigger_prompt(norm))
+        .cloned()
+        .collect();
+    let new: Vec<QueueItem> = executable_queue_items(current)
+        .into_iter()
+        .filter(|item| !is_session_trigger_row(&item.raw, &item.norm))
+        .collect();
     let old_keys: Vec<String> = old.iter().map(|norm| queue_identity(norm)).collect();
     // At the boundary the current item is finished: its consumption is not
     // an operator deletion and an edit to it is ordinary queue work.
@@ -1618,7 +1628,7 @@ fn queue_alignment(
         mut pair_of_new,
         mut old_paired,
         ops,
-    } = agent_doc_queue::queue_head_alignment::pair_queue_heads(old, &new_norms);
+    } = agent_doc_queue::queue_head_alignment::pair_queue_heads(&old, &new_norms);
 
     // `#nestedclaimsteer`: lineage is claim identity, not editable prose. A
     // parent becoming context and exposing a child is a parent deletion plus
@@ -3636,6 +3646,31 @@ mod tests {
         assert!(rendered.contains("dispatch=drain_after_current"));
         assert!(rendered.contains("AFTER the current item closes"));
         assert!(rendered.contains("Do NOT interrupt"));
+    }
+
+    #[test]
+    fn queue_session_trigger_is_ignored_by_midturn_steering() {
+        let owned = BTreeSet::new();
+        let run = |rows| {
+            doc(rows, EX).replacen(
+                "<!-- agent:queue -->",
+                "<!-- agent:queue subagents go -->",
+                1,
+            )
+        };
+        let current = run("- ### 📌 agent-doc /work/sample/bugs.md [#q-1234]\n\
+             - fix the parser\n");
+
+        for previous in ["", "- agent-doc /work/sample/bugs.md\n"] {
+            let wm = seeded(&run(previous), None);
+            let obs = observe(&wm, &current, &quiet_ctx(&owned));
+            assert_eq!(obs.ready.len(), 1, "{:?}", obs.ready);
+            let item = &obs.ready[0];
+            assert_eq!(item.change, SteeringChange::Added);
+            assert_eq!(item.dispatch, SteeringDispatch::Subagent);
+            assert_eq!(item.verbatim, "fix the parser");
+            assert_eq!(obs.next.acknowledged_queue, ["fix the parser"]);
+        }
     }
 
     /// `#runpresetunresolved`: an inline `preset="#name: body"` on the run

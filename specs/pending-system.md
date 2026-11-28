@@ -249,9 +249,12 @@ On every preflight run:
      is the explicit spelling of the legacy behavior. A bare `archive` flag
      defaults to `<document-basename>.done.md` beside the session document.
      Existing inline `agent:done` content is moved into the external file, after
-     which the local component remains only as the routing marker; retries
-     suppress duplicate content and date/id/text entries, and the combined
-     archive entries are ordered by their leading timestamp. Parent-directory
+     which the local component remains only as the routing marker. Preflight
+     and closeout do this even if the document has no live tracked-work
+     section or newly completed item. The current document supplies the
+     entries and archive target, and the commit snapshot receives that
+     routing marker. Retries suppress duplicates even if previously migrated
+     entries are interleaved with other entries by timestamp. Parent-directory
      segments are allowed only while the resolved target remains inside the
      project. Absolute paths, outside-project targets, and non-`.done.md` targets
      fail closed before active tracked work is mutated.

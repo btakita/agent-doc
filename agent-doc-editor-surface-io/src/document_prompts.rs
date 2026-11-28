@@ -980,6 +980,8 @@ mod tests {
         assert_eq!(nodes[at]["label"], "Review the change");
         assert_eq!(nodes[at]["action"], "navigate");
         assert_eq!(nodes[at]["task"]["state"], "submitted");
+        let end_line = nodes[at]["end_line"].as_u64().unwrap() as usize;
+        assert_eq!(shifted.lines().nth(end_line - 1), Some("> Test it"));
 
         let header = shifted
             .lines()
@@ -1014,17 +1016,30 @@ mod tests {
             )
         };
         let sample = append(&format!("\x60\x60\x60md\n{receipt}\n\x60\x60\x60"));
-        assert_eq!(
-            task_projection(&sample, RECEIPT, &[]).0["nodes"][at]["task"]["state"],
-            "submitted"
-        );
-        let answered = append(&format!("Review complete.\n{receipt}"));
+        let sample_projection = task_projection(&sample, RECEIPT, &[]).0;
+        assert_eq!(sample_projection["nodes"][at]["task"]["state"], "submitted");
+        assert_ne!(sample_projection["nodes"][at + 1]["label"], "Answer");
+        let answered = append(&format!("{receipt}\n\nReview complete.\nMore details."));
         let (result, at) = task_projection(&answered, RECEIPT, &[header.into()]);
         assert_eq!(
             result["nodes"][at - 1]["selection_key"],
             beta["selection_key"]
         );
         assert_eq!(result["nodes"][at]["task"]["state"], "answered");
+        let answer = &result["nodes"][at + 1];
+        assert_eq!(answer["label"], "Answer");
+        assert_eq!(answer["action"], "navigate");
+        assert_eq!(
+            answer["depth"].as_u64(),
+            result["nodes"][at]["depth"].as_u64().map(|depth| depth + 1)
+        );
+        let original = answered.lines().collect::<Vec<_>>();
+        let first = answer["line"].as_u64().unwrap() as usize - 1;
+        let end = answer["end_line"].as_u64().unwrap() as usize;
+        assert_eq!(original[first], "### Re: Review");
+        assert!(original[first..end].contains(&"Review complete."));
+        assert!(original[first..end].contains(&"More details."));
+        assert!(!original[first..end].contains(&"<!-- /agent:exchange -->"));
     }
 
     #[test]
@@ -1280,6 +1295,44 @@ mod tests {
         assert_eq!(
             answer(with_exchange(&retained))["text"],
             "The retained worker answered."
+        );
+
+        let original = outline(DOCUMENT);
+        let target = node(&original, "Earlier work");
+        let queued = apply(
+            DOCUMENT,
+            &edit(DOCUMENT, &original["revision"], &target["id"], "Check it"),
+        );
+        let line = queued
+            .lines()
+            .find(|line| line.contains(ANSWER_INSTRUCTION))
+            .unwrap()
+            .trim_start()
+            .strip_prefix("- ")
+            .unwrap();
+        let cell = subagent_completion::cell_with_response(
+            "subagent:sample",
+            line,
+            "sample-key",
+            &format!("Worker checked it.\n\n{marker}"),
+        )
+        .unwrap();
+        let answered = queued.replace(
+            "<!-- /agent:exchange -->",
+            &format!("\n{cell}\n<!-- /agent:exchange -->"),
+        );
+        let (view, at) = task_projection(&answered, RECEIPT, &[]);
+        assert_eq!(view["nodes"][at]["task"]["state"], "answered");
+        let response = &view["nodes"][at + 1];
+        assert_eq!(response["label"], "Answer");
+        let first = response["line"].as_u64().unwrap() as usize - 1;
+        let end = response["end_line"].as_u64().unwrap() as usize;
+        assert!(
+            answered
+                .lines()
+                .skip(first)
+                .take(end - first)
+                .any(|line| line.contains("Worker checked it."))
         );
 
         let untrusted_quote = "### Re: Ordinary quoted example\n> **Subagent response:**";

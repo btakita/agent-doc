@@ -8,6 +8,7 @@ use crate::document_explorer::{
 };
 use agent_doc_editor_surface_io::{DocumentPromptSubmission, project_document_prompts_with_active};
 use agent_doc_markdown_ast::overlay::parse_open_marker_line;
+use agent_doc_watch_io::{ResourceAwareWatcher, WatchFallback};
 use anyhow::{Context, Result, ensure};
 use crossterm::cursor::{Hide, MoveTo, Show};
 use crossterm::event::{
@@ -21,6 +22,7 @@ use crossterm::terminal::{
 };
 use crossterm::{execute, queue};
 use highlight::{Highlights, SourcePreview};
+use notify::{Event as FileEvent, RecursiveMode};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
@@ -43,9 +45,52 @@ pub(crate) fn run(file: &Path) -> Result<()> {
         .canonicalize()
         .with_context(|| format!("open {}", file.display()))?;
     ensure!(file.is_file(), "expected a document file");
+    let updates = match DocumentUpdates::watch(&file) {
+        Ok(updates) => Some(updates),
+        Err(error) => {
+            eprintln!("[explore] automatic refresh unavailable: {error:#}");
+            None
+        }
+    };
     let mut explorer = Explorer::open(file)?;
     let mut screen = Terminal::enter()?;
-    explorer.interact(&mut screen)
+    explorer.interact(&mut screen, updates)
+}
+
+struct DocumentUpdates {
+    watcher: ResourceAwareWatcher,
+    events: Receiver<notify::Result<FileEvent>>,
+}
+
+impl DocumentUpdates {
+    fn watch(file: &Path) -> Result<Self> {
+        let directory = file.parent().context("find document directory")?;
+        let (sender, events) = mpsc::channel();
+        let mut watcher = ResourceAwareWatcher::new(sender, Duration::from_millis(500))?;
+        // Watch the directory so atomic saves do not leave the old inode watched.
+        watcher.watch(directory, RecursiveMode::NonRecursive)?;
+        Ok(Self { watcher, events })
+    }
+
+    fn take_change(&mut self, file: &Path) -> bool {
+        let mut changed = false;
+        for event in self.events.try_iter() {
+            match event {
+                Ok(event) => {
+                    changed |= event.need_rescan()
+                        || (!event.kind.is_access() && event.paths.iter().any(|path| path == file));
+                }
+                Err(error) => match self.watcher.recover_from_event_error(&error) {
+                    Ok(WatchFallback::Activated) => changed = true,
+                    Ok(WatchFallback::Unchanged) => eprintln!("[explore] file watch: {error}"),
+                    Err(fallback) => {
+                        eprintln!("[explore] file watch: {error}; fallback: {fallback}");
+                    }
+                },
+            }
+        }
+        changed
+    }
 }
 
 #[derive(Deserialize)]
@@ -100,6 +145,7 @@ impl Row {
 
 #[derive(Deserialize)]
 struct Task {
+    request_id: String,
     label: String,
 }
 
@@ -393,18 +439,43 @@ impl Explorer {
             .unwrap_or(&row.label)
     }
 
-    fn interact(&mut self, screen: &mut Terminal) -> Result<()> {
+    fn answer_row(&self) -> Option<usize> {
+        let receipt = &self.selected_row()?.task.as_ref()?.request_id;
+        let rows = &self.snapshot.projection.nodes;
+        let index = OutlineJump::FirstChild.target(rows, self.selected)?;
+        (rows[index].id.strip_prefix("prompt-answer:") == Some(receipt)).then_some(index)
+    }
+
+    fn interact(
+        &mut self,
+        screen: &mut Terminal,
+        mut updates: Option<DocumentUpdates>,
+    ) -> Result<()> {
+        let mut redraw = true;
+        let mut refresh_pending = false;
         loop {
-            self.observe_run();
+            let dispatch_finished = self.observe_run();
+            refresh_pending |= dispatch_finished;
+            if let Some(updates) = &mut updates {
+                refresh_pending |= updates.take_change(&self.file);
+            }
+            // Review owns the captured revision until Ctrl+R or exit. A
+            // background document update must not silently rebase a draft.
+            if refresh_pending && self.review_top.is_none() {
+                redraw |= self.refresh_changed();
+                refresh_pending = false;
+            }
             let (width, height) = terminal::size()?;
-            self.render(&mut screen.output, width, height)?;
-            // The dispatch receipt is sent by a background worker. Wait on
-            // input outright when no other event source needs servicing.
-            while self.running.is_some() && !event::poll(Duration::from_millis(150))? {
-                self.observe_run();
-                if self.running.is_none() {
-                    self.render(&mut screen.output, width, height)?;
-                }
+            if redraw || dispatch_finished {
+                self.render(&mut screen.output, width, height)?;
+                redraw = false;
+            }
+            // Multiplex terminal input with the file-watcher and dispatch
+            // channels. Only their events trigger an authoritative text read.
+            if (updates.is_some() || self.running.is_some())
+                && !event::poll(Duration::from_millis(125))?
+            {
+                continue;
             }
             match event::read()? {
                 Event::Key(key) if key.kind != KeyEventKind::Release => {
@@ -421,6 +492,7 @@ impl Explorer {
                 }
                 _ => {}
             }
+            redraw = true;
         }
     }
 
@@ -510,7 +582,11 @@ impl Explorer {
             KeyCode::Char('=') => self.pane_sizes = PaneSizes::default(),
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Enter | KeyCode::Char('p') if key.modifiers.is_empty() => {
-                if self
+                if key.code == KeyCode::Enter
+                    && let Some(answer) = self.answer_row()
+                {
+                    self.visit_selection(answer);
+                } else if self
                     .selected_action()
                     .is_some_and(|action| !action.disabled)
                 {
@@ -661,6 +737,23 @@ impl Explorer {
         }
     }
 
+    fn refresh_changed(&mut self) -> bool {
+        let result = (|| {
+            let content =
+                agent_doc_document_realtime_io::peek_current_document_content(&self.file, SOURCE)?;
+            if agent_doc_hash::content_hash(&content) == self.snapshot.projection.revision {
+                return Ok(None);
+            }
+            Snapshot::project(&self.file, content).map(Some)
+        })();
+        match result {
+            Ok(Some(snapshot)) => self.replace_snapshot(snapshot),
+            Ok(None) => return false,
+            Err(error) => self.status = format!("Automatic refresh failed. {error:#}"),
+        }
+        true
+    }
+
     fn replace_snapshot(&mut self, snapshot: Snapshot) {
         let retained = self
             .snapshot
@@ -672,6 +765,7 @@ impl Explorer {
             self.selected = self
                 .selected
                 .min(snapshot.projection.nodes.len().saturating_sub(1));
+            self.source_scroll = 0;
             if self.review_top.take().is_some() {
                 self.status =
                     "Selected item changed. Your draft is kept. Select a target and press Enter."
@@ -681,7 +775,7 @@ impl Explorer {
         self.history
             .refresh(&snapshot, snapshot.selection_target(self.selected));
         self.snapshot = snapshot;
-        self.show_selection(self.selected);
+        self.search.preview_match = None;
     }
 
     fn submit(&mut self) {
@@ -770,22 +864,21 @@ impl Explorer {
         }
     }
 
-    fn observe_run(&mut self) {
+    fn observe_run(&mut self) -> bool {
         let Some(receiver) = &self.running else {
-            return;
+            return false;
         };
         self.status = match receiver.try_recv() {
-            Ok(Ok(status)) if status.success() => {
-                "Dispatch finished. Press r to refresh the document.".into()
-            }
+            Ok(Ok(status)) if status.success() => "Dispatch finished.".into(),
             Ok(Ok(status)) => format!("Prompt saved. Dispatch exited with {status}."),
             Ok(Err(error)) => format!("Prompt saved. Could not observe dispatch. {error}"),
             Err(TryRecvError::Disconnected) => {
                 "Prompt saved. The dispatch receipt is unavailable.".into()
             }
-            Err(TryRecvError::Empty) => return,
+            Err(TryRecvError::Empty) => return false,
         };
         self.running = None;
+        true
     }
 
     fn render(&self, output: &mut impl Write, width: u16, height: u16) -> io::Result<()> {
@@ -821,20 +914,24 @@ impl Explorer {
         }
         if height >= 2 && width > 0 {
             let keys = if self.review_top.is_some() {
-                "Ctrl+S send · Enter edit · PgUp/Dn · Ctrl+R refresh · Esc back"
+                "Ctrl+S send · Enter edit · PgUp/Dn · Ctrl+R refresh · Esc back".into()
             } else if self.search.input.is_some() {
-                "Enter find · Esc cancel"
+                "Enter find · Esc cancel".into()
             } else {
-                match self.focus {
-                    Focus::Outline => {
-                        "Outline · Enter prompt · / find · Tab switch · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · PgUp/Dn · = reset · r refresh"
-                    }
-                    Focus::Preview => {
-                        "Preview · Enter prompt · / find · Tab switch · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · PgUp/Dn · = reset · r refresh"
-                    }
-                }
+                let pane = match self.focus {
+                    Focus::Outline => "Outline",
+                    Focus::Preview => "Preview",
+                };
+                let enter = if self.answer_row().is_some() {
+                    "Enter answer"
+                } else {
+                    "Enter prompt"
+                };
+                format!(
+                    "{pane} · {enter} · / find · Tab switch · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · PgUp/Dn · = reset · r refresh"
+                )
             };
-            print_at(output, 0, height - 1, width, keys)?;
+            print_at(output, 0, height - 1, width, &keys)?;
         }
         output.flush()
     }
@@ -1192,6 +1289,48 @@ mod tests {
     }
 
     #[test]
+    fn enter_on_the_answered_prompt_opens_its_saved_response() {
+        let receipt = "0123456789abcdef0123456789abcdef";
+        let source = format!(
+            "# Sample\n\n## Exchange <!-- agent:exchange -->\n\n\
+             ❯ Document Explorer prompt. Please answer the quoted request and include a standalone HTML comment whose text is repo-context-answer:{receipt} in your matching response.\n\
+             > Where are the instructions?\n\n\
+             ### Re: Instructions\n\n<!-- repo-context-answer:{receipt} -->\n\n\
+             The instructions are in the ticket.\n<!-- /agent:exchange -->\n"
+        );
+        let projection =
+            serde_json::from_value(project_document_prompts_with_active(&source, &[]).unwrap())
+                .unwrap();
+        let snapshot = Snapshot {
+            preview: SourcePreview::new(source, false),
+            projection,
+        };
+        let mut explorer = Explorer::new(PathBuf::new(), snapshot);
+        explorer.visit_selection(
+            explorer
+                .snapshot
+                .projection
+                .nodes
+                .iter()
+                .position(|row| row.task.is_some())
+                .expect("prompt row"),
+        );
+        assert!(
+            explorer
+                .source_lines()
+                .any(|line| explorer.snapshot.preview.line(line) == "> Where are the instructions?")
+        );
+        explorer.key(KeyEvent::new(KeyCode::Tab, KeyModifiers::NONE), 90, 30);
+        let enter = KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE);
+        assert_eq!(explorer.key(enter, 90, 30), KeyAction::Continue);
+        assert_eq!(explorer.selected_row().unwrap().label, "Answer");
+        assert!(matches!(explorer.focus, Focus::Preview));
+        assert!(explorer.source_lines().any(|line| {
+            explorer.snapshot.preview.line(line) == "The instructions are in the ticket."
+        }));
+    }
+
+    #[test]
     fn outline_selection_covers_highlights_and_task_badges_without_leaking_style() {
         let label = "**é界** plain";
         let preview = SourcePreview::new(label.to_owned(), true);
@@ -1204,6 +1343,7 @@ mod tests {
             depth: 0,
             action: String::new(),
             task: Some(Task {
+                request_id: String::new(),
                 label: "Pending".into(),
             }),
             highlights: preview.outline_highlights(label, 0),

@@ -13,6 +13,7 @@ use agent_doc_markdown_ast::{
 };
 use serde::Serialize;
 use std::collections::{HashMap, HashSet};
+use std::ops::Range;
 
 pub(super) const ANSWER_PREFIX: &str = "repo-context-answer:";
 const ANCHOR_PREFIX: &str = "<!-- repo-context-target:";
@@ -183,36 +184,56 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
         .filter_map(|prompt| active_request_id(prompt))
         .collect();
     let Some(exchange) = projection.exchange else {
-        update_queue_tasks(&mut projection.nodes, &active, &HashSet::new());
+        update_queue_tasks(&mut projection.nodes, &active, &HashMap::new());
         return;
     };
     let body = exchange.content(projection.source);
     if !body.contains(ANSWER_PREFIX) {
-        update_queue_tasks(&mut projection.nodes, &active, &HashSet::new());
+        update_queue_tasks(&mut projection.nodes, &active, &HashMap::new());
         return;
     }
     let scan = ComponentMarkerScan::new(body);
     let exchange_nodes = parse_exchange_nodes(body);
-    let mut answers = worker_answer_receipts(body, &scan);
+    let mut answers = HashMap::new();
+    let mut response_ranges = Vec::new();
     let mut requests = Vec::new();
     let mut offset = 0;
     for node in &exchange_nodes {
+        let start = offset;
+        let is_response = matches!(node.kind, ExchangeNodeKind::Response { .. });
+        let end = start + node.lines.iter().map(String::len).sum::<usize>();
+        if is_response {
+            response_ranges.push(start..end);
+        }
         if let Some(request) = exchange_request(node) {
-            requests.push((offset, request, node));
+            requests.push((start..end, request, node));
         }
         for line in &node.lines {
-            if matches!(node.kind, ExchangeNodeKind::Response { .. })
+            if is_response
                 && !scan.in_code(offset)
                 && let Some(receipt) = answer_receipt(line)
             {
-                answers.insert(receipt.to_string());
+                answers.insert(receipt.to_owned(), start..end);
             }
             offset += line.len();
         }
     }
+    // A directly marked answer is canonical when both the coordinator and a
+    // retained worker record answer the same prompt.
+    visit_worker_exchange_answers(body, &scan, |start, item, response| {
+        if let Some(receipt) = active_request_id(item)
+            && !answers.contains_key(receipt)
+            && checked_worker_response(response, &format!("{ANSWER_PREFIX}{receipt}")).is_some()
+            && let Some(range) =
+                response_ranges.get(response_ranges.partition_point(|range| range.end <= start))
+            && range.contains(&start)
+        {
+            answers.insert(receipt.to_owned(), range.clone());
+        }
+    });
 
     update_queue_tasks(&mut projection.nodes, &active, &answers);
-    if requests.is_empty() {
+    if requests.is_empty() && answers.is_empty() {
         return;
     }
 
@@ -233,7 +254,7 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
 
     let mut children: HashMap<usize, Vec<Target>> = HashMap::new();
     let mut projected = HashSet::new();
-    for (offset, request, node) in requests {
+    for (range, request, node) in requests {
         if !projected.insert(request.request_id) {
             continue;
         }
@@ -248,15 +269,16 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
             .unwrap_or(exchange_index);
         let mut target = projection.target(
             request_label(node),
-            exchange.open_end + offset,
+            exchange.open_end + range.start,
             projection.nodes[parent].depth + 1,
         );
+        target.end_line = Some(projection.line(exchange.open_end + range.end - 1));
         target.id = format!("prompt-task:{}", request.request_id);
         target.selection_key = Some(target.id.clone());
         target.action = Action::Navigate;
         target.task = Some(PromptTask {
             request_id: request.request_id.to_string(),
-            state: if answers.contains(request.request_id) {
+            state: if answers.contains_key(request.request_id) {
                 PromptTaskState::Answered
             } else if request.marked_running || active.contains(request.request_id) {
                 PromptTaskState::Running
@@ -267,18 +289,41 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
         children.entry(parent).or_default().push(target);
     }
 
+    let mut attached = HashSet::new();
     projection.nodes = std::mem::take(&mut projection.nodes)
         .into_iter()
         .enumerate()
         .flat_map(|(index, target)| {
             std::iter::once(target).chain(children.remove(&index).into_iter().flatten())
         })
+        .flat_map(|target| {
+            let answer = target.task.as_ref().and_then(|task| {
+                let range = answers.get(&task.request_id)?;
+                if !attached.insert(task.request_id.clone()) {
+                    return None;
+                }
+                let mut answer = projection.target(
+                    "Answer".into(),
+                    exchange.open_end + range.start,
+                    target.depth + 1,
+                );
+                answer.end_line = Some(projection.line(exchange.open_end + range.end - 1));
+                answer.id = format!("prompt-answer:{}", task.request_id);
+                answer.selection_key = Some(answer.id.clone());
+                Some(answer)
+            });
+            std::iter::once(target).chain(answer)
+        })
         .collect();
 }
 
-fn update_queue_tasks(nodes: &mut [Target], active: &HashSet<&str>, answers: &HashSet<String>) {
+fn update_queue_tasks(
+    nodes: &mut [Target],
+    active: &HashSet<&str>,
+    answers: &HashMap<String, Range<usize>>,
+) {
     for task in nodes.iter_mut().filter_map(|target| target.task.as_mut()) {
-        if answers.contains(&task.request_id) {
+        if answers.contains_key(&task.request_id) {
             task.state = match task.state {
                 PromptTaskState::Reported => PromptTaskState::Reported,
                 _ => PromptTaskState::Answered,
@@ -288,16 +333,4 @@ fn update_queue_tasks(nodes: &mut [Target], active: &HashSet<&str>, answers: &Ha
             task.state = PromptTaskState::Running;
         }
     }
-}
-
-fn worker_answer_receipts(body: &str, scan: &ComponentMarkerScan) -> HashSet<String> {
-    let mut receipts = HashSet::new();
-    visit_worker_exchange_answers(body, scan, |_, item, response| {
-        if let Some(id) = active_request_id(item)
-            && checked_worker_response(response, &format!("{ANSWER_PREFIX}{id}")).is_some()
-        {
-            receipts.insert(id.to_owned());
-        }
-    });
-    receipts
 }

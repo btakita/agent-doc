@@ -366,7 +366,7 @@ impl Explorer {
                     self.status = action.hint.clone();
                 }
             }
-            code => self.navigate(code, &panes),
+            _ => self.navigate(key, &panes),
         }
         false
     }
@@ -418,7 +418,18 @@ impl Explorer {
         };
     }
 
-    fn navigate(&mut self, code: KeyCode, panes: &Panes) {
+    fn navigate(&mut self, key: KeyEvent, panes: &Panes) {
+        if let Some(jump) = OutlineJump::from_key(key) {
+            if let Focus::Outline = self.focus
+                && let Some(target) = jump.target(&self.snapshot.projection.nodes, self.selected)
+            {
+                self.selected = target;
+                self.source_scroll = 0;
+                self.search.preview_match = None;
+            }
+            return;
+        }
+
         let selection_before = self.selected;
         let (position, last, page) = match self.focus {
             Focus::Outline => (
@@ -436,7 +447,7 @@ impl Explorer {
             }
         };
         let current = (*position).min(last);
-        *position = match code {
+        *position = match key.code {
             KeyCode::Up | KeyCode::Char('k') => current.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => (current + 1).min(last),
             KeyCode::PageUp => current.saturating_sub(page),
@@ -720,6 +731,50 @@ impl Explorer {
     }
 }
 
+enum OutlineJump {
+    Parent,
+    FirstChild,
+    PreviousSibling,
+    NextSibling,
+}
+
+impl OutlineJump {
+    fn from_key(key: KeyEvent) -> Option<Self> {
+        match (key.code, key.modifiers) {
+            (KeyCode::Left, KeyModifiers::NONE) => Some(Self::Parent),
+            (KeyCode::Right, KeyModifiers::NONE) => Some(Self::FirstChild),
+            (KeyCode::Up, KeyModifiers::CONTROL) => Some(Self::PreviousSibling),
+            (KeyCode::Down, KeyModifiers::CONTROL) => Some(Self::NextSibling),
+            _ => None,
+        }
+    }
+
+    fn target(self, rows: &[Row], selected: usize) -> Option<usize> {
+        let depth = rows.get(selected)?.depth;
+        // Rows are the outline in preorder. A shallower row ends the search
+        // for siblings so a jump cannot enter a different parent's subtree.
+        match self {
+            Self::Parent => rows[..selected].iter().rposition(|row| row.depth < depth),
+            Self::FirstChild => rows
+                .get(selected + 1)
+                .filter(|row| row.depth.checked_sub(1) == Some(depth))
+                .map(|_| selected + 1),
+            Self::PreviousSibling => rows[..selected]
+                .iter()
+                .enumerate()
+                .rev()
+                .take_while(|(_, row)| row.depth >= depth)
+                .find_map(|(index, row)| (row.depth == depth).then_some(index)),
+            Self::NextSibling => rows
+                .iter()
+                .enumerate()
+                .skip(selected + 1)
+                .take_while(|(_, row)| row.depth >= depth)
+                .find_map(|(index, row)| (row.depth == depth).then_some(index)),
+        }
+    }
+}
+
 struct Panes {
     outline_top: u16,
     outline_height: u16,
@@ -968,14 +1023,16 @@ mod tests {
 
     #[test]
     fn navigation_pages_the_focused_pane_and_keeps_preview_position_on_focus_change() {
-        let nodes = (0..8)
-            .map(|index| Row {
+        let nodes = [0, 1, 2, 1, 2, 2, 0, 1]
+            .into_iter()
+            .enumerate()
+            .map(|(index, depth)| Row {
                 id: index.to_string(),
                 selection_key: None,
                 label: format!("Heading {index}"),
                 line: index + 1,
                 end_line: Some(index + 12),
-                depth: 0,
+                depth,
                 action: String::new(),
                 task: None,
                 highlights: Vec::new(),
@@ -1010,6 +1067,29 @@ mod tests {
         assert_eq!(press(KeyCode::BackTab, KeyModifiers::SHIFT), (4, 5));
         assert_eq!(press(KeyCode::PageDown, plain), (7, 0));
         assert_eq!(press(KeyCode::PageUp, plain), (3, 0));
+
+        let control = KeyModifiers::CONTROL;
+        assert_eq!(press(KeyCode::Down, control), (3, 0));
+        assert_eq!(press(KeyCode::Up, control), (1, 0));
+        assert_eq!(press(KeyCode::Right, plain), (2, 0));
+        assert_eq!(press(KeyCode::Right, plain), (2, 0));
+        assert_eq!(press(KeyCode::Down, control), (2, 0));
+        assert_eq!(press(KeyCode::Left, plain), (1, 0));
+        assert_eq!(press(KeyCode::Down, control), (3, 0));
+        assert_eq!(press(KeyCode::Right, plain), (4, 0));
+        assert_eq!(press(KeyCode::Down, control), (5, 0));
+        assert_eq!(press(KeyCode::Up, control), (4, 0));
+        assert_eq!(press(KeyCode::Tab, plain), (4, 0));
+        assert_eq!(press(KeyCode::Down, plain), (4, 1));
+        assert_eq!(press(KeyCode::Up, control), (4, 1));
+        assert_eq!(press(KeyCode::Left, plain), (4, 1));
+        assert_eq!(press(KeyCode::Tab, plain), (4, 1));
+        assert_eq!(press(KeyCode::Left, plain), (3, 0));
+        assert_eq!(press(KeyCode::Left, plain), (0, 0));
+        assert_eq!(press(KeyCode::Left, plain), (0, 0));
+        assert_eq!(press(KeyCode::Down, control), (6, 0));
+        assert_eq!(press(KeyCode::Right, plain), (7, 0));
+        assert_eq!(press(KeyCode::Up, control), (7, 0));
     }
 
     #[test]

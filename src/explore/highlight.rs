@@ -20,6 +20,12 @@ pub(super) fn enabled() -> bool {
 
 pub(super) type Highlights = Vec<(Range<usize>, ContentStyle)>;
 
+pub(super) struct PreviewRow {
+    pub(super) index: usize,
+    pub(super) bytes: Range<usize>,
+    gutter: bool,
+}
+
 pub(super) struct SourcePreview {
     content: String,
     lines: Vec<Range<usize>>,
@@ -62,6 +68,39 @@ impl SourcePreview {
         &self.content[self.lines[index].clone()]
     }
 
+    pub(super) fn wrapped_rows(&self, lines: Range<usize>, width: u16) -> Vec<PreviewRow> {
+        let mut rows = Vec::new();
+        for index in lines {
+            let line = self.line(index);
+            let prefix_width = line_prefix(index).len();
+            let width = usize::from(width);
+            let gutter = width >= prefix_width + 2;
+            let text_width = if gutter { width - prefix_width } else { width };
+            let mut start = 0;
+            loop {
+                let mut available = text_width;
+                let mut end = start + clip_to_width(&line[start..], &mut available).len();
+                if end == start
+                    && let Some(c) = line[start..].chars().next()
+                {
+                    // A wide glyph on a one-column terminal cannot fit, but
+                    // it must not prevent later text from being reached.
+                    end += c.len_utf8();
+                }
+                rows.push(PreviewRow {
+                    index,
+                    bytes: start..end,
+                    gutter,
+                });
+                if end == line.len() {
+                    break;
+                }
+                start = end;
+            }
+        }
+        rows
+    }
+
     pub(super) fn print_line(
         &self,
         output: &mut impl Write,
@@ -71,16 +110,43 @@ impl SourcePreview {
         index: usize,
         active: bool,
     ) -> io::Result<()> {
+        let row = PreviewRow {
+            index,
+            bytes: 0..self.lines[index].len(),
+            gutter: true,
+        };
+        self.print_row(output, x, y, width, &row, active)
+    }
+
+    pub(super) fn print_row(
+        &self,
+        output: &mut impl Write,
+        x: u16,
+        y: u16,
+        width: u16,
+        row: &PreviewRow,
+        active: bool,
+    ) -> io::Result<()> {
         let mut columns = usize::from(width);
-        let prefix = format!("{:>4}  ", index + 1);
+        let prefix = if row.gutter {
+            let numbered = line_prefix(row.index);
+            if row.bytes.start == 0 {
+                numbered
+            } else {
+                " ".repeat(numbered.len())
+            }
+        } else {
+            String::new()
+        };
         let visible_prefix = clip_to_width(&prefix, &mut columns);
         if active {
             queue!(output, SetAttribute(Attribute::Reverse))?;
         }
         queue!(output, MoveTo(x, y), Print(visible_prefix))?;
         if visible_prefix.len() == prefix.len() {
-            let start = self.lines[index].start;
-            let end = start + clip_to_width(self.line(index), &mut columns).len();
+            let start = self.lines[row.index].start + row.bytes.start;
+            let end =
+                start + clip_to_width(&self.line(row.index)[row.bytes.clone()], &mut columns).len();
             print_spans(output, &self.content, start..end, &self.highlights, active)?;
         }
         if active {
@@ -127,6 +193,10 @@ impl SourcePreview {
             .map(|(range, style)| (range.start - start..range.end - start, style))
             .collect()
     }
+}
+
+fn line_prefix(index: usize) -> String {
+    format!("{:>4}  ", index + 1)
 }
 
 fn projected_component_marker(source: &str, label: &str) -> bool {

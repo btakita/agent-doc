@@ -21,7 +21,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use crossterm::{execute, queue};
-use highlight::{Highlights, SourcePreview};
+use highlight::{Highlights, PreviewRow, SourcePreview};
 use notify::{Event as FileEvent, RecursiveMode};
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -343,6 +343,17 @@ fn next_match(
     }
 }
 
+fn match_byte(line: &str, query: &str) -> Option<usize> {
+    let folded_offset = line.to_lowercase().find(query)?;
+    // An original character can expand when lowercased. Map the hit back to
+    // the source bytes used by the wrapped rows and syntax spans.
+    let mut folded_end = 0;
+    line.char_indices().find_map(|(offset, c)| {
+        folded_end += c.to_lowercase().map(char::len_utf8).sum::<usize>();
+        (folded_end > folded_offset).then_some(offset)
+    })
+}
+
 struct Explorer {
     file: PathBuf,
     snapshot: Snapshot,
@@ -648,9 +659,17 @@ impl Explorer {
             Focus::Preview => {
                 let lines = self.source_lines();
                 let first = lines.start;
-                let current = self.search.preview_match.map_or(
-                    self.source_scroll
-                        .min(panes.source_scroll_limit(lines.len())),
+                let wrapped = self.wrapped_answer(panes.source_width);
+                let row_count = wrapped.as_ref().map_or(lines.len(), Vec::len);
+                let scroll_limit = panes.source_scroll_limit(row_count);
+                let current_row = self.source_scroll.min(scroll_limit);
+                let current = self.search.preview_match.map_or_else(
+                    || {
+                        wrapped
+                            .as_ref()
+                            .and_then(|rows| rows.get(current_row))
+                            .map_or(current_row, |row| row.index - first)
+                    },
                     |line| line - first,
                 );
                 if let Some(index) = next_match(lines.len(), current, backward, |&index| {
@@ -660,9 +679,18 @@ impl Explorer {
                         .to_lowercase()
                         .contains(query)
                 }) {
-                    self.source_scroll = index.min(panes.source_scroll_limit(lines.len()));
-                    self.search.preview_match = Some(first + index);
-                    format!("Match at line {} · n/N next/previous", first + index + 1)
+                    let line = first + index;
+                    let found_row = wrapped
+                        .as_ref()
+                        .and_then(|rows| {
+                            let byte = match_byte(self.snapshot.preview.line(line), query)?;
+                            rows.iter()
+                                .position(|row| row.index == line && row.bytes.contains(&byte))
+                        })
+                        .unwrap_or(index);
+                    self.source_scroll = found_row.min(scroll_limit);
+                    self.search.preview_match = Some(line);
+                    format!("Match at line {} · n/N next/previous", line + 1)
                 } else {
                     "No matches in this section.".into()
                 }
@@ -687,7 +715,10 @@ impl Explorer {
                 usize::from(panes.outline_height.max(1)),
             ),
             Focus::Preview => {
-                let last = panes.source_scroll_limit(self.source_lines().len());
+                let row_count = self
+                    .wrapped_answer(panes.source_width)
+                    .map_or_else(|| self.source_lines().len(), |rows| rows.len());
+                let last = panes.source_scroll_limit(row_count);
                 (
                     self.source_scroll,
                     last,
@@ -725,6 +756,17 @@ impl Explorer {
                 .min(line_count);
             first..end
         })
+    }
+
+    fn wrapped_answer(&self, width: u16) -> Option<Vec<PreviewRow>> {
+        self.selected_row()?
+            .id
+            .starts_with("prompt-answer:")
+            .then(|| {
+                self.snapshot
+                    .preview
+                    .wrapped_rows(self.source_lines(), width)
+            })
     }
 
     fn refresh(&mut self) {
@@ -953,6 +995,22 @@ impl Explorer {
                 panes.outline_width,
                 first + offset == self.selected,
             )?;
+        }
+        if let Some(rows) = self.wrapped_answer(panes.source_width) {
+            let first = self
+                .source_scroll
+                .min(panes.source_scroll_limit(rows.len()));
+            for (offset, row) in (0..panes.source_height).zip(&rows[first..]) {
+                self.snapshot.preview.print_row(
+                    output,
+                    panes.source_left,
+                    panes.source_top + offset,
+                    panes.source_width,
+                    row,
+                    self.search.preview_match == Some(row.index),
+                )?;
+            }
+            return Ok(());
         }
         let lines = self.source_lines();
         let first = lines.start
@@ -1291,12 +1349,13 @@ mod tests {
     #[test]
     fn enter_on_the_answered_prompt_opens_its_saved_response() {
         let receipt = "0123456789abcdef0123456789abcdef";
+        let long_reply = format!("{}İ Follow the verification checklist.", "x".repeat(425));
         let source = format!(
             "# Sample\n\n## Exchange <!-- agent:exchange -->\n\n\
              ❯ Document Explorer prompt. Please answer the quoted request and include a standalone HTML comment whose text is repo-context-answer:{receipt} in your matching response.\n\
              > Where are the instructions?\n\n\
              ### Re: Instructions\n\n<!-- repo-context-answer:{receipt} -->\n\n\
-             The instructions are in the ticket.\n<!-- /agent:exchange -->\n"
+             The instructions are in the ticket.\n\n{long_reply}\n<!-- /agent:exchange -->\n"
         );
         let projection =
             serde_json::from_value(project_document_prompts_with_active(&source, &[]).unwrap())
@@ -1328,6 +1387,31 @@ mod tests {
         assert!(explorer.source_lines().any(|line| {
             explorer.snapshot.preview.line(line) == "The instructions are in the ticket."
         }));
+
+        let draw = |explorer: &Explorer| {
+            let mut output = Vec::new();
+            explorer
+                .render_panes(&mut output, explorer.pane_sizes.fit(66, 14))
+                .unwrap();
+            String::from_utf8(output).unwrap()
+        };
+        let tail = "Follow the verification checklist.";
+        assert!(!draw(&explorer).contains(tail));
+        let press = |explorer: &mut Explorer, code| {
+            explorer.key(KeyEvent::new(code, KeyModifiers::NONE), 66, 14)
+        };
+        for _ in 0..3 {
+            press(&mut explorer, KeyCode::PageDown);
+        }
+        assert!(draw(&explorer).contains(tail));
+        press(&mut explorer, KeyCode::Home);
+        assert!(!draw(&explorer).contains(tail));
+        for c in "/VERIFICATION CHECKLIST".chars() {
+            press(&mut explorer, KeyCode::Char(c));
+        }
+        press(&mut explorer, KeyCode::Enter);
+        assert!(draw(&explorer).contains(tail));
+        assert_eq!(explorer.selected_row().unwrap().label, "Answer");
     }
 
     #[test]

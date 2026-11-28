@@ -153,22 +153,106 @@ impl Snapshot {
             projection,
         })
     }
+
+    fn selection_target(&self, index: usize) -> Option<SelectionTarget> {
+        self.projection
+            .nodes
+            .get(index)
+            .map(|row| SelectionTarget::new(row, &self.projection.revision))
+    }
+
+    fn resolve_selection(&self, target: &SelectionTarget) -> Option<usize> {
+        let nodes = &self.projection.nodes;
+        match target {
+            SelectionTarget::Stable(key) => nodes
+                .iter()
+                .position(|row| row.selection_key.as_ref() == Some(key)),
+            SelectionTarget::Snapshot { revision, id } if self.projection.revision == *revision => {
+                nodes.iter().position(|row| row.id == *id)
+            }
+            SelectionTarget::Snapshot { .. } => None,
+        }
+    }
 }
 
-#[derive(PartialEq)]
-enum DraftTarget {
+#[derive(Clone, PartialEq)]
+enum SelectionTarget {
     Stable(String),
     Snapshot { revision: String, id: String },
 }
 
+impl SelectionTarget {
+    fn new(row: &Row, revision: &str) -> Self {
+        match &row.selection_key {
+            Some(key) => Self::Stable(key.clone()),
+            None => Self::Snapshot {
+                revision: revision.into(),
+                id: row.id.clone(),
+            },
+        }
+    }
+}
+
+#[derive(Default)]
+struct SelectionHistory {
+    entries: Vec<SelectionTarget>,
+    position: usize,
+}
+
+impl SelectionHistory {
+    fn visit(&mut self, target: SelectionTarget) {
+        self.entries.truncate(self.position + 1);
+        self.entries.push(target);
+        self.position = self.entries.len() - 1;
+    }
+
+    fn step(&mut self, snapshot: &Snapshot, forward: bool) -> Option<usize> {
+        let position = if forward {
+            self.position + 1
+        } else {
+            self.position.checked_sub(1)?
+        };
+        let selected = snapshot.resolve_selection(self.entries.get(position)?)?;
+        self.position = position;
+        Some(selected)
+    }
+
+    fn refresh(&mut self, snapshot: &Snapshot, current: Option<SelectionTarget>) {
+        let Some(current) = current else {
+            *self = Self::default();
+            return;
+        };
+        let previous_position = self.position;
+        self.position = 0;
+        for (index, target) in std::mem::take(&mut self.entries).into_iter().enumerate() {
+            let target = if index == previous_position {
+                current.clone()
+            } else if snapshot.resolve_selection(&target).is_some() {
+                target
+            } else {
+                continue;
+            };
+            if self.entries.last() != Some(&target) {
+                self.entries.push(target);
+            }
+            if index == previous_position {
+                self.position = self.entries.len() - 1;
+            }
+        }
+        if self.entries.is_empty() {
+            self.visit(current);
+        }
+    }
+}
+
 struct DraftAttempt {
     receipt: String,
-    target: DraftTarget,
+    target: SelectionTarget,
     text: String,
 }
 
 impl DraftAttempt {
-    fn for_submission(previous: Option<Self>, target: DraftTarget, text: &str) -> Self {
+    fn for_submission(previous: Option<Self>, target: SelectionTarget, text: &str) -> Self {
         match previous {
             Some(attempt) if attempt.target == target && attempt.text == text => attempt,
             _ => Self {
@@ -215,6 +299,7 @@ struct Explorer {
     file: PathBuf,
     snapshot: Snapshot,
     selected: usize,
+    history: SelectionHistory,
     source_scroll: usize,
     focus: Focus,
     search: Search,
@@ -233,10 +318,15 @@ impl Explorer {
     }
 
     fn new(file: PathBuf, snapshot: Snapshot) -> Self {
+        let mut history = SelectionHistory::default();
+        if let Some(target) = snapshot.selection_target(0) {
+            history.visit(target);
+        }
         Self {
             file,
             snapshot,
             selected: 0,
+            history,
             source_scroll: 0,
             focus: Focus::default(),
             search: Search::default(),
@@ -251,6 +341,21 @@ impl Explorer {
 
     fn selected_row(&self) -> Option<&Row> {
         self.snapshot.projection.nodes.get(self.selected)
+    }
+
+    fn visit_selection(&mut self, index: usize) {
+        if index != self.selected
+            && let Some(target) = self.snapshot.selection_target(index)
+        {
+            self.history.visit(target);
+            self.show_selection(index);
+        }
+    }
+
+    fn show_selection(&mut self, index: usize) {
+        self.selected = index;
+        self.source_scroll = 0;
+        self.search.preview_match = None;
     }
 
     fn selected_action(&self) -> Option<&PromptAction> {
@@ -340,6 +445,17 @@ impl Explorer {
             return false;
         }
 
+        if key.modifiers == KeyModifiers::ALT && matches!(key.code, KeyCode::Left | KeyCode::Right)
+        {
+            if let Some(index) = self
+                .history
+                .step(&self.snapshot, key.code == KeyCode::Right)
+            {
+                self.show_selection(index);
+            }
+            return false;
+        }
+
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return true,
             KeyCode::Char('/') => self.search.input = Some(String::new()),
@@ -383,11 +499,7 @@ impl Explorer {
                 if let Some(index) = next_match(rows.len(), self.selected, backward, |&index| {
                     rows[index].label.to_lowercase().contains(query)
                 }) {
-                    if index != self.selected {
-                        self.selected = index;
-                        self.source_scroll = 0;
-                        self.search.preview_match = None;
-                    }
+                    self.visit_selection(index);
                     "Outline match · n/N next/previous".into()
                 } else {
                     "No outline matches.".into()
@@ -423,31 +535,28 @@ impl Explorer {
             if let Focus::Outline = self.focus
                 && let Some(target) = jump.target(&self.snapshot.projection.nodes, self.selected)
             {
-                self.selected = target;
-                self.source_scroll = 0;
-                self.search.preview_match = None;
+                self.visit_selection(target);
             }
             return;
         }
 
-        let selection_before = self.selected;
         let (position, last, page) = match self.focus {
             Focus::Outline => (
-                &mut self.selected,
+                self.selected,
                 self.snapshot.projection.nodes.len().saturating_sub(1),
                 usize::from(panes.outline_height.max(1)),
             ),
             Focus::Preview => {
                 let last = panes.source_scroll_limit(self.source_lines().len());
                 (
-                    &mut self.source_scroll,
+                    self.source_scroll,
                     last,
                     usize::from(panes.source_height.saturating_sub(1).max(1)),
                 )
             }
         };
-        let current = (*position).min(last);
-        *position = match key.code {
+        let current = position.min(last);
+        let next = match key.code {
             KeyCode::Up | KeyCode::Char('k') => current.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => (current + 1).min(last),
             KeyCode::PageUp => current.saturating_sub(page),
@@ -456,11 +565,12 @@ impl Explorer {
             KeyCode::End => last,
             _ => return,
         };
-        if self.selected != selection_before {
-            self.source_scroll = 0;
-        }
-        if self.selected != selection_before || matches!(self.focus, Focus::Preview) {
-            self.search.preview_match = None;
+        match self.focus {
+            Focus::Outline => self.visit_selection(next),
+            Focus::Preview => {
+                self.source_scroll = next;
+                self.search.preview_match = None;
+            }
         }
     }
 
@@ -488,16 +598,10 @@ impl Explorer {
     }
 
     fn replace_snapshot(&mut self, snapshot: Snapshot) {
-        let retained = self.selected_row().and_then(|row| {
-            snapshot.projection.nodes.iter().position(|candidate| {
-                if let Some(key) = &row.selection_key {
-                    candidate.selection_key.as_ref() == Some(key)
-                } else {
-                    snapshot.projection.revision == self.snapshot.projection.revision
-                        && candidate.id == row.id
-                }
-            })
-        });
+        let retained = self
+            .snapshot
+            .selection_target(self.selected)
+            .and_then(|target| snapshot.resolve_selection(&target));
         if let Some(index) = retained {
             self.selected = index;
         } else {
@@ -511,9 +615,10 @@ impl Explorer {
                         .into();
             }
         }
+        self.history
+            .refresh(&snapshot, snapshot.selection_target(self.selected));
         self.snapshot = snapshot;
-        self.source_scroll = 0;
-        self.search.preview_match = None;
+        self.show_selection(self.selected);
     }
 
     fn submit(&mut self) {
@@ -530,13 +635,7 @@ impl Explorer {
         };
         let revision = self.snapshot.projection.revision.clone();
         let id = row.id.clone();
-        let target = match &row.selection_key {
-            Some(key) => DraftTarget::Stable(key.clone()),
-            None => DraftTarget::Snapshot {
-                revision: revision.clone(),
-                id: id.clone(),
-            },
-        };
+        let target = SelectionTarget::new(row, &revision);
         let attempt = DraftAttempt::for_submission(self.draft_attempt.take(), target, &self.draft);
         let receipt = attempt.receipt.clone();
         self.draft_attempt = Some(attempt);
@@ -661,10 +760,10 @@ impl Explorer {
             } else {
                 match self.focus {
                     Focus::Outline => {
-                        "Outline · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · ↑/↓ select · = reset · p prompt · r refresh"
+                        "Outline · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · = reset · p prompt · r refresh"
                     }
                     Focus::Preview => {
-                        "Preview · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · ↑/↓ scroll · = reset · p prompt · r refresh"
+                        "Preview · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · Alt+←/→ history · ↑/↓ · = reset · p prompt · r refresh"
                     }
                 }
             };
@@ -962,7 +1061,7 @@ mod tests {
 
     #[test]
     fn receipt_is_reused_only_for_an_exact_draft_and_target() {
-        let target = || DraftTarget::Stable("document".into());
+        let target = || SelectionTarget::Stable("document".into());
         let initial = DraftAttempt::for_submission(None, target(), "Question");
         let receipt = initial.receipt.clone();
         let retry = DraftAttempt::for_submission(Some(initial), target(), "Question");
@@ -972,7 +1071,7 @@ mod tests {
         let edited_receipt = edited.receipt.clone();
         let selected_other_row = DraftAttempt::for_submission(
             Some(edited),
-            DraftTarget::Stable("another row".into()),
+            SelectionTarget::Stable("another row".into()),
             "Question revised",
         );
         assert_ne!(selected_other_row.receipt, edited_receipt);
@@ -1162,6 +1261,94 @@ mod tests {
 
         press(&mut explorer, KeyCode::Up);
         assert_eq!(explorer.search.preview_match, None);
+    }
+
+    #[test]
+    fn selection_history_tracks_jumps_and_search_without_reusing_stale_ids() {
+        let snapshot = |revision: &str, labels: &[&str]| Snapshot {
+            preview: SourcePreview::new("source\n".repeat(20), false),
+            projection: Projection {
+                revision: revision.into(),
+                nodes: labels
+                    .iter()
+                    .enumerate()
+                    .map(|(index, label)| Row {
+                        id: index.to_string(),
+                        selection_key: (*label != "unstable").then(|| (*label).into()),
+                        label: (*label).into(),
+                        line: 1,
+                        end_line: Some(20),
+                        depth: usize::from(index != 0),
+                        action: String::new(),
+                        task: None,
+                        highlights: Vec::new(),
+                    })
+                    .collect(),
+                view: View {
+                    title: String::new(),
+                    prompt_label: String::new(),
+                    prompt_actions: HashMap::new(),
+                },
+            },
+        };
+        let mut explorer = Explorer::new(
+            PathBuf::new(),
+            snapshot("first", &["Document", "Alpha", "unstable", "Gamma"]),
+        );
+        let press = |explorer: &mut Explorer, code, modifiers| {
+            assert!(!explorer.key(KeyEvent::new(code, modifiers), 66, 11));
+        };
+        let plain = KeyModifiers::NONE;
+        let alt = KeyModifiers::ALT;
+        let back = |explorer: &mut Explorer| press(explorer, KeyCode::Left, alt);
+        let forward = |explorer: &mut Explorer| press(explorer, KeyCode::Right, alt);
+
+        back(&mut explorer);
+        assert_eq!(explorer.selected, 0);
+        press(&mut explorer, KeyCode::Right, plain);
+        assert_eq!(explorer.selected, 1);
+        press(&mut explorer, KeyCode::Down, KeyModifiers::CONTROL);
+        assert_eq!(explorer.selected, 2);
+        for character in "/gamma".chars() {
+            press(&mut explorer, KeyCode::Char(character), plain);
+        }
+        press(&mut explorer, KeyCode::Enter, plain);
+        assert_eq!(explorer.selected, 3);
+        back(&mut explorer);
+        assert_eq!(explorer.selected, 2);
+        back(&mut explorer);
+        assert_eq!(explorer.selected, 1);
+
+        explorer.replace_snapshot(snapshot(
+            "updated",
+            &["Document", "Inserted", "Alpha", "Replacement", "Gamma"],
+        ));
+        assert_eq!(explorer.selected, 2);
+        press(&mut explorer, KeyCode::Tab, plain);
+        press(&mut explorer, KeyCode::Down, plain);
+        assert_eq!(explorer.source_scroll, 1);
+        forward(&mut explorer);
+        assert_eq!(explorer.selected, 4);
+        assert_eq!(explorer.source_scroll, 0);
+        back(&mut explorer);
+        assert_eq!(explorer.selected, 2);
+        assert!(matches!(explorer.focus, Focus::Preview));
+
+        press(&mut explorer, KeyCode::Tab, plain);
+        press(&mut explorer, KeyCode::Down, plain);
+        forward(&mut explorer);
+        assert_eq!(explorer.selected, 3);
+        back(&mut explorer);
+        assert_eq!(explorer.selected, 2);
+        forward(&mut explorer);
+        assert_eq!(explorer.selected, 3);
+
+        press(&mut explorer, KeyCode::Char('/'), plain);
+        back(&mut explorer);
+        press(&mut explorer, KeyCode::Esc, plain);
+        explorer.composing = true;
+        back(&mut explorer);
+        assert_eq!(explorer.selected, 3);
     }
 
     #[test]

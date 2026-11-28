@@ -58,6 +58,10 @@ impl SourcePreview {
         self.lines.len()
     }
 
+    pub(super) fn line(&self, index: usize) -> &str {
+        &self.content[self.lines[index].clone()]
+    }
+
     pub(super) fn print_line(
         &self,
         output: &mut impl Write,
@@ -65,24 +69,24 @@ impl SourcePreview {
         y: u16,
         width: u16,
         index: usize,
+        active: bool,
     ) -> io::Result<()> {
         let mut columns = usize::from(width);
         let prefix = format!("{:>4}  ", index + 1);
         let visible_prefix = clip_to_width(&prefix, &mut columns);
-        queue!(output, MoveTo(x, y), Print(visible_prefix))?;
-        if visible_prefix.len() < prefix.len() {
-            return Ok(());
+        if active {
+            queue!(output, SetAttribute(Attribute::Reverse))?;
         }
-
-        let line = &self.lines[index];
-        let end = line.start + clip_to_width(&self.content[line.clone()], &mut columns).len();
-        print_spans(
-            output,
-            &self.content,
-            line.start..end,
-            &self.highlights,
-            false,
-        )
+        queue!(output, MoveTo(x, y), Print(visible_prefix))?;
+        if visible_prefix.len() == prefix.len() {
+            let start = self.lines[index].start;
+            let end = start + clip_to_width(self.line(index), &mut columns).len();
+            print_spans(output, &self.content, start..end, &self.highlights, active)?;
+        }
+        if active {
+            queue!(output, SetAttribute(Attribute::Reset))?;
+        }
+        Ok(())
     }
 
     pub(super) fn outline_highlights(&self, label: &str, line: usize) -> Highlights {
@@ -461,13 +465,13 @@ mod tests {
         let preview = SourcePreview::new(content.clone(), true);
         assert_eq!(preview.line_count(), 2);
         let mut styled = Vec::new();
-        preview.print_line(&mut styled, 0, 0, 15, 1).unwrap();
+        preview.print_line(&mut styled, 0, 0, 15, 1, false).unwrap();
         let styled = String::from_utf8(styled).unwrap();
         assert!(styled.ends_with("   2  \x1b[1m**é界**\x1b[0m n"));
 
         let mut plain = Vec::new();
         SourcePreview::new(content, false)
-            .print_line(&mut plain, 0, 0, 15, 1)
+            .print_line(&mut plain, 0, 0, 15, 1, false)
             .unwrap();
         let plain = String::from_utf8(plain).unwrap();
         assert!(plain.ends_with("   2  **é界** n"));
@@ -475,7 +479,7 @@ mod tests {
 
         let preview = SourcePreview::new("# 界".to_owned(), true);
         let mut clipped = Vec::new();
-        preview.print_line(&mut clipped, 0, 0, 9, 0).unwrap();
+        preview.print_line(&mut clipped, 0, 0, 9, 0, false).unwrap();
         let clipped = String::from_utf8(clipped).unwrap();
         assert!(clipped.ends_with("# \x1b[0m"));
         assert!(!clipped.contains('界'));

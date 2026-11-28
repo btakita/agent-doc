@@ -187,12 +187,37 @@ enum Focus {
     Preview,
 }
 
+#[derive(Default)]
+struct Search {
+    input: Option<String>,
+    query: String,
+    preview_match: Option<usize>,
+}
+
+fn next_match(
+    count: usize,
+    current: usize,
+    backward: bool,
+    matches: impl FnMut(&usize) -> bool,
+) -> Option<usize> {
+    let current = current.min(count.checked_sub(1)?);
+    if backward {
+        (0..current)
+            .rev()
+            .chain((current..count).rev())
+            .find(matches)
+    } else {
+        (current + 1..count).chain(0..=current).find(matches)
+    }
+}
+
 struct Explorer {
     file: PathBuf,
     snapshot: Snapshot,
     selected: usize,
     source_scroll: usize,
     focus: Focus,
+    search: Search,
     pane_sizes: PaneSizes,
     status: String,
     composing: bool,
@@ -214,6 +239,7 @@ impl Explorer {
             selected: 0,
             source_scroll: 0,
             focus: Focus::default(),
+            search: Search::default(),
             pane_sizes: PaneSizes::default(),
             status: String::new(),
             composing: false,
@@ -262,6 +288,11 @@ impl Explorer {
                             .filter(|c| matches!(c, '\n' | '\t') || !c.is_control()),
                     );
                 }
+                Event::Paste(text) => {
+                    if let Some(input) = &mut self.search.input {
+                        input.extend(text.chars().filter(|c| !c.is_control()));
+                    }
+                }
                 _ => {}
             }
         }
@@ -288,8 +319,32 @@ impl Explorer {
         }
 
         let panes = self.pane_sizes.fit(width, height);
+        if let Some(input) = &mut self.search.input {
+            match key.code {
+                KeyCode::Esc => self.search.input = None,
+                KeyCode::Enter => {
+                    let query = input.to_lowercase();
+                    self.search.input = None;
+                    if !query.is_empty() {
+                        self.search.query = query;
+                        self.search.preview_match = None;
+                        self.find(&panes, false);
+                    }
+                }
+                KeyCode::Backspace => {
+                    input.pop();
+                }
+                KeyCode::Char(c) if !control && !c.is_control() => input.push(c),
+                _ => {}
+            }
+            return false;
+        }
+
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return true,
+            KeyCode::Char('/') => self.search.input = Some(String::new()),
+            KeyCode::Char('n') => self.find(&panes, false),
+            KeyCode::Char('N') => self.find(&panes, true),
             KeyCode::Tab | KeyCode::BackTab => {
                 self.focus = match self.focus {
                     Focus::Outline => Focus::Preview,
@@ -314,6 +369,53 @@ impl Explorer {
             code => self.navigate(code, &panes),
         }
         false
+    }
+
+    fn find(&mut self, panes: &Panes, backward: bool) {
+        let query = &self.search.query;
+        if query.is_empty() {
+            return;
+        }
+
+        self.status = match self.focus {
+            Focus::Outline => {
+                let rows = &self.snapshot.projection.nodes;
+                if let Some(index) = next_match(rows.len(), self.selected, backward, |&index| {
+                    rows[index].label.to_lowercase().contains(query)
+                }) {
+                    if index != self.selected {
+                        self.selected = index;
+                        self.source_scroll = 0;
+                        self.search.preview_match = None;
+                    }
+                    "Outline match · n/N next/previous".into()
+                } else {
+                    "No outline matches.".into()
+                }
+            }
+            Focus::Preview => {
+                let lines = self.source_lines();
+                let first = lines.start;
+                let current = self.search.preview_match.map_or(
+                    self.source_scroll
+                        .min(panes.source_scroll_limit(lines.len())),
+                    |line| line - first,
+                );
+                if let Some(index) = next_match(lines.len(), current, backward, |&index| {
+                    self.snapshot
+                        .preview
+                        .line(first + index)
+                        .to_lowercase()
+                        .contains(query)
+                }) {
+                    self.source_scroll = index.min(panes.source_scroll_limit(lines.len()));
+                    self.search.preview_match = Some(first + index);
+                    format!("Match at line {} · n/N next/previous", first + index + 1)
+                } else {
+                    "No matches in this section.".into()
+                }
+            }
+        };
     }
 
     fn navigate(&mut self, code: KeyCode, panes: &Panes) {
@@ -345,6 +447,9 @@ impl Explorer {
         };
         if self.selected != selection_before {
             self.source_scroll = 0;
+        }
+        if self.selected != selection_before || matches!(self.focus, Focus::Preview) {
+            self.search.preview_match = None;
         }
     }
 
@@ -397,6 +502,7 @@ impl Explorer {
         }
         self.snapshot = snapshot;
         self.source_scroll = 0;
+        self.search.preview_match = None;
     }
 
     fn submit(&mut self) {
@@ -523,18 +629,31 @@ impl Explorer {
             } else {
                 self.render_panes(output, self.pane_sizes.fit(width, height))?;
             }
-            print_at(output, 0, height - 2, width, &self.status)?;
+            let search_prompt;
+            let status = if let Some(input) = &self.search.input {
+                let pane = match self.focus {
+                    Focus::Outline => "Outline",
+                    Focus::Preview => "Preview",
+                };
+                search_prompt = format!("{pane} /{input}");
+                &search_prompt
+            } else {
+                &self.status
+            };
+            print_at(output, 0, height - 2, width, status)?;
         }
         if height >= 2 && width > 0 {
             let keys = if self.composing {
                 "Ctrl+S send · Ctrl+R refresh · Esc keep draft and return"
+            } else if self.search.input.is_some() {
+                "Enter find · Esc cancel"
             } else {
                 match self.focus {
                     Focus::Outline => {
-                        "Outline · Tab switch · PgUp/Dn page · [ ] resize · q quit · ↑/↓ select · = reset · p prompt · r refresh"
+                        "Outline · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · ↑/↓ select · = reset · p prompt · r refresh"
                     }
                     Focus::Preview => {
-                        "Preview · Tab switch · PgUp/Dn page · [ ] resize · q quit · ↑/↓ scroll · = reset · p prompt · r refresh"
+                        "Preview · / search · Tab switch · PgUp/Dn · [ ] resize · q quit · ↑/↓ scroll · = reset · p prompt · r refresh"
                     }
                 }
             };
@@ -573,6 +692,7 @@ impl Explorer {
                 panes.source_top + offset,
                 panes.source_width,
                 line,
+                self.search.preview_match == Some(line),
             )?;
         }
         Ok(())
@@ -890,6 +1010,78 @@ mod tests {
         assert_eq!(press(KeyCode::BackTab, KeyModifiers::SHIFT), (4, 5));
         assert_eq!(press(KeyCode::PageDown, plain), (7, 0));
         assert_eq!(press(KeyCode::PageUp, plain), (3, 0));
+    }
+
+    #[test]
+    fn slash_search_respects_focus_and_repeats_past_the_last_scroll_position() {
+        let nodes = ["Document", "Match one", "Other", "Match two"]
+            .into_iter()
+            .enumerate()
+            .map(|(index, label)| Row {
+                id: index.to_string(),
+                selection_key: None,
+                label: label.into(),
+                line: 1,
+                end_line: Some(5),
+                depth: 0,
+                action: String::new(),
+                task: None,
+                highlights: Vec::new(),
+            })
+            .collect();
+        let snapshot = Snapshot {
+            preview: SourcePreview::new(
+                "first\nother\nthird\nMATCH one\nmatch two\n".into(),
+                false,
+            ),
+            projection: Projection {
+                revision: String::new(),
+                nodes,
+                view: View {
+                    title: String::new(),
+                    prompt_label: String::new(),
+                    prompt_actions: HashMap::new(),
+                },
+            },
+        };
+        let mut explorer = Explorer::new(PathBuf::new(), snapshot);
+        let press = |explorer: &mut Explorer, code| {
+            assert!(!explorer.key(KeyEvent::new(code, KeyModifiers::NONE), 66, 11));
+        };
+        for c in "/MaTcH".chars() {
+            press(&mut explorer, KeyCode::Char(c));
+        }
+        press(&mut explorer, KeyCode::Enter);
+        assert_eq!(explorer.selected, 1);
+        press(&mut explorer, KeyCode::Char('n'));
+        assert_eq!(explorer.selected, 3);
+        press(&mut explorer, KeyCode::Char('n'));
+        assert_eq!(explorer.selected, 1);
+        press(&mut explorer, KeyCode::Char('N'));
+        assert_eq!(explorer.selected, 3);
+
+        // Escape leaves the current selection and repeat query available.
+        press(&mut explorer, KeyCode::Char('/'));
+        press(&mut explorer, KeyCode::Char('x'));
+        press(&mut explorer, KeyCode::Esc);
+        assert_eq!(explorer.selected, 3);
+        assert_eq!(explorer.search.query, "match");
+
+        press(&mut explorer, KeyCode::Tab);
+        press(&mut explorer, KeyCode::Char('n'));
+        assert_eq!(explorer.selected, 3);
+        assert_eq!(explorer.source_scroll, 1);
+        assert_eq!(explorer.search.preview_match, Some(3));
+        press(&mut explorer, KeyCode::Char('n'));
+        assert_eq!(explorer.source_scroll, 1);
+        assert_eq!(explorer.search.preview_match, Some(4));
+        press(&mut explorer, KeyCode::Char('n'));
+        assert_eq!(explorer.search.preview_match, Some(3));
+        press(&mut explorer, KeyCode::Char('N'));
+        assert_eq!(explorer.search.preview_match, Some(4));
+
+        press(&mut explorer, KeyCode::Up);
+        assert_eq!(explorer.search.preview_match, None);
     }
 
     #[test]

@@ -491,6 +491,15 @@ It is the complement of `admin dashboard`, not a replacement: `admin dashboard` 
 - **Never a session document.** The projection has no frontmatter, contains no `<!-- agent:` marker and no `agent_doc_*` token (free text is escaped; such links are percent-encoded), lives under the gitignored `.agent-doc/` by default, and its first-line marker makes `is_agent_doc_document`, the `board` / `serve` scans, and therefore the cross-document sweep and editor tab sync reject it even under `auto_session_for_all_md` or a `**/*.md` include glob.
 - Editor plugins expose it as the **Dashboard** action (`editors/SPEC.md` § 6c).
 
+## explore
+
+`agent-doc explore FILE` opens the Document Explorer in an interactive terminal. It uses the same Lazily View outline, task labels, and prompt controls as the browser and JetBrains. The preview reads the current authoritative document, including unsaved edits when an editor owns it.
+
+- Move through the outline with Up and Down or `j` and `k`. Use Page Up and Page Down to scroll the selected item's Markdown source. Press `r` to refresh the document and task state.
+- Press `p` on a promptable item, type a draft, and press Ctrl+S to send. Enter adds a newline. Ctrl+R refreshes from the composer, and Escape returns to the outline with the draft intact. A changed document revision leaves the draft intact and requires a refresh before retrying.
+- Prompt submission uses the browser Explorer's revision-bound operator-edit transaction. An active session can admit a saved prompt. Otherwise the command dispatches to the existing owner or starts the configured standalone agent.
+- Press `q` from the outline or Ctrl+C to leave the Explorer.
+
 ## serve
 
 `agent-doc serve [FILE_OR_DIR] [--port 7333] [--host 127.0.0.1] [--auth-token T] [--read-only-token T] [--tls-cert C --tls-key K] [--allow-run]` serves the Document Explorer with a browser editor and a document prompt tree for one session document or a project's session list. The route table and module contracts live in `src/serve.rs`.

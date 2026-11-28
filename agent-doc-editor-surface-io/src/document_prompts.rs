@@ -136,6 +136,15 @@ pub fn insert_document_prompt(source: &str, submission: &Submission) -> Result<S
     Ok(result)
 }
 
+/// A placement may be authoritative before its editor save is confirmed.
+pub fn document_prompt_receipt_present(source: &str, receipt: &str) -> bool {
+    valid_receipt(receipt)
+        && source.lines().any(|line| {
+            let line = line.trim_start();
+            !line.starts_with('>') && tasks::request_id(line) == Some(receipt)
+        })
+}
+
 pub(crate) fn derive(evidence: Evidence) -> Value {
     let source = &evidence.source;
     let result = if let Some(request_id) = &evidence.answer {

@@ -66,7 +66,7 @@ pub(super) fn anchor_comment(selection_key: &str) -> String {
     format!(" {ANCHOR_PREFIX}{} -->", content_hash(selection_key))
 }
 
-fn request_id(line: &str) -> Option<&str> {
+pub(super) fn request_id(line: &str) -> Option<&str> {
     let (_, suffix) = line.rsplit_once(ANSWER_INSTRUCTION)?;
     let suffix = suffix.strip_prefix(ANSWER_PREFIX)?;
     let (id, after_id) = suffix.split_at_checked(32)?;

@@ -57,6 +57,10 @@
 //! - `serve_post_save_refuses_overlapping_editor_edits`
 //! - `serve_sse_stream_emits_doc_changed_after_file_mutation`
 
+use crate::document_explorer::{
+    MAX_BODY_BYTES, PromptFailure, explorer_active_prompts, load_open_cycle, persist_prompt,
+    spawn_prompt_run,
+};
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use serde::Serialize;
@@ -76,7 +80,6 @@ const TREE_HTML: &str = include_str!("../assets/serve/tree.html");
 const FLEET_CACHE_TTL: Duration = Duration::from_secs(30);
 const DEFAULT_PORT: u16 = 7333;
 const DEFAULT_HOST: &str = "127.0.0.1";
-const MAX_BODY_BYTES: usize = 4 * 1024 * 1024; // 4 MiB cap for the MVP
 const MAX_SAVED_REVISIONS: usize = 16;
 const SSE_POLL_INTERVAL_MS: u64 = 300;
 const SSE_HEARTBEAT: Duration = Duration::from_secs(15);
@@ -1376,24 +1379,6 @@ fn doc_event_payload(doc: &Path, fingerprint: &DocFingerprint) -> serde_json::Va
     })
 }
 
-fn load_open_cycle(doc: &Path) -> Result<Option<agent_doc_cycle_state_io::CycleState>> {
-    Ok(
-        agent_doc_cycle_state_io::load_with_closeout_projection(doc)?
-            .filter(|cycle| cycle.is_open()),
-    )
-}
-
-fn explorer_active_prompts(
-    cycle: &agent_doc_cycle_state_io::CycleState,
-) -> impl Iterator<Item = &String> {
-    cycle
-        .prompt_targets
-        .iter()
-        .chain(&cycle.selected_free_text_queue_heads)
-        .chain(&cycle.absorbed_steering_prompts)
-        .filter(|prompt| prompt.contains("repo-context-answer:"))
-}
-
 fn partial_response_fingerprint(
     record: &agent_doc_capture_io::PartialCaptureRecord,
 ) -> PartialResponseFingerprint {
@@ -1645,15 +1630,15 @@ fn handle_prompt(
             StatusCode(409),
         );
     }
-    let (content, active_cycle) = match persist_browser_prompt(&doc, submission) {
+    let (content, active_cycle) = match persist_prompt(&doc, submission, "serve_browser_prompt") {
         Ok(saved) => saved,
         Err(failure) => {
             state.prompt_runs.lock().remove(&doc);
             return respond(
                 request,
-                &failure.message,
+                &failure.to_string(),
                 "text/plain; charset=utf-8",
-                StatusCode(failure.status),
+                StatusCode(prompt_failure_status(&failure)),
             );
         }
     };
@@ -1684,88 +1669,16 @@ fn handle_prompt(
     )
 }
 
-fn persist_browser_prompt(
-    doc: &Path,
-    submission: agent_doc_editor_surface_io::DocumentPromptSubmission,
-) -> std::result::Result<(String, bool), SaveFailure> {
-    const SOURCE: &str = "serve_browser_prompt";
-    let project = agent_doc_project_root_io::project_root_containing(doc).ok_or_else(|| {
-        SaveFailure::new(
-            409,
-            "prompt submission requires an Agent Doc project\n".into(),
-        )
-    })?;
-    let owned_doc = doc.to_path_buf();
-    agent_doc_queue_io::write_queue::DocumentWriteQueue::new(
-        &agent_doc_document_realtime_io::SESSION_ACTOR_WRITE_QUEUE,
-        &project,
-        &doc.to_string_lossy(),
-    )
-    .agent_write(move || {
-        let current =
-            agent_doc_document_realtime_io::peek_current_document_content(&owned_doc, SOURCE)
-                .map_err(|error| {
-                    SaveFailure::new(409, format!("document authority unavailable: {error:#}\n"))
-                })?;
-        let content = agent_doc_editor_surface_io::insert_document_prompt(&current, &submission)
-            .map_err(|error| SaveFailure::new(409, format!("{error:#}\n")))?;
-        if content.len() > MAX_BODY_BYTES {
-            return Err(SaveFailure::new(413, "the document is too large\n".into()));
-        }
-        let active_cycle = active_cycle_id(&owned_doc)
-            .map_err(|error| {
-                SaveFailure::new(500, format!("failed to inspect active cycle: {error:#}\n"))
-            })?
-            .is_some();
-        agent_doc_document_realtime_io::persist_exact_operator_edit_through_authority(
-            &owned_doc, &current, &content, SOURCE,
-        )
-        .map_err(|error| {
-            SaveFailure::new(
-                409,
-                format!("prompt placement could not be confirmed: {error:#}\n"),
-            )
-        })?;
-        // Admission consumes this operator edit. A browser save's Git commit
-        // would instead establish it as the next baseline.
-        Ok((content, active_cycle))
-    })
-    .map_err(|error| {
-        SaveFailure::new(
-            500,
-            format!("document write queue unavailable: {error:#}\n"),
-        )
-    })?
+fn prompt_failure_status(failure: &PromptFailure) -> u16 {
+    match failure {
+        PromptFailure::AlreadyPlaced | PromptFailure::Conflict(_) => 409,
+        PromptFailure::TooLarge => 413,
+        PromptFailure::Internal(_) => 500,
+    }
 }
 
 fn start_browser_prompt_run(state: &ServeState, doc: &Path) -> Result<()> {
-    use agent_doc_state_backbone::pane_execution_authority::{
-        AuthorityOperation, AuthorityVerdict,
-    };
-
-    let scope = agent_doc_state_backbone::DocumentScope::new();
-    let verdict = agent_doc_run_io::pane_execution_authority::verdict_in(
-        &scope,
-        doc,
-        AuthorityOperation::Mutation,
-    )?;
-    let binary = std::env::current_exe().context("locate Agent Doc executable")?;
-    let mut command = Command::new(binary);
-    if matches!(
-        verdict,
-        AuthorityVerdict::PermitHeadless | AuthorityVerdict::PermitUnregistered
-    ) {
-        command.arg("run");
-    } else {
-        command.args(["route", "--dispatch-only", "--debounce", "0"]);
-    }
-    let mut child = command
-        .arg(doc)
-        .current_dir(&state.root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .spawn()
-        .context("start Agent Doc")?;
+    let mut child = spawn_prompt_run(&state.root, doc, Stdio::inherit())?;
     let runs = Arc::clone(&state.prompt_runs);
     let doc = doc.to_path_buf();
     thread::spawn(move || {
@@ -2874,15 +2787,24 @@ mod tests {
             draft: "Which steps remain?\nInclude the test status.".into(),
             request_id: "0123456789abcdef0123456789abcdef".into(),
         };
-        let (content, active_cycle) = persist_browser_prompt(&doc, submit()).unwrap();
+        let (content, active_cycle) =
+            persist_prompt(&doc, submit(), "serve_browser_prompt").unwrap();
         assert!(!active_cycle);
         assert!(content.contains("> Which steps remain?\n> Include the test status."));
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
         assert_eq!(git(dir.path(), &["rev-parse", "HEAD"]), head_before);
         assert_eq!(
-            persist_browser_prompt(&doc, submit()).unwrap_err().status,
+            prompt_failure_status(
+                &persist_prompt(&doc, submit(), "serve_browser_prompt").unwrap_err()
+            ),
             409
         );
+        let mut repeat = submit();
+        repeat.revision = agent_doc_hash::content_hash(&content);
+        assert!(matches!(
+            persist_prompt(&doc, repeat, "serve_browser_prompt"),
+            Err(PromptFailure::AlreadyPlaced)
+        ));
         assert_eq!(std::fs::read_to_string(&doc).unwrap(), content);
     }
 

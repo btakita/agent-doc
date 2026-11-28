@@ -65,9 +65,11 @@ mod decision_search;
 mod dedupe_cmd;
 mod describe_image;
 mod document_cmd;
+mod document_explorer;
 mod dogfood_cmd;
 mod env_cmd;
 mod exchange;
+mod explore;
 mod extract;
 mod fleet_board_cmd;
 mod focus_effects;
@@ -3709,6 +3711,11 @@ enum Commands {
     },
     /// Run the supplemental Markdown language server used by the Zed extension
     ZedLsp,
+    /// Open the terminal Document Explorer for a Markdown document
+    Explore {
+        /// Path to the document
+        file: PathBuf,
+    },
     /// Serve a localhost HTTP markdown editor for one document or a project session list
     Serve {
         /// Path to a session document or project directory. Defaults to the nearest project root from CWD.
@@ -9343,6 +9350,7 @@ fn try_main() -> anyhow::Result<()> {
             Some(McpAction::Serve { project_root }) => mcp::serve(project_root.as_deref()),
         },
         Commands::ZedLsp => agent_doc_zed_lsp_io::run(),
+        Commands::Explore { file } => explore::run(&file),
         Commands::Serve {
             file,
             host,

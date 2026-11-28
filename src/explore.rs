@@ -1,0 +1,685 @@
+//! Terminal host for the shared Lazily View-backed Document Explorer.
+
+use crate::document_explorer::{
+    PromptFailure, explorer_active_prompts, load_open_cycle, persist_prompt, spawn_prompt_run,
+};
+use agent_doc_editor_surface_io::{DocumentPromptSubmission, project_document_prompts_with_active};
+use anyhow::{Context, Result, ensure};
+use crossterm::cursor::{Hide, MoveTo, Show};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyEvent, KeyEventKind,
+    KeyModifiers,
+};
+use crossterm::style::{Attribute, Print, SetAttribute};
+use crossterm::terminal::{
+    self, Clear, ClearType, DisableLineWrap, EnableLineWrap, EnterAlternateScreen,
+    LeaveAlternateScreen,
+};
+use crossterm::{execute, queue};
+use serde::Deserialize;
+use std::collections::HashMap;
+use std::io::{self, IsTerminal, Write};
+use std::path::{Path, PathBuf};
+use std::process::Stdio;
+use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::thread;
+use std::time::Duration;
+use unicode_width::UnicodeWidthChar;
+
+const SOURCE: &str = "terminal_document_explorer";
+
+pub(crate) fn run(file: &Path) -> Result<()> {
+    ensure!(
+        io::stdin().is_terminal() && io::stdout().is_terminal(),
+        "agent-doc explore requires an interactive terminal"
+    );
+    let file = file
+        .canonicalize()
+        .with_context(|| format!("open {}", file.display()))?;
+    ensure!(file.is_file(), "expected a document file");
+    let mut explorer = Explorer::open(file)?;
+    let mut screen = Terminal::enter()?;
+    explorer.interact(&mut screen.output)
+}
+
+#[derive(Deserialize)]
+struct Projection {
+    revision: String,
+    nodes: Vec<Row>,
+    view: View,
+}
+
+#[derive(Deserialize)]
+struct Row {
+    id: String,
+    selection_key: Option<String>,
+    label: String,
+    line: usize,
+    end_line: Option<usize>,
+    depth: usize,
+    action: String,
+    task: Option<Task>,
+}
+
+#[derive(Deserialize)]
+struct Task {
+    label: String,
+}
+
+#[derive(Deserialize)]
+struct View {
+    title: String,
+    prompt_label: String,
+    prompt_actions: HashMap<String, PromptAction>,
+}
+
+#[derive(Deserialize)]
+struct PromptAction {
+    label: String,
+    hint: String,
+    disabled: bool,
+}
+
+struct Snapshot {
+    content: String,
+    projection: Projection,
+}
+
+impl Snapshot {
+    fn load(file: &Path) -> Result<Self> {
+        let content = agent_doc_document_realtime_io::peek_current_document_content(file, SOURCE)
+            .context("read authoritative document")?;
+        Self::project(file, content)
+    }
+
+    fn project(file: &Path, content: String) -> Result<Self> {
+        let cycle = load_open_cycle(file).context("read active prompt state")?;
+        let active_prompts = cycle
+            .iter()
+            .flat_map(explorer_active_prompts)
+            .cloned()
+            .collect::<Vec<_>>();
+        let projection = serde_json::from_value(project_document_prompts_with_active(
+            &content,
+            &active_prompts,
+        )?)
+        .context("decode the Document Explorer view")?;
+        Ok(Self {
+            content,
+            projection,
+        })
+    }
+}
+
+#[derive(PartialEq)]
+enum DraftTarget {
+    Stable(String),
+    Snapshot { revision: String, id: String },
+}
+
+struct DraftAttempt {
+    receipt: String,
+    target: DraftTarget,
+    text: String,
+}
+
+impl DraftAttempt {
+    fn for_submission(previous: Option<Self>, target: DraftTarget, text: &str) -> Self {
+        match previous {
+            Some(attempt) if attempt.target == target && attempt.text == text => attempt,
+            _ => Self {
+                receipt: uuid::Uuid::new_v4().simple().to_string(),
+                target,
+                text: text.into(),
+            },
+        }
+    }
+}
+
+struct Explorer {
+    file: PathBuf,
+    snapshot: Snapshot,
+    selected: usize,
+    source_scroll: usize,
+    status: String,
+    composing: bool,
+    draft: String,
+    draft_attempt: Option<DraftAttempt>,
+    running: Option<Receiver<Result<std::process::ExitStatus, io::Error>>>,
+}
+
+impl Explorer {
+    fn open(file: PathBuf) -> Result<Self> {
+        Ok(Self {
+            snapshot: Snapshot::load(&file)?,
+            file,
+            selected: 0,
+            source_scroll: 0,
+            status: String::new(),
+            composing: false,
+            draft: String::new(),
+            draft_attempt: None,
+            running: None,
+        })
+    }
+
+    fn selected_row(&self) -> Option<&Row> {
+        self.snapshot.projection.nodes.get(self.selected)
+    }
+
+    fn selected_action(&self) -> Option<&PromptAction> {
+        let row = self.selected_row()?;
+        self.snapshot
+            .projection
+            .view
+            .prompt_actions
+            .get(&row.action)
+    }
+
+    fn interact(&mut self, output: &mut impl Write) -> Result<()> {
+        loop {
+            self.observe_run();
+            let (width, height) = terminal::size()?;
+            self.render(output, width, height)?;
+            // The dispatch receipt is sent by a background worker. Wait on
+            // input outright when no other event source needs servicing.
+            while self.running.is_some() && !event::poll(Duration::from_millis(150))? {
+                self.observe_run();
+                if self.running.is_none() {
+                    self.render(output, width, height)?;
+                }
+            }
+            match event::read()? {
+                Event::Key(key) if key.kind != KeyEventKind::Release => {
+                    if self.key(key, width, height) {
+                        return Ok(());
+                    }
+                }
+                Event::Paste(text) if self.composing => {
+                    let text = text.replace("\r\n", "\n").replace('\r', "\n");
+                    self.draft.extend(
+                        text.chars()
+                            .filter(|c| matches!(c, '\n' | '\t') || !c.is_control()),
+                    );
+                }
+                _ => {}
+            }
+        }
+    }
+
+    fn key(&mut self, key: KeyEvent, width: u16, height: u16) -> bool {
+        let control = key.modifiers.contains(KeyModifiers::CONTROL);
+        if control && key.code == KeyCode::Char('c') {
+            return true;
+        }
+        if self.composing {
+            match key.code {
+                KeyCode::Esc => self.composing = false,
+                KeyCode::Char('s') if control => self.submit(),
+                KeyCode::Char('r') if control => self.refresh(),
+                KeyCode::Enter => self.draft.push('\n'),
+                KeyCode::Backspace => {
+                    self.draft.pop();
+                }
+                KeyCode::Char(c) if !control && !c.is_control() => self.draft.push(c),
+                _ => {}
+            }
+            return false;
+        }
+
+        let before = self.selected;
+        let last = self.snapshot.projection.nodes.len().saturating_sub(1);
+        let page = Panes::fit(width, height).source_height.saturating_sub(1);
+        match key.code {
+            KeyCode::Char('q') | KeyCode::Esc => return true,
+            KeyCode::Up | KeyCode::Char('k') => self.selected = before.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => self.selected = (before + 1).min(last),
+            KeyCode::Home => self.selected = 0,
+            KeyCode::End => self.selected = last,
+            KeyCode::PageUp => self.source_scroll = self.source_scroll.saturating_sub(page.into()),
+            KeyCode::PageDown => {
+                if let Some(row) = self.selected_row() {
+                    let last = row.end_line.unwrap_or(row.line);
+                    let available = last.saturating_sub(row.line);
+                    self.source_scroll = (self.source_scroll + usize::from(page)).min(available);
+                }
+            }
+            KeyCode::Char('r') => self.refresh(),
+            KeyCode::Char('p') => {
+                if self
+                    .selected_action()
+                    .is_some_and(|action| !action.disabled)
+                {
+                    self.composing = true;
+                    self.status.clear();
+                } else if let Some(action) = self.selected_action() {
+                    self.status = action.hint.clone();
+                }
+            }
+            _ => {}
+        }
+        if matches!(
+            key.code,
+            KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') | KeyCode::Home | KeyCode::End
+        ) && self.selected != before
+        {
+            self.source_scroll = 0;
+        }
+        false
+    }
+
+    fn refresh(&mut self) {
+        match Snapshot::load(&self.file) {
+            Ok(snapshot) => {
+                self.status = "Document refreshed.".into();
+                self.replace_snapshot(snapshot);
+            }
+            Err(error) => self.status = format!("Refresh failed. {error:#}"),
+        }
+    }
+
+    fn replace_snapshot(&mut self, snapshot: Snapshot) {
+        let retained = self.selected_row().and_then(|row| {
+            snapshot.projection.nodes.iter().position(|candidate| {
+                if let Some(key) = &row.selection_key {
+                    candidate.selection_key.as_ref() == Some(key)
+                } else {
+                    snapshot.projection.revision == self.snapshot.projection.revision
+                        && candidate.id == row.id
+                }
+            })
+        });
+        if let Some(index) = retained {
+            self.selected = index;
+        } else {
+            self.selected = self
+                .selected
+                .min(snapshot.projection.nodes.len().saturating_sub(1));
+            if self.composing {
+                self.composing = false;
+                self.status =
+                    "Selected item changed. Your draft is kept. Select a target and press p."
+                        .into();
+            }
+        }
+        self.snapshot = snapshot;
+        self.source_scroll = 0;
+    }
+
+    fn submit(&mut self) {
+        if self.running.is_some() {
+            self.status = "The previous dispatch is still running. Your draft is kept.".into();
+            return;
+        }
+        if self.selected_action().is_none_or(|action| action.disabled) {
+            self.status = "Choose a promptable item. Your draft is kept.".into();
+            return;
+        }
+        let Some(row) = self.selected_row() else {
+            return;
+        };
+        let revision = self.snapshot.projection.revision.clone();
+        let id = row.id.clone();
+        let target = match &row.selection_key {
+            Some(key) => DraftTarget::Stable(key.clone()),
+            None => DraftTarget::Snapshot {
+                revision: revision.clone(),
+                id: id.clone(),
+            },
+        };
+        let attempt = DraftAttempt::for_submission(self.draft_attempt.take(), target, &self.draft);
+        let receipt = attempt.receipt.clone();
+        self.draft_attempt = Some(attempt);
+        let submission = DocumentPromptSubmission {
+            revision,
+            target: id,
+            draft: self.draft.clone(),
+            request_id: receipt,
+        };
+        let (content, active_cycle) = match persist_prompt(&self.file, submission, SOURCE) {
+            Ok(result) => result,
+            Err(PromptFailure::AlreadyPlaced) => {
+                self.finish_draft();
+                self.status = "This prompt was already saved. Press r to refresh.".into();
+                return;
+            }
+            Err(error) => {
+                self.status = format!("Your draft is kept. {error} Use Ctrl+R to refresh.");
+                return;
+            }
+        };
+        self.finish_draft();
+        self.status = if active_cycle {
+            "Prompt saved for the active session.".into()
+        } else {
+            self.start_run()
+        };
+        match Snapshot::project(&self.file, content) {
+            Ok(snapshot) => self.replace_snapshot(snapshot),
+            Err(error) => {
+                self.status
+                    .push_str(&format!(" View refresh failed. {error:#}"));
+            }
+        }
+    }
+
+    fn finish_draft(&mut self) {
+        self.draft.clear();
+        self.draft_attempt = None;
+        self.composing = false;
+    }
+
+    fn start_run(&mut self) -> String {
+        // Persistence already checked the root. Resolve it again for the
+        // process, which must run in the document's project.
+        let Some(root) = agent_doc_project_root_io::project_root_containing(&self.file) else {
+            return "Prompt saved. Dispatch could not find the document's project.".into();
+        };
+        match spawn_prompt_run(&root, &self.file, Stdio::null()) {
+            Ok(mut child) => {
+                let (sender, receiver) = mpsc::channel();
+                thread::spawn(move || {
+                    let result = child.wait();
+                    // The Explorer may have closed while the agent was running.
+                    if let Err(error) = sender.send(result)
+                        && let Err(error) = error.0
+                    {
+                        eprintln!("[explore] could not observe the prompt run: {error}");
+                    }
+                });
+                self.running = Some(receiver);
+                "Prompt saved. Dispatch started.".into()
+            }
+            Err(error) => format!("Prompt saved. Dispatch failed. {error:#}"),
+        }
+    }
+
+    fn observe_run(&mut self) {
+        let Some(receiver) = &self.running else {
+            return;
+        };
+        self.status = match receiver.try_recv() {
+            Ok(Ok(status)) if status.success() => {
+                "Dispatch finished. Press r to refresh the document.".into()
+            }
+            Ok(Ok(status)) => format!("Prompt saved. Dispatch exited with {status}."),
+            Ok(Err(error)) => format!("Prompt saved. Could not observe dispatch. {error}"),
+            Err(TryRecvError::Disconnected) => {
+                "Prompt saved. The dispatch receipt is unavailable.".into()
+            }
+            Err(TryRecvError::Empty) => return,
+        };
+        self.running = None;
+    }
+
+    fn render(&self, output: &mut impl Write, width: u16, height: u16) -> io::Result<()> {
+        queue!(output, Clear(ClearType::All))?;
+        if width > 0 && height > 0 {
+            let title = &self.snapshot.projection.view.title;
+            print_at(
+                output,
+                0,
+                0,
+                width,
+                &format!("{title} · {}", self.file.display()),
+            )?;
+        }
+        if height >= 5 && width > 0 {
+            if self.composing {
+                self.render_composer(output, width, height)?;
+            } else {
+                self.render_panes(output, Panes::fit(width, height))?;
+            }
+            print_at(output, 0, height - 2, width, &self.status)?;
+        }
+        if height >= 2 && width > 0 {
+            let keys = if self.composing {
+                "Ctrl+S send · Ctrl+R refresh · Esc keep draft and return"
+            } else {
+                "↑/↓ select · PgUp/PgDn source · p prompt · r refresh · q quit"
+            };
+            print_at(output, 0, height - 1, width, keys)?;
+        }
+        output.flush()
+    }
+
+    fn render_panes(&self, output: &mut impl Write, panes: Panes) -> io::Result<()> {
+        let nodes = &self.snapshot.projection.nodes;
+        let first = self
+            .selected
+            .saturating_sub(usize::from(panes.outline_height).saturating_sub(1));
+        for (offset, row) in nodes
+            .iter()
+            .skip(first)
+            .take(panes.outline_height.into())
+            .enumerate()
+        {
+            let active = first + offset == self.selected;
+            let indent = row
+                .depth
+                .saturating_mul(2)
+                .min(usize::from(panes.outline_width / 2));
+            let task = row
+                .task
+                .as_ref()
+                .map_or(String::new(), |task| format!(" [{}]", task.label));
+            let line = format!(
+                "{}{}{}{}",
+                if active { "› " } else { "  " },
+                " ".repeat(indent),
+                row.label,
+                task
+            );
+            if active {
+                queue!(output, SetAttribute(Attribute::Reverse))?;
+            }
+            print_at(
+                output,
+                0,
+                panes.outline_top + offset as u16,
+                panes.outline_width,
+                &line,
+            )?;
+            if active {
+                queue!(output, SetAttribute(Attribute::Reset))?;
+            }
+        }
+        if let Some(row) = self.selected_row() {
+            let first = row.line.saturating_sub(1) + self.source_scroll;
+            let last = row.end_line.unwrap_or(row.line).max(row.line);
+            for (offset, line) in self
+                .snapshot
+                .content
+                .lines()
+                .take(last)
+                .skip(first)
+                .take(panes.source_height.into())
+                .enumerate()
+            {
+                print_at(
+                    output,
+                    panes.source_left,
+                    panes.source_top + offset as u16,
+                    panes.source_width,
+                    &format!("{:>4}  {line}", first + offset + 1),
+                )?;
+            }
+        }
+        Ok(())
+    }
+
+    fn render_composer(&self, output: &mut impl Write, width: u16, height: u16) -> io::Result<()> {
+        let view = &self.snapshot.projection.view;
+        if let (Some(row), Some(action)) = (self.selected_row(), self.selected_action()) {
+            print_at(
+                output,
+                0,
+                1,
+                width,
+                &format!("{} · {} · {}", view.prompt_label, action.label, row.label),
+            )?;
+            print_at(output, 0, 2, width, &action.hint)?;
+        }
+        let available = height.saturating_sub(5);
+        let draft = wrap(&self.draft, usize::from(width));
+        let first = draft.len().saturating_sub(available.into());
+        for (index, line) in draft.iter().skip(first).take(available.into()).enumerate() {
+            print_at(output, 0, index as u16 + 3, width, line)?;
+        }
+        Ok(())
+    }
+}
+
+struct Panes {
+    outline_top: u16,
+    outline_height: u16,
+    outline_width: u16,
+    source_top: u16,
+    source_left: u16,
+    source_height: u16,
+    source_width: u16,
+}
+
+impl Panes {
+    fn fit(width: u16, height: u16) -> Self {
+        let rows = height.saturating_sub(3);
+        if width >= 80 {
+            let outline = (width / 2).min(52);
+            Self {
+                outline_top: 1,
+                outline_height: rows,
+                outline_width: outline,
+                source_top: 1,
+                source_left: outline + 1,
+                source_height: rows,
+                source_width: width - outline - 1,
+            }
+        } else {
+            let outline = rows.div_ceil(2);
+            Self {
+                outline_top: 1,
+                outline_height: outline,
+                outline_width: width,
+                source_top: outline + 1,
+                source_left: 0,
+                source_height: rows - outline,
+                source_width: width,
+            }
+        }
+    }
+}
+
+fn printable(text: &str) -> impl Iterator<Item = char> + '_ {
+    // Terminal markup always comes from Crossterm, even when document text,
+    // view labels, paths, or error messages contain their own controls.
+    text.chars().map(|c| if c.is_control() { ' ' } else { c })
+}
+
+fn print_at(output: &mut impl Write, x: u16, y: u16, width: u16, text: &str) -> io::Result<()> {
+    let mut space = usize::from(width);
+    let text: String = printable(text)
+        .take_while(|c| {
+            let cells = c.width().unwrap_or_default();
+            if cells > space {
+                return false;
+            }
+            space -= cells;
+            true
+        })
+        .collect();
+    queue!(output, MoveTo(x, y), Print(text))
+}
+
+fn wrap(text: &str, width: usize) -> Vec<String> {
+    let mut lines = Vec::new();
+    for source in text.split('\n') {
+        let mut line = String::new();
+        let mut cells = 0;
+        for c in printable(source) {
+            let next = c.width().unwrap_or_default();
+            if next > width {
+                continue;
+            }
+            if cells + next > width {
+                lines.push(std::mem::take(&mut line));
+                cells = 0;
+            }
+            line.push(c);
+            cells += next;
+        }
+        lines.push(line);
+    }
+    lines
+}
+
+struct Terminal {
+    output: io::Stdout,
+}
+
+impl Terminal {
+    fn enter() -> Result<Self> {
+        terminal::enable_raw_mode().context("enable terminal raw mode")?;
+        let mut session = Self {
+            output: io::stdout(),
+        };
+        execute!(
+            session.output,
+            EnterAlternateScreen,
+            DisableLineWrap,
+            EnableBracketedPaste,
+            Hide
+        )?;
+        Ok(session)
+    }
+}
+
+impl Drop for Terminal {
+    fn drop(&mut self) {
+        // Try both operations even if the emulator has stopped accepting output.
+        let screen = execute!(
+            self.output,
+            SetAttribute(Attribute::Reset),
+            Show,
+            DisableBracketedPaste,
+            EnableLineWrap,
+            LeaveAlternateScreen
+        );
+        if let Err(error) = terminal::disable_raw_mode() {
+            eprintln!("[explore] could not restore terminal input: {error}");
+        }
+        if let Err(error) = screen {
+            eprintln!("[explore] could not restore terminal screen: {error}");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn receipt_is_reused_only_for_an_exact_draft_and_target() {
+        let target = || DraftTarget::Stable("document".into());
+        let initial = DraftAttempt::for_submission(None, target(), "Question");
+        let receipt = initial.receipt.clone();
+        let retry = DraftAttempt::for_submission(Some(initial), target(), "Question");
+        assert_eq!(retry.receipt, receipt);
+        let edited = DraftAttempt::for_submission(Some(retry), target(), "Question revised");
+        assert_ne!(edited.receipt, receipt);
+        let edited_receipt = edited.receipt.clone();
+        let selected_other_row = DraftAttempt::for_submission(
+            Some(edited),
+            DraftTarget::Stable("another row".into()),
+            "Question revised",
+        );
+        assert_ne!(selected_other_row.receipt, edited_receipt);
+    }
+
+    #[test]
+    fn terminal_text_neutralizes_controls_and_clips_wide_characters() {
+        let mut output = Vec::new();
+        print_at(&mut output, 0, 0, 6, "a\x1b\u{9f}界bc").unwrap();
+        assert!(output.ends_with("a  界b".as_bytes()));
+        assert_eq!(wrap("ab界\nc", 3), ["ab", "界", "c"]);
+    }
+}

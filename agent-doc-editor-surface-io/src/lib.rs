@@ -34,8 +34,8 @@ mod document_links;
 mod document_prompts;
 pub use document_links::linked_markdown_documents;
 pub use document_prompts::{
-    Submission as DocumentPromptSubmission, insert_document_prompt, project_document_prompts,
-    project_document_prompts_with_active,
+    Submission as DocumentPromptSubmission, document_prompt_receipt_present,
+    insert_document_prompt, project_document_prompts, project_document_prompts_with_active,
 };
 
 /// Compatibility consequence for a locally derived intent.

@@ -106,7 +106,22 @@ intellijPlatform {
     }
 }
 
+val explorerTabLayoutTestClass = "com.github.btakita.agentdoc.RepoContextTabLayoutTest"
+
+// The tab-strip fixture starts an IntelliJ application. Keep it in its own
+// JVM so the standalone editor tests still run without platform services.
+intellijPlatformTesting.testIde.register("testExplorerTabLayout") {
+    task {
+        filter.includeTestsMatching(explorerTabLayoutTestClass)
+    }
+}
+
 tasks {
+    test {
+        filter.excludeTestsMatching(explorerTabLayoutTestClass)
+        dependsOn("testExplorerTabLayout")
+    }
+
     withType<JavaCompile>().configureEach {
         options.compilerArgs.addAll(listOf("--add-modules", "jdk.attach"))
     }

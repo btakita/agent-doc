@@ -66,14 +66,15 @@ pub fn tracked_work_maintenance_required(content: &str) -> bool {
         return false;
     };
 
-    components
-        .iter()
-        .filter(|component| is_tracked_work_component(&component.name))
-        .any(|component| {
+    components.iter().any(|component| {
+        if is_tracked_work_component(&component.name) {
             let (_, items, _) =
                 agent_doc_element_backlog::backlog::parse_items(component.content(content));
             items.iter().any(|item| item.is_done())
-        })
+        } else {
+            component.has_inline_done_archive_content(content)
+        }
+    })
 }
 
 /// Open (`[ ]`/gated, not done) ids that live specifically in the live
@@ -127,6 +128,30 @@ pub fn single_open_review_item_id(content: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requires_maintenance_for_inline_history_on_external_done_marker() {
+        for attr in ["archive", "archive=document:other.done.md"] {
+            let template =
+                format!("## Done <!-- agent:done {attr} -->\n{{body}}<!-- /agent:done -->\n");
+            assert!(tracked_work_maintenance_required(
+                &template.replace("{body}", "- 2026-10-19 [#first] First completion.\n")
+            ));
+            for body in [
+                "\n",
+                "\n<!-- completed work archived in other.done.md -->\n",
+            ] {
+                assert!(!tracked_work_maintenance_required(
+                    &template.replace("{body}", body)
+                ));
+            }
+        }
+        assert!(!tracked_work_maintenance_required(concat!(
+            "<!-- agent:done -->\n",
+            "- 2026-10-19 [#first] First completion.\n",
+            "<!-- /agent:done -->\n",
+        )));
+    }
 
     #[test]
     fn fingerprints_backlog_component_with_open_item_ids() {

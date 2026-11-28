@@ -41,10 +41,7 @@ pub fn archive_pending_done(
         let pointer = format!("\n<!-- completed work archived in {label} -->\n");
         let inline_content = existing_body
             .lines()
-            .filter(|line| {
-                let line = line.trim();
-                !(line.starts_with("<!-- completed work archived in ") && line.ends_with(" -->"))
-            })
+            .filter(|line| !agent_doc_element::element::is_done_archive_pointer(line))
             .collect::<Vec<_>>()
             .join("\n");
         let inline = (!inline_content.trim().is_empty()).then_some(inline_content.as_str());
@@ -464,14 +461,8 @@ fn append_external_done_archive(
         existing.push('\n');
         changed = true;
     }
-    if let Some(inline) = inline_content
-        .map(str::trim)
-        .filter(|inline| !inline.is_empty())
-        && !existing.contains(inline)
-    {
-        existing.push_str(inline);
-        existing.push('\n');
-        changed = true;
+    if let Some(inline) = inline_content {
+        changed |= append_inline_done_archive(&mut existing, inline);
     }
     for item in removed {
         let first_line = format!("- {} [#{}] {}", today, item.id, item.text);
@@ -509,42 +500,98 @@ fn append_external_done_archive(
     Ok(())
 }
 
-fn sort_done_archive_entries_by_timestamp(content: &str) -> String {
-    fn timestamp(line: &str) -> Option<&str> {
-        let rest = line
-            .strip_prefix("- ")
-            .or_else(|| line.strip_prefix("* "))?;
-        let value = rest.split_whitespace().next()?;
-        let bytes = value.as_bytes();
-        (bytes.len() == 10
-            && bytes[4] == b'-'
-            && bytes[7] == b'-'
-            && bytes
-                .iter()
-                .enumerate()
-                .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit()))
-        .then_some(value)
-    }
-
-    let mut prefix = String::new();
-    let mut entries: Vec<(String, String)> = Vec::new();
-    for line in content.split_inclusive('\n') {
-        if let Some(stamp) = timestamp(line) {
-            entries.push((stamp.to_string(), line.to_string()));
-        } else if let Some((_, entry)) = entries.last_mut() {
-            entry.push_str(line);
-        } else {
-            prefix.push_str(line);
+fn append_inline_done_archive(existing: &mut String, inline: &str) -> bool {
+    let initial_len = existing.len();
+    let inline = inline.trim_matches(['\r', '\n']);
+    // A legacy preamble or undated record may already be present verbatim
+    // between dated entries. Compare complete lines to avoid substring hits.
+    let (preamble, incoming) = split_dated_done_archive_entries(inline);
+    let (existing_preamble, archived) = split_dated_done_archive_entries(existing);
+    let preamble_end = existing_preamble.len();
+    let lines: Vec<_> = preamble.lines().collect();
+    let add_preamble = !preamble.trim().is_empty()
+        && !existing
+            .lines()
+            .collect::<Vec<_>>()
+            .windows(lines.len())
+            .any(|window| window == lines);
+    // Sorting can interleave source entries with earlier archive contents.
+    // Match complete entries (including continuations) during an effect replay.
+    let mut known: HashSet<_> = archived
+        .iter()
+        .map(|(_, entry)| entry.trim_end_matches(['\r', '\n']))
+        .collect();
+    let mut append = String::new();
+    for (_, entry) in incoming {
+        if known.insert(entry.trim_end_matches(['\r', '\n'])) {
+            append.push_str(entry);
+            if !append.ends_with('\n') {
+                append.push('\n');
+            }
         }
     }
+    if add_preamble {
+        existing.insert_str(preamble_end, preamble);
+        if !preamble.ends_with('\n') {
+            existing.insert(preamble_end + preamble.len(), '\n');
+        }
+    }
+    existing.push_str(&append);
+    existing.len() != initial_len
+}
+
+fn dated_done_archive_entry_timestamp(line: &str) -> Option<&str> {
+    let rest = line
+        .strip_prefix("- ")
+        .or_else(|| line.strip_prefix("* "))?;
+    let value = rest.split_whitespace().next()?;
+    let bytes = value.as_bytes();
+    (bytes.len() == 10
+        && bytes[4] == b'-'
+        && bytes[7] == b'-'
+        && bytes
+            .iter()
+            .enumerate()
+            .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit()))
+    .then_some(value)
+}
+
+fn split_dated_done_archive_entries(content: &str) -> (&str, Vec<(&str, &str)>) {
+    let mut offset = 0;
+    let mut entries = Vec::new();
+    for line in content.split_inclusive('\n') {
+        if let Some(stamp) = dated_done_archive_entry_timestamp(line) {
+            entries.push((stamp, offset));
+        }
+        offset += line.len();
+    }
+    let prefix_len = entries.first().map_or(content.len(), |(_, start)| *start);
+    let mut end = content.len();
+    let mut entries: Vec<_> = entries
+        .into_iter()
+        .rev()
+        .map(|(stamp, start)| {
+            let entry = &content[start..end];
+            end = start;
+            (stamp, entry)
+        })
+        .collect();
+    entries.reverse();
+    (&content[..prefix_len], entries)
+}
+
+fn sort_done_archive_entries_by_timestamp(content: &str) -> String {
+    let (prefix, mut entries) = split_dated_done_archive_entries(content);
     if entries.len() < 2 {
         return content.to_string();
     }
-    entries.sort_by(|left, right| left.0.cmp(&right.0));
+    entries.sort_by_key(|(stamp, _)| *stamp);
+    let mut sorted = String::with_capacity(content.len());
+    sorted.push_str(prefix);
     for (_, entry) in entries {
-        prefix.push_str(&entry);
+        sorted.push_str(entry);
     }
-    prefix
+    sorted
 }
 
 #[cfg(test)]
@@ -718,6 +765,47 @@ mod tests {
         );
         assert!(!updated.contains("[#old]"), "{updated}");
         assert_eq!(archive_pending_done(&doc, &updated, &[]).unwrap(), None);
+    }
+
+    #[test]
+    fn migrating_inline_archive_replays_after_entries_were_interleaved() {
+        let project = tempfile::tempdir().unwrap();
+        std::fs::create_dir_all(project.path().join(".agent-doc")).unwrap();
+        let doc = project.path().join("session.md");
+        let archive = doc.with_extension("done.md");
+        let body = concat!(
+            "<!-- agent:done archive -->\n",
+            "Legacy archive note.\n",
+            "- 2026-10-19 [#first] First completion.\n",
+            "  - Evidence for the first completion.\n\n",
+            "- 2026-10-21 [#last] Last completion.\n",
+            "<!-- /agent:done -->\n",
+        );
+        std::fs::write(&doc, body).unwrap();
+        std::fs::write(
+            &archive,
+            "# Done\n\n- 2026-10-20 [#middle] Existing completion.\n",
+        )
+        .unwrap();
+
+        archive_pending_done(&doc, body, &[]).unwrap().unwrap();
+        let archived = std::fs::read_to_string(&archive).unwrap();
+        assert_eq!(
+            archived,
+            concat!(
+                "# Done\n\n",
+                "Legacy archive note.\n",
+                "- 2026-10-19 [#first] First completion.\n",
+                "  - Evidence for the first completion.\n\n",
+                "- 2026-10-20 [#middle] Existing completion.\n",
+                "- 2026-10-21 [#last] Last completion.\n",
+            )
+        );
+
+        // Replaying after the archive write succeeds and clearing the inline
+        // body has not landed must leave the archive byte-for-byte unchanged.
+        archive_pending_done(&doc, body, &[]).unwrap().unwrap();
+        assert_eq!(std::fs::read_to_string(&archive).unwrap(), archived);
     }
 }
 

@@ -262,6 +262,12 @@ pub fn is_backlog_done_component(name: &str) -> bool {
     name == BACKLOG_DONE_COMPONENT
 }
 
+/// Whether a line is the generated routing comment for an external done archive.
+pub fn is_done_archive_pointer(line: &str) -> bool {
+    let line = line.trim();
+    line.starts_with("<!-- completed work archived in ") && line.ends_with(" -->")
+}
+
 /// Check whether a component name refers to the review component.
 pub fn is_review_component(name: &str) -> bool {
     name == REVIEW_COMPONENT
@@ -483,6 +489,19 @@ impl Component {
     #[allow(dead_code)] // public API — used by tests and future consumers
     pub fn content<'a>(&self, doc: &'a str) -> &'a str {
         &doc[self.open_end..self.close_start]
+    }
+
+    pub fn is_external_done_archive(&self) -> bool {
+        is_backlog_done_component(&self.name) && self.attrs.contains_key("archive")
+    }
+
+    /// Whether this done archive still holds inline content to move.
+    pub fn has_inline_done_archive_content(&self, doc: &str) -> bool {
+        self.is_external_done_archive()
+            && self
+                .content(doc)
+                .lines()
+                .any(|line| !line.trim().is_empty() && !is_done_archive_pointer(line))
     }
 
     /// Get the patch mode from inline attributes.

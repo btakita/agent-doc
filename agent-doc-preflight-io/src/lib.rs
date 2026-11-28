@@ -2445,10 +2445,10 @@ struct GateVerifyOptions {
     force_disk: bool,
 }
 
-/// Run pending-component maintenance: lazy backfill, reap `[x]`, and reorder detection.
+/// Run pending-component maintenance: lazy backfill, reap `[x]`, move
+/// inline done history to a configured archive, and detect reorders.
 ///
-/// Any write-through (backfill / reap) is persisted and committed in the same pass.
-/// Silent no-op when the document has no tracked-work component.
+/// The write-through is persisted with the upcoming commit baseline.
 pub fn run_pending_maintenance(
     file: &Path,
     write_effects: &dyn PreflightMaintenanceWriteEffects,
@@ -2685,12 +2685,16 @@ fn run_pending_maintenance_with_options(
         .collect();
     if tracked_surfaces.is_empty()
         && !components.iter().any(|component| {
-            agent_doc_element::todo::is_todo_component(&component.name)
-                && component.attrs.contains_key("priority")
+            component.has_inline_done_archive_content(&content)
+                || (agent_doc_element::todo::is_todo_component(&component.name)
+                    && component.attrs.contains_key("priority"))
         })
     {
         return Ok(PendingMaintenanceReport::default());
     }
+    let uses_external_done_archive = components
+        .iter()
+        .any(|component| component.is_external_done_archive());
 
     let canonical = std::fs::canonicalize(file).unwrap_or_else(|_| file.to_path_buf());
     let doc_id = agent_doc_fs::document_state_hash(&canonical)
@@ -3049,8 +3053,8 @@ fn run_pending_maintenance_with_options(
         // which sets `mutated`; this also covers the no-reap mutations.
         if let Some(ref mut snap_content) = snapshot_content {
             let snap_comps = agent_doc_element::element::parse(snap_content).ok();
-            if let Some(snap_comp) = snap_comps.and_then(|cs| {
-                cs.into_iter()
+            if let Some(snap_comp) = snap_comps.as_ref().and_then(|cs| {
+                cs.iter()
                     .find(|c| component_matches_tracked_surface(&c.name, surface))
             }) {
                 let snap_body = snap_comp.content(snap_content).to_string();
@@ -3059,6 +3063,12 @@ fn run_pending_maintenance_with_options(
                     snapshot_mutated = true;
                 }
                 if !removed_items.is_empty()
+                    && !uses_external_done_archive
+                    && !snap_comps.as_ref().is_some_and(|components| {
+                        components
+                            .iter()
+                            .any(|component| component.is_external_done_archive())
+                    })
                     && let Some(archived) = archive_pending_done_for_maintenance(
                         file,
                         snap_content,
@@ -3115,17 +3125,11 @@ fn run_pending_maintenance_with_options(
         current_content = archived;
         mutated = true;
     }
-    if let Some(ref mut snap_content) = snapshot_content
-        && let Some(archived) = archive_pending_done_for_maintenance(
-            file,
-            snap_content,
-            &[],
-            options.persist,
-            effect_fence,
-        )?
-        && archived != *snap_content
+    if options.persist
+        && uses_external_done_archive
+        && let Some(ref mut snap_content) = snapshot_content
+        && sync_external_done_marker(&current_content, snap_content)?
     {
-        *snap_content = archived;
         snapshot_mutated = true;
     }
 
@@ -3572,6 +3576,32 @@ fn run_pending_maintenance_with_options(
         terminal_debris_lines_pruned,
         todo_signals,
     })
+}
+
+/// Only the authoritative document may move history into an external file.
+/// Checkpoint that same routing marker over any older inline history.
+fn sync_external_done_marker(current: &str, snapshot: &mut String) -> Result<bool> {
+    use agent_doc_element::element::{is_backlog_done_component, parse};
+
+    let Some(archive) = parse(current)?
+        .into_iter()
+        .find(|component| component.is_external_done_archive())
+    else {
+        return Ok(false);
+    };
+    let Some(previous) = parse(snapshot)?
+        .into_iter()
+        .find(|component| is_backlog_done_component(&component.name))
+    else {
+        return Ok(false);
+    };
+    let marker_and_body = &current[archive.open_start..archive.close_start];
+    let previous_range = previous.open_start..previous.close_start;
+    if &snapshot[previous_range.clone()] == marker_and_body {
+        return Ok(false);
+    }
+    snapshot.replace_range(previous_range, marker_and_body);
+    Ok(true)
 }
 
 /// Completed-work ids for `file`: the inline `agent:done` bodies plus every
@@ -23231,6 +23261,49 @@ prompt_presets:\n  \"#spec-test-build-install-commit-push\": \"update spec + tes
 
         run_pending_maintenance(&doc, &effects).expect_err(
             "an unreachable editor replica must still fail closed, not defer like a converging one",
+        );
+    }
+
+    #[test]
+    fn pending_maintenance_archives_inline_done_history_without_live_tracked_work() {
+        let dir = setup_project();
+        let doc = dir.path().join("session.md");
+        let archive = doc.with_extension("done.md");
+        let old = concat!(
+            "# Session\n\n",
+            "## Done <!-- agent:done -->\n",
+            "- 2026-10-19 [#first] First completion.\n",
+            "<!-- /agent:done -->\n",
+        );
+        let current = old.replace("<!-- agent:done -->", "<!-- agent:done archive -->");
+        std::fs::write(&doc, &current).unwrap();
+        agent_doc_snapshot_io::checkpoint_document_baseline(
+            &doc,
+            old,
+            agent_doc_ops_log_io::log_op,
+        )
+        .unwrap();
+
+        inspect_pending_maintenance(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS).unwrap();
+        assert!(!archive.exists());
+        assert_eq!(std::fs::read_to_string(&doc).unwrap(), current);
+
+        run_pending_maintenance_force_disk(&doc, &TEST_PREFLIGHT_MAINTENANCE_WRITE_EFFECTS)
+            .unwrap();
+
+        let updated = std::fs::read_to_string(&doc).unwrap();
+        assert!(updated.contains("## Done <!-- agent:done archive -->"));
+        assert!(updated.contains("<!-- completed work archived in session.done.md -->"));
+        assert!(!updated.contains("[#first]"));
+        assert_eq!(
+            std::fs::read_to_string(&archive).unwrap(),
+            "# Agent Doc Completed Work\n\n- 2026-10-19 [#first] First completion.\n"
+        );
+        assert_eq!(
+            agent_doc_snapshot_io::load_document_baseline(&doc)
+                .unwrap()
+                .unwrap(),
+            updated
         );
     }
 

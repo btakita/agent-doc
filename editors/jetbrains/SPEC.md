@@ -2227,10 +2227,11 @@ IntelliJ IDEA. The classic plugin and the 262–263 modular backend use the
 same implementation. The Document tab uses the same Lazily View projection as
 the browser for tree order, task states, and prompt controls. It shows
 **Follow editor caret** at the right edge of the tab row. The option starts on
-and is remembered per IDE project. Opening Explorer from an editor selects the
-deepest row at that editor's logical caret line once its outline is current,
-including rows that only support navigation. Turn the option off to keep the
-selected tree row when the editor caret moves. Manual selection and
+and is remembered per IDE project. Opening Explorer selects the deepest row
+at the editor's logical caret line once its outline is current, including rows
+that only support navigation. The action uses its invoking editor, while the
+tool-window stripe uses the currently selected editor. Turn the option off to
+keep the selected tree row when the editor caret moves. Manual selection and
 **Open in editor** work in either mode. The Document tab lists in-project
 Markdown links from the current session snapshot. Open a linked document in
 the editor or switch the document tree to a linked Agent Doc session. The

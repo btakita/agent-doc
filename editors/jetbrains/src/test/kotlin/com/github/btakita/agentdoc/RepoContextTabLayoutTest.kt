@@ -6,6 +6,7 @@ import com.intellij.openapi.project.ProjectManager
 import com.intellij.testFramework.TestApplicationManager
 import com.intellij.testFramework.UsefulTestCase
 import java.awt.Container
+import javax.swing.JFrame
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 
@@ -84,6 +85,61 @@ class RepoContextTabLayoutTest : UsefulTestCase() {
             assertEquals(run, tree.selection)
         } finally {
             factory.releaseEditor(invokingEditor)
+        }
+    }
+
+    fun testStripeReopenFollowsCurrentCaretAndActionKeepsInvokingSplit() {
+        TestApplicationManager.getInstance()
+        val project = ProjectManager.getInstance().defaultProject
+        val factory = EditorFactory.getInstance()
+        val document = factory.createDocument("Run\nFirst follow-up\nVerify the Explorer")
+        val selectedEditor = factory.createEditor(document, project)
+        val invokingEditor = factory.createEditor(document, project)
+        val frame = JFrame()
+        try {
+            val run = DocumentPromptTarget("run", "run", "Run", 1, 0, DocumentPromptAction.QUEUE, endLine = 3)
+            val first = DocumentPromptTarget("first", "first", "First follow-up", 2, 1, DocumentPromptAction.EXCHANGE)
+            val followUp = first.copy(id = "verify", selectionKey = "verify", label = "Verify the Explorer", line = 3)
+            val outline = RepoContextDocumentOutline("current", listOf(run, first, followUp))
+            val tree = RepoContextDocumentTree({}, {})
+            val caretSync = RepoContextCaretSync(
+                project, testRootDisposable, canFollow = { false },
+                canFollowOnOpen = { tree.followEditorCaret.isSelected }, selectTarget = tree::selectTarget,
+            )
+            tree.show(outline)
+            caretSync.show(document, document.modificationStamp, outline)
+            caretSync.observeWindowVisibility(tree) { caretSync.openAtCaret(selectedEditor) }
+            frame.contentPane.add(tree)
+            frame.setSize(480, 320)
+
+            selectedEditor.caretModel.moveToLogicalPosition(LogicalPosition(1, 0))
+            frame.isVisible = true
+            assertEquals(first, tree.selection)
+
+            frame.isVisible = false
+            selectedEditor.caretModel.moveToLogicalPosition(LogicalPosition(2, 0))
+            assertEquals(first, tree.selection)
+            frame.isVisible = true
+            assertEquals(followUp, tree.selection)
+
+            frame.isVisible = false
+            tree.followEditorCaret.isSelected = false
+            selectedEditor.caretModel.moveToLogicalPosition(LogicalPosition(1, 0))
+            frame.isVisible = true
+            assertEquals(followUp, tree.selection)
+
+            frame.isVisible = false
+            tree.followEditorCaret.isSelected = true
+            caretSync.showFromExplorerAction({ ready ->
+                frame.isVisible = true
+                assertEquals(followUp, tree.selection)
+                ready.run()
+            }) { caretSync.openAtCaret(invokingEditor) }
+            assertEquals(run, tree.selection)
+        } finally {
+            frame.dispose()
+            factory.releaseEditor(invokingEditor)
+            factory.releaseEditor(selectedEditor)
         }
     }
 

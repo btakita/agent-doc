@@ -8,6 +8,8 @@ import com.intellij.openapi.editor.event.CaretEvent
 import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
+import java.awt.Component
+import java.awt.event.HierarchyEvent
 
 internal fun documentTargetAtCaret(
     targets: List<DocumentPromptTarget>,
@@ -38,6 +40,7 @@ internal class RepoContextCaretSync(
     private var awaitingOutline = false
     private var openedLine: Int? = null
     private var openingEditor: Editor? = null
+    private var explicitOpen: (() -> Unit)? = null
 
     init {
         GenerationListeners.addCaretListener(object : CaretListener {
@@ -74,6 +77,30 @@ internal class RepoContextCaretSync(
 
     fun cancelOpeningFollow() {
         openingEditor = null
+    }
+
+    fun observeWindowVisibility(component: Component, followOpen: () -> Unit) {
+        component.addHierarchyListener { event ->
+            if (event.changeFlags and HierarchyEvent.SHOWING_CHANGED.toLong() == 0L) return@addHierarchyListener
+            if (!component.isShowing) {
+                explicitOpen = null
+                cancelOpeningFollow()
+            } else if (explicitOpen == null) {
+                followOpen()
+            }
+        }
+    }
+
+    fun showFromExplorerAction(show: (Runnable) -> Unit, followOpen: () -> Unit) {
+        // The action has an editor captured before ToolWindow.show changes focus.
+        // Its callback takes precedence over the ordinary visibility event.
+        explicitOpen = followOpen
+        show(Runnable {
+            if (explicitOpen === followOpen) {
+                explicitOpen = null
+                followOpen()
+            }
+        })
     }
 
     fun followSelectedEditor() {

@@ -90,7 +90,8 @@ class RepoContextExplorerAction : ImplAction {
         } else {
             window.contentManager.selectedContent?.component as? RepoContextExplorerPanel
         }
-        window.show { panel?.followOpeningEditor(editor) }
+        if (panel == null) window.show()
+        else panel.showFromExplorerAction(editor, window::show)
     }
 
     override fun update(e: AnActionEvent) {
@@ -350,6 +351,9 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                 refreshOutline()
             }
         })
+        caretSync.observeWindowVisibility(this) {
+            followOpeningEditor(FileEditorManager.getInstance(project).selectedTextEditor)
+        }
         refreshOutline()
     }
 
@@ -569,7 +573,11 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         documentTree.followEditorCaret.isSelected && !disposed && !submitting &&
             tabs.selectedInfo?.component === documentTree && !documentTree.isEditingPrompt
 
-    fun followOpeningEditor(editor: Editor?) {
+    fun showFromExplorerAction(editor: Editor?, show: (Runnable) -> Unit) {
+        caretSync.showFromExplorerAction(show) { followOpeningEditor(editor) }
+    }
+
+    private fun followOpeningEditor(editor: Editor?) {
         if (!canFollowCaret() || editor == null || editor.isDisposed || editor.project !== project) return
         val file = FileDocumentManager.getInstance().getFile(editor.document) ?: return
         if (!pinnedSession && file != session && AgentDocSessionFiles.isSessionDocument(file)) setSession(file)

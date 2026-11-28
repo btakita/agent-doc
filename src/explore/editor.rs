@@ -8,6 +8,7 @@ pub(super) struct DraftEditor {
     command: Command,
     path: PathBuf,
     context_marker: String,
+    quoted_row: String,
     _directory: tempfile::TempDir,
     #[cfg(unix)]
     _interrupt: InterruptGuard,
@@ -28,18 +29,17 @@ impl DraftEditor {
             .context("create private editor directory")?;
         let path = directory.path().join("prompt.md");
         let context_marker = format!(
-            "<!-- Agent Doc: write your prompt above this line. Selected row for reference. {} -->",
+            "<!-- Agent Doc: Selected row for reference. Write your prompt above or below it. {} -->",
             uuid::Uuid::new_v4().simple()
         );
-        fs::write(
-            &path,
-            format!("{draft}\n{context_marker}\n> {selected_row}\n"),
-        )
-        .context("write temporary draft")?;
+        let quoted_row = format!("> {selected_row}");
+        fs::write(&path, format!("{draft}\n{context_marker}\n{quoted_row}\n"))
+            .context("write temporary draft")?;
         Ok(Self {
             command,
             path,
             context_marker,
+            quoted_row,
             _directory: directory,
             #[cfg(unix)]
             _interrupt: InterruptGuard::install()?,
@@ -48,24 +48,41 @@ impl DraftEditor {
 
     pub(super) fn edit(&mut self) -> Result<String> {
         let contents = read_edited_draft(&mut self.command, &self.path)?;
-        Ok(without_context(contents, &self.context_marker))
+        Ok(without_context(
+            contents,
+            &self.context_marker,
+            &self.quoted_row,
+        ))
     }
 }
 
-fn without_context(mut contents: String, marker: &str) -> String {
-    // The editor may normalize line endings. Strip the single separator we
-    // inserted before the generated footer and keep the prompt itself verbatim.
-    if let Some((before, _)) = contents.split_once(marker) {
-        if before.is_empty() {
-            contents.clear();
-        } else if let Some(body) = before
-            .strip_suffix("\r\n")
-            .or_else(|| before.strip_suffix('\n'))
-        {
-            contents.truncate(body.len());
-        }
+fn without_context(contents: String, marker: &str, quoted_row: &str) -> String {
+    fn strip_leading_line_break(text: &str) -> &str {
+        text.strip_prefix("\r\n")
+            .or_else(|| text.strip_prefix('\n'))
+            .unwrap_or(text)
     }
-    contents
+
+    let Some((before, rest)) = contents.split_once(marker) else {
+        return contents;
+    };
+    let after_marker = strip_leading_line_break(rest);
+    let after = after_marker
+        .strip_prefix(quoted_row)
+        .map_or(after_marker, strip_leading_line_break);
+    // Editors can normalize line endings. Drop the template separators at
+    // either edge, but keep a line break between authored text on both sides.
+    let before_prompt = before
+        .strip_suffix("\r\n")
+        .or_else(|| before.strip_suffix('\n'))
+        .unwrap_or(before);
+    if before_prompt.is_empty() {
+        after.to_owned()
+    } else if after.is_empty() {
+        before_prompt.to_owned()
+    } else {
+        [before, after].concat()
+    }
 }
 
 fn editor_command(visual: Option<OsString>, editor: Option<OsString>) -> Result<Command> {
@@ -139,23 +156,55 @@ impl Drop for InterruptGuard {
 mod tests {
     use super::*;
 
+    const CONTEXT_MARKER: &str = "<!-- selected row for reference: test -->";
+    const QUOTED_ROW: &str = "> - ### A **row** with an <!-- inline note -->";
+
     #[test]
     fn editor_context_is_removed_without_changing_the_authored_markdown() {
-        let marker = "<!-- Agent Doc: write your prompt above this line. Selected row for reference. test -->";
-        let footer = format!("{marker}\n> - ### A **row** with an <!-- inline note -->\n");
+        let footer = format!("{CONTEXT_MARKER}\n{QUOTED_ROW}\n");
         let untouched = format!("\n{footer}");
-        assert_eq!(without_context(untouched, marker), "");
+        assert_eq!(without_context(untouched, CONTEXT_MARKER, QUOTED_ROW), "");
 
         let authored = "> Quoted text\n\n<!-- Authored comment -->\n  ";
         let edited = format!("{authored}\n{footer}");
-        assert_eq!(without_context(edited, marker), authored);
+        assert_eq!(
+            without_context(edited, CONTEXT_MARKER, QUOTED_ROW),
+            authored
+        );
 
         let authored = "A **prompt**\r\n";
         let edited = format!("{authored}\r\n{}", footer.replace('\n', "\r\n"));
-        assert_eq!(without_context(edited, marker), authored);
+        assert_eq!(
+            without_context(edited, CONTEXT_MARKER, QUOTED_ROW),
+            authored
+        );
 
         let replaced = "A **new** prompt\n> Kept quotation\n";
-        assert_eq!(without_context(replaced.to_owned(), marker), replaced);
+        assert_eq!(
+            without_context(replaced.to_owned(), CONTEXT_MARKER, QUOTED_ROW),
+            replaced
+        );
+    }
+
+    #[test]
+    fn saved_text_below_the_selected_row_stays_in_the_draft() {
+        let reference = format!("\n{CONTEXT_MARKER}\n{QUOTED_ROW}\n");
+        let added = "Keep **this Markdown**.\n\n> Keep this quotation, too.";
+        let edited = format!("{reference}{added}");
+        assert_eq!(without_context(edited, CONTEXT_MARKER, QUOTED_ROW), added);
+
+        let edited = format!("Existing prompt.{reference}{added}").replace('\n', "\r\n");
+        let expected = format!("Existing prompt.\n{added}").replace('\n', "\r\n");
+        assert_eq!(
+            without_context(edited, CONTEXT_MARKER, QUOTED_ROW),
+            expected
+        );
+
+        let replaced_row = format!("\n{CONTEXT_MARKER}\n{added}");
+        assert_eq!(
+            without_context(replaced_row, CONTEXT_MARKER, QUOTED_ROW),
+            added
+        );
     }
 
     #[test]

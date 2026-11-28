@@ -72,9 +72,11 @@ class RepoContextExplorerAction : ImplAction {
         val project = e.project ?: return
         val manager = ToolWindowManager.getInstance(project)
         val parent = project.getService(ProjectPluginLifecycleService::class.java)
-        val window = manager.getToolWindow(TITLE) ?: manager.registerToolWindow(
-            TITLE, false, ToolWindowAnchor.RIGHT, parent,
+        val window = manager.getToolWindow(TOOL_WINDOW_ID) ?: manager.registerToolWindow(
+            TOOL_WINDOW_ID, false, ToolWindowAnchor.RIGHT, parent,
         )
+        window.setTitle(TITLE)
+        window.setStripeTitle(TITLE)
         if (window.contentManager.contentCount == 0) {
             val basePath = project.basePath ?: return
             val panel = RepoContextExplorerPanel(project, Path.of(basePath))
@@ -90,7 +92,8 @@ class RepoContextExplorerAction : ImplAction {
     }
 
     companion object {
-        internal const val TITLE = "Document Context Explorer"
+        internal const val TITLE = "Document Explorer"
+        private const val TOOL_WINDOW_ID = "Document Context Explorer"
     }
 }
 
@@ -371,13 +374,13 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         openRelated.isEnabled = idle && related.selectedValue != null
         chooseSession.isEnabled = idle
         val documentSelected = tabs.selectedInfo?.component == documentTree
-        val target = documentTree.selection
+        val promptControl = documentTree.promptControl
         question.isVisible = !documentSelected
         question.submit.text = "Ask about source"
         question.submit.isEnabled = !documentSelected && idle && selection != null
-        documentTree.question.submit.text = target?.action?.button ?: "Ask agent"
+        documentTree.question.submit.text = promptControl?.label ?: "Ask agent"
         documentTree.question.submit.isEnabled = documentSelected && idle && currentOutline != null &&
-            target != null && target.action != DocumentPromptAction.NAVIGATE
+            promptControl?.disabled == false
         openAnswer.isEnabled = matchingAnswer != null
         sessionLabel.text = session?.name ?: "No session selected."
     }
@@ -571,6 +574,10 @@ private class RepoContextExplorerPanel(private val project: Project, private val
                     session != file || document.modificationStamp != stamp) return@invokeLater
                 projection.onSuccess { outline ->
                     currentOutline = CurrentOutline(file, stamp, outline)
+                    outline.view?.let { view ->
+                        tabs.tabs[0].setText(view.documentTab)
+                        tabs.tabs[1].setText(view.repositoryTab)
+                    }
                     documentTree.show(outline, file.url)
                     caretSync.show(document, stamp, outline)
                 }.onFailure { error ->

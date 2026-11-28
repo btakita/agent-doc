@@ -9,10 +9,14 @@ import com.intellij.openapi.editor.event.CaretListener
 import com.intellij.openapi.fileEditor.FileEditorManager
 import com.intellij.openapi.project.Project
 
-internal fun promptTargetAtCaret(targets: List<DocumentPromptTarget>, line: Int): DocumentPromptTarget? =
+internal fun promptTargetAtCaret(
+    targets: List<DocumentPromptTarget>,
+    line: Int,
+    allowsPrompt: (DocumentPromptAction) -> Boolean = { it != DocumentPromptAction.NAVIGATE },
+): DocumentPromptTarget? =
     targets.asSequence()
         .filter { target ->
-            target.action != DocumentPromptAction.NAVIGATE && line >= target.line && line <= (target.endLine ?: target.line)
+            allowsPrompt(target.action) && line >= target.line && line <= (target.endLine ?: target.line)
         }
         .maxWithOrNull(compareBy(DocumentPromptTarget::depth, DocumentPromptTarget::line))
 
@@ -96,7 +100,9 @@ internal class RepoContextCaretSync(
                 openedLine = null
                 if (fromTree) return@compute null
             }
-            promptTargetAtCaret(current.outline.targets, line)
+            promptTargetAtCaret(current.outline.targets, line) { action ->
+                !current.outline.promptControl(action).disabled
+            }
         }
         target?.id?.let(selectTarget)
     }

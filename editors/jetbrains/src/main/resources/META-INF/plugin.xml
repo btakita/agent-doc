@@ -308,7 +308,7 @@
         </action>
         <action id="AgentDoc.RepoContextExplorer"
                 class="com.github.btakita.agentdoc.shell.RepoContextExplorerForwarder"
-                text="Agent Doc: Document Context Explorer"
+                text="Agent Doc: Document Explorer"
                 description="Search repository code and Markdown and ask about a selected source">
             <add-to-group group-id="ToolsMenu" anchor="last"/>
         </action>

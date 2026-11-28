@@ -1,0 +1,37 @@
+{
+  "id": "agent-doc.document-explorer",
+  "root": "explorer",
+  "signals": {},
+  "nodes": {
+    "explorer": {
+      "role": "region",
+      "layout": {"flow": "column"},
+      "children": ["title", "tabs", "linked-documents", "outline", "composer"]
+    },
+    "title": {"role": "text", "text": "Document Explorer"},
+    "tabs": {
+      "role": "region",
+      "layout": {"flow": "row"},
+      "children": ["document-tab", "repository-tab", "follow-editor-caret"]
+    },
+    "document-tab": {"role": "button", "text": "Document"},
+    "repository-tab": {"role": "button", "text": "Repository"},
+    "follow-editor-caret": {"role": "field", "text": "Follow editor caret"},
+    "linked-documents": {"role": "list", "text": "Linked documents"},
+    "outline": {"role": "list", "children": []},
+    "composer": {
+      "role": "region",
+      "layout": {"flow": "column"},
+      "children": ["prompt-label", "prompt-exchange", "hint-exchange", "prompt-queue", "hint-queue", "prompt-subprompt", "hint-subprompt", "prompt-navigate", "hint-navigate"]
+    },
+    "prompt-label": {"role": "text", "text": "Prompt"},
+    "prompt-exchange": {"role": "button", "text": "Ask agent", "disabled": false},
+    "hint-exchange": {"role": "text", "text": "Send about this target in Exchange."},
+    "prompt-queue": {"role": "button", "text": "Add prompt", "disabled": false},
+    "hint-queue": {"role": "text", "text": "Add to this run under its queue settings."},
+    "prompt-subprompt": {"role": "button", "text": "Add subprompt", "disabled": false},
+    "hint-subprompt": {"role": "text", "text": "Add a child prompt under this row."},
+    "prompt-navigate": {"role": "button", "text": "Navigation only", "disabled": true},
+    "hint-navigate": {"role": "text", "text": "Navigation only. Select another row to ask."}
+  }
+}

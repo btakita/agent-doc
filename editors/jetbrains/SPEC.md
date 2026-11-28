@@ -2219,12 +2219,13 @@ On a cross-session claim reject, the first recovery choice is **New Pane in This
 - The generation proxy calls `requireLosslessNativeStringArgs(method.name, args)` before every native call. A `String` argument with an unpaired UTF-16 surrogate, the one input that UTF-8 encoding also replaces with `?`, refuses the call with `LossyNativeStringException` and never crosses.
 - `NativeStringEncodingTest` forces JNA's default to US-ASCII. It proves the default is the issue's lossy encoder (`dispatched ? opus-5.5 ?`), and that the bound handler crosses the issue's text and 500 seeded random non-ASCII documents byte-exact (length and round trip). It also proves the surrogate and malformed-UTF-8 refusals, and source-scans the plugin so no un-encoded crossing returns.
 
-### Document Context Explorer
+### Document Explorer
 
-**Agent Doc: Document Context Explorer** is a project action in Tools, Find
+**Agent Doc: Document Explorer** is a project action in Tools, Find
 Action, and the Agent Doc popup. It opens a native tool window in local
 IntelliJ IDEA. The classic plugin and the 262–263 modular backend use the
-same implementation. The Document tab shows **Follow editor caret** in the tab
+same implementation. The Document tab uses the same Lazily View projection as
+the browser for tree order, task states, and prompt controls. It shows **Follow editor caret** in the tab
 row. The option starts on and is remembered per IDE project. Turn it off to
 keep the selected tree row when the editor caret moves. Manual selection and
 **Open in editor** work in either mode. The Document tab lists in-project

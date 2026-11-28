@@ -127,7 +127,7 @@
       },
       {
         "command": "agentDoc.repoContextExplorer",
-        "title": "Agent Doc: Document Context Explorer"
+        "title": "Agent Doc: Document Explorer"
       },
       {
         "command": "agentDoc.treeStatus",

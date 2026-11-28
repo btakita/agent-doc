@@ -48,7 +48,7 @@ class BackendPopupActionRegistrationTest {
     }
 
     @Test
-    fun `local modular IDE can find the Document Context Explorer backend action`() {
+    fun `local modular IDE can find the Document Explorer backend action`() {
         assertTrue("AgentDoc.RepoContextExplorer" in backendIds)
     }
 

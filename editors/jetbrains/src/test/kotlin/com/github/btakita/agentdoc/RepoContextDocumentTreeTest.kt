@@ -109,6 +109,41 @@ class RepoContextDocumentTreeTest {
     }
 
     @Test
+    fun `document tree lowers the native Lazily view controls`() = SwingUtilities.invokeAndWait {
+        val native = EditorDerivation { derivation, _ ->
+            assertEquals("document_prompts", derivation)
+            """
+            {
+                "revision": "revision",
+                "nodes": [
+                    {"id":"root","label":"Root","line":1,"depth":0,"action":"queue"},
+                    {"id":"child","label":"Child","line":2,"depth":1,"action":"navigate",
+                     "task":{"request_id":"receipt","state":"waiting","label":"Waiting for you"}}
+                ],
+                "view": {
+                    "document_tab":"Document", "repository_tab":"Repository",
+                    "follow_editor_caret":"Follow current line", "linked_documents":"Links",
+                    "prompt_label":"New prompt", "prompt_actions":{
+                        "queue":{"label":"Add prompt","hint":"Add here","disabled":false},
+                        "navigate":{"label":"Navigation only","hint":"Open only","disabled":true}
+                    }
+                }
+            }
+            """.trimIndent()
+        }
+        val outline = RepoContextDocumentPrompts(native).outline("# Root")
+        val explorer = RepoContextDocumentTree({}, {})
+        explorer.show(outline)
+        assertEquals("Follow current line", explorer.followEditorCaret.text)
+        assertEquals("New prompt", explorer.question.label.text)
+        assertEquals(DocumentPromptControl("Add prompt", "Add here", false), explorer.promptControl)
+        assertEquals("Waiting for you", outline.targets.last().task?.label)
+        explorer.selectTarget("child")
+        assertTrue(explorer.promptControl!!.disabled)
+        assertFalse(explorer.question.isVisible)
+    }
+
+    @Test
     fun `turning off caret following keeps manual tree navigation available`() = SwingUtilities.invokeAndWait {
         var opened: DocumentPromptTarget? = null
         val view = RepoContextDocumentTree({}, { opened = it })

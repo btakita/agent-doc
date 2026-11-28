@@ -8,7 +8,10 @@ use super::{
 use agent_doc_document::queue_projection::{QueueLifecycleMarker as Marker, lifecycle_marker};
 use agent_doc_hash::content_hash;
 use agent_doc_markdown_ast::{
-    exchange_tree::{ExchangeNode, ExchangeNodeKind, parse_exchange_nodes},
+    exchange_tree::{
+        ExchangeNode, ExchangeNodeKind, is_response_id_lookup_marker, parse_exchange_nodes,
+        response_cell_spans,
+    },
     overlay::ComponentMarkerScan,
 };
 use serde::Serialize;
@@ -178,6 +181,52 @@ fn attach_candidate<'a>(
         .or_insert(Some(index));
 }
 
+struct PromptAnswer {
+    range: Range<usize>,
+    text: String,
+}
+
+fn direct_answers(
+    body: &str,
+    scan: &ComponentMarkerScan,
+    range: Range<usize>,
+    answers: &mut HashMap<String, PromptAnswer>,
+) {
+    let response = &body[range.clone()];
+    if !response.contains(ANSWER_PREFIX) {
+        return;
+    }
+    let Some((heading, remainder)) = response.split_once('\n') else {
+        return;
+    };
+    let mut offset = range.start + heading.len() + 1;
+    let mut receipts = Vec::new();
+    let mut text = String::new();
+    for line in remainder.split_inclusive('\n') {
+        let trimmed = line.trim();
+        if scan.in_code(offset) {
+            text.push_str(line);
+        } else if let Some(receipt) = answer_receipt(line) {
+            receipts.push(receipt);
+        } else if !(is_response_id_lookup_marker(trimmed)
+            || trimmed.starts_with("<!-- agent:boundary:") && trimmed.ends_with(" -->"))
+        {
+            text.push_str(line);
+        }
+        offset += line.len();
+    }
+    let text = text.trim_matches(['\r', '\n']);
+    for receipt in receipts {
+        answers.insert(
+            receipt.to_owned(),
+            PromptAnswer {
+                range: range.clone(),
+                text: text.to_owned(),
+            },
+        );
+    }
+}
+
 pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]) {
     let active: HashSet<_> = active_prompts
         .iter()
@@ -195,40 +244,42 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
     let scan = ComponentMarkerScan::new(body);
     let exchange_nodes = parse_exchange_nodes(body);
     let mut answers = HashMap::new();
-    let mut response_ranges = Vec::new();
     let mut requests = Vec::new();
-    let mut offset = 0;
+    let mut node_offsets = vec![0];
+    let mut start = 0;
     for node in &exchange_nodes {
-        let start = offset;
-        let is_response = matches!(node.kind, ExchangeNodeKind::Response { .. });
         let end = start + node.lines.iter().map(String::len).sum::<usize>();
-        if is_response {
-            response_ranges.push(start..end);
-        }
         if let Some(request) = exchange_request(node) {
             requests.push((start..end, request, node));
         }
-        for line in &node.lines {
-            if is_response
-                && !scan.in_code(offset)
-                && let Some(receipt) = answer_receipt(line)
-            {
-                answers.insert(receipt.to_owned(), start..end);
-            }
-            offset += line.len();
-        }
+        node_offsets.push(end);
+        start = end;
+    }
+    let response_ranges: Vec<_> = response_cell_spans(&exchange_nodes)
+        .into_iter()
+        .map(|span| node_offsets[span.start]..node_offsets[span.end])
+        .collect();
+    for range in &response_ranges {
+        direct_answers(body, &scan, range.clone(), &mut answers);
     }
     // A directly marked answer is canonical when both the coordinator and a
     // retained worker record answer the same prompt.
     visit_worker_exchange_answers(body, &scan, |start, item, response| {
         if let Some(receipt) = active_request_id(item)
             && !answers.contains_key(receipt)
-            && checked_worker_response(response, &format!("{ANSWER_PREFIX}{receipt}")).is_some()
+            && let Some(text) =
+                checked_worker_response(response, &format!("{ANSWER_PREFIX}{receipt}"))
             && let Some(range) =
                 response_ranges.get(response_ranges.partition_point(|range| range.end <= start))
             && range.contains(&start)
         {
-            answers.insert(receipt.to_owned(), range.clone());
+            answers.insert(
+                receipt.to_owned(),
+                PromptAnswer {
+                    range: range.clone(),
+                    text,
+                },
+            );
         }
     });
 
@@ -298,7 +349,8 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
         })
         .flat_map(|target| {
             let answer = target.task.as_ref().and_then(|task| {
-                let range = answers.get(&task.request_id)?;
+                let saved = answers.get(task.request_id.as_str())?;
+                let range = &saved.range;
                 if !attached.insert(task.request_id.clone()) {
                     return None;
                 }
@@ -310,6 +362,9 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
                 answer.end_line = Some(projection.line(exchange.open_end + range.end - 1));
                 answer.id = format!("prompt-answer:{}", task.request_id);
                 answer.selection_key = Some(answer.id.clone());
+                if !saved.text.trim().is_empty() {
+                    answer.answer_text = Some(saved.text.clone());
+                }
                 Some(answer)
             });
             std::iter::once(target).chain(answer)
@@ -320,10 +375,10 @@ pub(super) fn project(projection: &mut Projection<'_>, active_prompts: &[String]
 fn update_queue_tasks(
     nodes: &mut [Target],
     active: &HashSet<&str>,
-    answers: &HashMap<String, Range<usize>>,
+    answers: &HashMap<String, PromptAnswer>,
 ) {
     for task in nodes.iter_mut().filter_map(|target| target.task.as_mut()) {
-        if answers.contains_key(&task.request_id) {
+        if answers.contains_key(task.request_id.as_str()) {
             task.state = match task.state {
                 PromptTaskState::Reported => PromptTaskState::Reported,
                 _ => PromptTaskState::Answered,

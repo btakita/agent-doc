@@ -1,6 +1,7 @@
 package com.github.btakita.agentdoc
 
 import com.intellij.openapi.editor.Document
+import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.treeStructure.Tree
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -188,6 +189,48 @@ class RepoContextDocumentTreeTest {
         view.show(RepoContextDocumentOutline("same-revision", listOf(root, parent, task("answered"))))
         assertEquals(parent, view.selection)
         assertEquals("Answered · Check the change", taskLabel())
+    }
+
+    @Test
+    fun `a newly saved answer appears verbatim under its prompt and opens its response`() = SwingUtilities.invokeAndWait {
+        val native = EditorDerivation { _, _ ->
+            """
+            {
+                "revision": "answered",
+                "nodes": [
+                    {"id":"document","selection_key":"document","label":"Document","line":1,"depth":0,"action":"exchange"},
+                    {"id":"prompt","selection_key":"prompt","label":"Check it","line":2,"depth":1,"action":"navigate",
+                     "task":{"request_id":"receipt","state":"answered"}},
+                    {"id":"answer","selection_key":"answer","label":"Answer","line":6,"depth":2,"action":"navigate",
+                     "answer_text":"The instructions are in the ticket.\n\n<example>Open the description.</example>"}
+                ]
+            }
+            """.trimIndent()
+        }
+        var opened: DocumentPromptTarget? = null
+        val view = RepoContextDocumentTree({}, { opened = it })
+        val answered = RepoContextDocumentPrompts(native).outline("source")
+        val (root, prompt, answer) = answered.targets
+        val running = prompt.copy(task = prompt.task?.copy(state = "running"))
+        view.show(RepoContextDocumentOutline("running", listOf(root, running)))
+        view.selectTarget(root.id)
+        view.show(answered)
+
+        val tree = tree(view)
+        val row = (0 until tree.rowCount).single { tree.getPathForRow(it).lastPathComponent.toString() == "Answer" }
+        val path = tree.getPathForRow(row)
+        assertEquals("Answered · Check it", path.parentPath.lastPathComponent.toString())
+        val renderer = tree.cellRenderer.getTreeCellRendererComponent(tree, path.lastPathComponent, false, false, true, row, false)
+        assertEquals("The instructions are in the ticket.\n\n<example>Open the description.</example>", (renderer as JBTextArea).text)
+        val answerHeight = tree.getPathBounds(path).height
+        val promptHeight = tree.getPathBounds(path.parentPath).height
+        assertTrue("Answer height $answerHeight should exceed prompt height $promptHeight", answerHeight > promptHeight)
+        assertEquals(root, view.selection)
+        tree.selectionPath = path
+        assertEquals(answer, view.selection)
+        assertFalse(view.question.isVisible)
+        children(view).filterIsInstance<JButton>().single { it.text == "Open in editor" }.doClick()
+        assertEquals(answer, opened)
     }
 
     private fun children(component: Component): Sequence<Component> = sequence {

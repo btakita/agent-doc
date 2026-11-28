@@ -31,6 +31,7 @@ internal data class DocumentPromptTarget(
     val action: DocumentPromptAction,
     val task: DocumentPromptTask? = null,
     val endLine: Int? = null,
+    val answerText: String? = null,
 ) {
     override fun toString(): String = task?.let { "${it.label} · $label" } ?: label
 }
@@ -105,6 +106,7 @@ internal class RepoContextDocumentPrompts(private val native: EditorDerivation =
                         )
                     },
                     endLine = node.get("end_line")?.takeUnless { it.isJsonNull }?.asInt,
+                    answerText = node.get("answer_text")?.takeUnless { it.isJsonNull }?.asString,
                 )
             },
             links = output.getAsJsonArray("links")?.map { it.asString }.orEmpty(),
@@ -289,15 +291,17 @@ internal class RepoContextDocumentTree(
 
     fun show(outline: RepoContextDocumentOutline, draftScope: String = "") {
         if (outline == revision && draftScope == scope) return
-        val previouslyWorking = revision?.targets.orEmpty()
+        val sameSession = draftScope == scope
+        val previousTargets = if (sameSession) revision?.targets.orEmpty() else emptyList()
+        val previouslyWorking = previousTargets
             .mapNotNull { it.task?.takeIf { task -> task.state == "running" }?.requestId }
             .toSet()
+        val previousTargetIds = previousTargets.mapTo(mutableSetOf()) { it.id }
         val previous = (tree.model.root as DefaultMutableTreeNode)
         val expanded = tree.getExpandedDescendants(TreePath(previous.path))?.toList()
             ?.mapNotNull { path ->
                 ((path.lastPathComponent as? DefaultMutableTreeNode)?.userObject as? DocumentPromptTarget)?.selectionKey
             }.orEmpty()
-        val sameSession = draftScope == scope
         val selected = selection?.selectionKey.takeIf { sameSession }
         val initial = revision == null || !sameSession
         val focused = question.editor.isFocusOwner
@@ -307,6 +311,7 @@ internal class RepoContextDocumentTree(
         val nodes = mutableMapOf<String, DefaultMutableTreeNode>()
         val branches = mutableMapOf<String, DefaultMutableTreeNode>()
         val newWorking = mutableListOf<DefaultMutableTreeNode>()
+        val newAnswers = mutableListOf<DefaultMutableTreeNode>()
         for (target in outline.targets) {
             while (lineage.isNotEmpty() && lineage.last().first >= target.depth) lineage.removeLast()
             val branch = DefaultMutableTreeNode(target)
@@ -317,6 +322,7 @@ internal class RepoContextDocumentTree(
             if (target.task?.let { it.state == "running" && it.requestId !in previouslyWorking } == true) {
                 newWorking.add(branch)
             }
+            if (target.answerText != null && target.id !in previousTargetIds) newAnswers.add(branch)
         }
         if (outline.links != revision?.links || !sameSession) showLinks(outline.links)
         revision = outline
@@ -335,6 +341,7 @@ internal class RepoContextDocumentTree(
         val first = if (root.childCount > 0) root.getChildAt(0) as DefaultMutableTreeNode else null
         if (first != null) tree.expandPath(TreePath(first.path))
         for (branch in newWorking) tree.expandPath(TreePath(branch.path).parentPath)
+        if (!initial) for (branch in newAnswers) tree.expandPath(TreePath(branch.path).parentPath)
         val current = nodes[selected] ?: first.takeIf { initial }
         current?.let { tree.selectionPath = TreePath(it.path) }
         replacingModel = false

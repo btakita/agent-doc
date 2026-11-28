@@ -1,5 +1,6 @@
 package com.github.btakita.agentdoc
 
+import com.intellij.ui.components.JBTextArea
 import com.intellij.ui.treeStructure.Tree
 import com.intellij.util.ui.JBUI
 import java.awt.Dimension
@@ -15,18 +16,38 @@ import javax.swing.tree.TreePath
 internal class RepoContextInlinePromptTree(private val composer: JComponent) : Tree() {
     private val promptRow = DefaultMutableTreeNode(null, false)
     private val spacer = JPanel().apply { isOpaque = false }
+    private val answerRow = JBTextArea().apply {
+        isEditable = false
+        isFocusable = false
+        isOpaque = false
+        lineWrap = true
+        wrapStyleWord = true
+        border = JBUI.Borders.empty(2, 0)
+    }
 
     init {
-        rowHeight = 0
-        val targetRenderer = cellRenderer ?: DefaultTreeCellRenderer()
-        cellRenderer = TreeCellRenderer { tree, value, selected, expanded, leaf, row, hasFocus ->
+        setRowHeight(0)
+        val targetRenderer = getCellRenderer() ?: DefaultTreeCellRenderer()
+        // Use the Swing setter so the bounds cache and paint delegate see the same renderer.
+        setCellRenderer(TreeCellRenderer { tree, value, selected, expanded, leaf, row, hasFocus ->
             if (value === promptRow) {
                 spacer.preferredSize = Dimension(composer.minimumSize.width, composer.preferredSize.height + JBUI.scale(4))
                 spacer
             } else {
-                targetRenderer.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
+                val standard = targetRenderer.getTreeCellRendererComponent(tree, value, selected, expanded, leaf, row, hasFocus)
+                val target = (value as? DefaultMutableTreeNode)?.userObject as? DocumentPromptTarget
+                val text = target?.answerText
+                if (text == null) standard else {
+                    answerRow.font = tree.font
+                    answerRow.foreground = standard.foreground
+                    answerRow.text = text
+                    val wrapWidth = answerRow.getFontMetrics(answerRow.font).charWidth('m') * 72
+                    answerRow.setSize(wrapWidth, Short.MAX_VALUE.toInt())
+                    answerRow.preferredSize = answerRow.ui.getPreferredSize(answerRow)
+                    answerRow
+                }
             }
-        }
+        })
         composer.isVisible = false
         add(composer)
     }

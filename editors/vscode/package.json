@@ -2,7 +2,7 @@
   "name": "agent-doc",
   "displayName": "Agent Doc",
   "description": "Submit markdown documents to AI agents via agent-doc",
-  "version": "0.2.110",
+  "version": "0.2.111",
   "publisher": "btakita",
   "icon": "icon.png",
   "license": "Apache-2.0",
@@ -127,7 +127,7 @@
       },
       {
         "command": "agentDoc.repoContextExplorer",
-        "title": "Agent Doc: Document Context Explorer"
+        "title": "Agent Doc: Document Explorer"
       },
       {
         "command": "agentDoc.treeStatus",

@@ -35,9 +35,13 @@ internal data class DocumentPromptTarget(
     override fun toString(): String = task?.let { "${it.label} · $label" } ?: label
 }
 
-internal data class DocumentPromptTask(val requestId: String, val state: String) {
+internal data class DocumentPromptTask(
+    val requestId: String,
+    val state: String,
+    val viewLabel: String? = null,
+) {
     val label: String
-        get() = when (state) {
+        get() = viewLabel ?: when (state) {
             "running" -> "Working"
             "waiting" -> "Waiting for you"
             "interrupted" -> "Interrupted"
@@ -45,11 +49,27 @@ internal data class DocumentPromptTask(val requestId: String, val state: String)
         }
 }
 
+internal data class DocumentPromptControl(val label: String, val hint: String, val disabled: Boolean)
+
+internal data class DocumentExplorerView(
+    val documentTab: String,
+    val repositoryTab: String,
+    val followEditorCaret: String,
+    val linkedDocuments: String,
+    val promptLabel: String,
+    val promptActions: Map<DocumentPromptAction, DocumentPromptControl>,
+)
+
 internal data class RepoContextDocumentOutline(
     val revision: String,
     val targets: List<DocumentPromptTarget>,
     val links: List<String> = emptyList(),
-)
+    val view: DocumentExplorerView? = null,
+) {
+    fun promptControl(action: DocumentPromptAction): DocumentPromptControl =
+        view?.promptActions?.get(action)
+            ?: DocumentPromptControl(action.button, action.hint, action == DocumentPromptAction.NAVIGATE)
+}
 
 internal data class RepoContextPromptEdit(val offset: Int, val text: String, val action: DocumentPromptAction) {
     fun applyTo(document: Document, stamp: Long) {
@@ -78,12 +98,17 @@ internal class RepoContextDocumentPrompts(private val native: EditorDerivation =
                     node.get("depth").asInt,
                     action(node),
                     task = node.getAsJsonObject("task")?.let { task ->
-                        DocumentPromptTask(task.get("request_id").asString, task.get("state").asString)
+                        DocumentPromptTask(
+                            task.get("request_id").asString,
+                            task.get("state").asString,
+                            task.get("label")?.asString,
+                        )
                     },
                     endLine = node.get("end_line")?.takeUnless { it.isJsonNull }?.asInt,
                 )
             },
             links = output.getAsJsonArray("links")?.map { it.asString }.orEmpty(),
+            view = output.getAsJsonObject("view")?.let(::view),
         )
     }
 
@@ -117,7 +142,25 @@ internal class RepoContextDocumentPrompts(private val native: EditorDerivation =
         return json
     }
 
-    private fun action(json: JsonObject): DocumentPromptAction = when (val name = json.get("action").asString) {
+    private fun view(json: JsonObject): DocumentExplorerView = DocumentExplorerView(
+        documentTab = json.get("document_tab").asString,
+        repositoryTab = json.get("repository_tab").asString,
+        followEditorCaret = json.get("follow_editor_caret").asString,
+        linkedDocuments = json.get("linked_documents").asString,
+        promptLabel = json.get("prompt_label").asString,
+        promptActions = json.getAsJsonObject("prompt_actions").entrySet().associate { (id, value) ->
+            val control = value.asJsonObject
+            action(id) to DocumentPromptControl(
+                control.get("label").asString,
+                control.get("hint").asString,
+                control.get("disabled").asBoolean,
+            )
+        },
+    )
+
+    private fun action(json: JsonObject): DocumentPromptAction = action(json.get("action").asString)
+
+    private fun action(name: String): DocumentPromptAction = when (name) {
         "exchange" -> DocumentPromptAction.EXCHANGE
         "queue" -> DocumentPromptAction.QUEUE
         "subprompt" -> DocumentPromptAction.SUBPROMPT
@@ -170,6 +213,9 @@ internal class RepoContextDocumentTree(
     val isEditingPrompt: Boolean
         get() = question.editor.isFocusOwner
 
+    val promptControl: DocumentPromptControl?
+        get() = selection?.action?.let { revision?.promptControl(it) }
+
     init {
         add(links, BorderLayout.NORTH)
         add(JBScrollPane(tree), BorderLayout.CENTER)
@@ -203,7 +249,8 @@ internal class RepoContextDocumentTree(
     private fun updateSelection() {
         val branch = selectedBranch()
         val selected = branch?.userObject as? DocumentPromptTarget
-        val promptTarget = selected?.takeIf { it.action != DocumentPromptAction.NAVIGATE }
+        val control = promptControl
+        val promptTarget = selected?.takeIf { control?.disabled == false }
         val nextKey = promptTarget?.let { target ->
             DraftKey(scope, target.selectionKey ?: target.id, if (target.selectionKey == null) revision?.revision else null)
         }
@@ -217,7 +264,7 @@ internal class RepoContextDocumentTree(
         }
         tree.putComposerUnder(branch.takeIf { promptTarget != null })
         open.isEnabled = selected != null
-        hint.text = selected?.action?.hint ?: "Select a document section or item."
+        hint.text = control?.hint ?: "Select a document section or item."
         onSelection()
     }
 
@@ -273,6 +320,12 @@ internal class RepoContextDocumentTree(
         }
         if (outline.links != revision?.links || !sameSession) showLinks(outline.links)
         revision = outline
+        outline.view?.let { view ->
+            followEditorCaret.text = view.followEditorCaret
+            linksLabel.text = view.linkedDocuments
+            linkedDocuments.accessibleContext.accessibleName = view.linkedDocuments
+            question.label.text = view.promptLabel
+        }
         scope = draftScope
         targetBranches = branches
         replacingModel = true

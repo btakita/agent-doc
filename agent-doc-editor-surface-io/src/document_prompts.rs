@@ -25,6 +25,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 mod tasks;
+mod view;
 use tasks::PromptTask;
 
 #[derive(Default, Deserialize)]
@@ -55,8 +56,11 @@ enum Action {
     Navigate,
 }
 
-const PROMPT_HEADER: &str = "Document Context Explorer prompt";
-const LEGACY_PROMPT_HEADER: &str = "Repo Context Explorer question";
+const PROMPT_HEADER: &str = "Document Explorer prompt";
+const LEGACY_PROMPT_HEADERS: &[&str] = &[
+    "Document Context Explorer prompt",
+    "Repo Context Explorer question",
+];
 
 const ANSWER_INSTRUCTION: &str =
     "Please answer the quoted request and include a standalone HTML comment whose text is ";
@@ -108,7 +112,12 @@ pub fn project_document_prompts_with_active(
     let components = element::parse(source)?;
     let mut projection = Projection::new(source, &components)?;
     tasks::project(&mut projection, active_prompts);
-    Ok(json!({"revision": content_hash(source), "nodes": projection.nodes}))
+    let rendered = view::project(&projection.nodes)?;
+    Ok(json!({
+        "revision": content_hash(source),
+        "nodes": rendered.rows,
+        "view": rendered.controls,
+    }))
 }
 
 fn prepare_document_prompt(source: &str, submission: &Submission) -> Result<PromptEdit> {
@@ -853,6 +862,48 @@ mod tests {
     }
 
     #[test]
+    fn explorer_view_projects_shared_controls_and_a_large_outline() {
+        use std::fmt::Write as _;
+        let mut source = String::from("# Project\n\n");
+        for index in 0..1_500 {
+            writeln!(source, "## Topic {index}\n\nNotes.\n").unwrap();
+        }
+        let start = std::time::Instant::now();
+        let projected = project_document_prompts(&source).unwrap();
+        eprintln!(
+            "Document Explorer 1,500-heading projection: {:?}",
+            start.elapsed()
+        );
+        assert_eq!(projected, outline(&source));
+        assert_eq!(projected["view"]["title"], "Document Explorer");
+        assert_eq!(
+            projected["view"]["follow_editor_caret"],
+            "Follow editor caret"
+        );
+        assert_eq!(
+            projected["view"]["prompt_actions"]["queue"]["label"],
+            "Add prompt"
+        );
+        assert_eq!(
+            projected["view"]["prompt_actions"]["queue"]["disabled"],
+            false
+        );
+        assert_eq!(
+            projected["view"]["prompt_actions"]["navigate"]["disabled"],
+            true
+        );
+        let rows = projected["nodes"].as_array().unwrap();
+        assert_eq!(rows.len(), 1_502);
+        assert_eq!(rows[1]["label"], "Project");
+        assert_eq!(rows[2]["label"], "Topic 0");
+        assert_eq!(rows[1_501]["label"], "Topic 1499");
+        assert_eq!(
+            rows[2]["depth"].as_u64(),
+            rows[1]["depth"].as_u64().map(|depth| depth + 1)
+        );
+    }
+
+    #[test]
     fn caret_ranges_follow_queue_subtrees_and_stop_at_component_boundaries() {
         let fixture = DOCUMENT.replace(
             "<!-- /agent:run -->\n",
@@ -928,6 +979,7 @@ mod tests {
         let running = task_projection(&shifted, RECEIPT, &[header.into()]).0;
         assert_eq!(running["revision"], pending["revision"]);
         assert_eq!(running["nodes"][at]["task"]["state"], "running");
+        assert_eq!(running["nodes"][at]["task"]["label"], "Working");
         let marked = shifted.replace(
             &format!("❯ {PROMPT_HEADER}"),
             &format!("❯ 🚧 {PROMPT_HEADER}"),
@@ -937,11 +989,13 @@ mod tests {
             "running"
         );
 
-        let legacy = marked.replace(PROMPT_HEADER, LEGACY_PROMPT_HEADER);
-        assert_eq!(
-            task_projection(&legacy, RECEIPT, &[]).0["nodes"][at]["task"]["state"],
-            "running"
-        );
+        for legacy_prefix in LEGACY_PROMPT_HEADERS {
+            let legacy = marked.replace(PROMPT_HEADER, legacy_prefix);
+            assert_eq!(
+                task_projection(&legacy, RECEIPT, &[]).0["nodes"][at]["task"]["state"],
+                "running"
+            );
+        }
 
         let receipt = format!("<!-- repo-context-answer:{RECEIPT} -->");
         let append = |answer: &str| {
@@ -1056,10 +1110,7 @@ mod tests {
             .split_once("<!-- agent:boundary:sample -->\r\n")
             .unwrap()
             .1;
-        assert!(
-            body.contains("❯ Document Context Explorer prompt."),
-            "{body}"
-        );
+        assert!(body.contains("❯ Document Explorer prompt."), "{body}");
         assert!(body.contains("> Can we iterate here?\r\n"), "{body}");
     }
 

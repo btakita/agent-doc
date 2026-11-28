@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Document Context Explorer</title>
+  <title>Document Explorer</title>
   <style>
     :root { --bg: #0f1115; --fg: #e6e6e6; --muted: #888; --accent: #4ea1ff; --warn: #ffb454; --err: #ff6b6b; }
     * { box-sizing: border-box; }
@@ -36,12 +36,14 @@
     .follow-editor-caret { display: flex; align-items: center; gap: 4px; padding-inline: 4px; font-size: 12px; white-space: nowrap; }
     .follow-editor-caret[hidden] { display: none; }
     .follow-editor-caret input { margin: 0; }
+    .follow-editor-caret .caret-compact-label { display: none; }
     @container (max-width: 395px) {
       .tabs button { padding-inline: 2px; font-size: 11px; }
-      .follow-editor-caret .editor-label { display: none; }
+      .follow-editor-caret .caret-full-label { display: none; }
+      .follow-editor-caret .caret-compact-label { display: inline; }
     }
     @container (max-width: 330px) {
-      .follow-editor-caret .caret-label { display: none; }
+      .follow-editor-caret .caret-compact-label span { display: none; }
     }
     .tabs button.active { color: var(--fg); background: #1b202a; }
     .live-response { max-height: 34%; min-height: 92px; border-bottom: 1px solid #232735; display: flex; flex-direction: column; }
@@ -86,7 +88,7 @@
 </head>
 <body>
   <header>
-    <h1>Document Context Explorer</h1>
+    <h1>Document Explorer</h1>
     <div class="status" id="status">loading…</div>
     <a id="boardLink" class="secondary" href="/board" title="Fleet work board: queue + backlog across every project">board</a>
     <button id="reload" class="secondary" title="Discard unsaved edits and reload from disk">reload</button>
@@ -100,7 +102,7 @@
       <pre class="gutter" id="gutter" aria-hidden="true">1</pre>
       <textarea id="editor" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" wrap="soft"></textarea>
     </section>
-    <aside class="inspector" aria-label="Document Context Explorer">
+    <aside class="inspector" aria-label="Document Explorer">
       <section class="live-response" id="liveResponse" hidden>
         <div class="component-meta" id="liveResponseMeta">agent response</div>
         <pre id="liveResponseBody"></pre>
@@ -115,7 +117,8 @@
         </div>
         <label class="follow-editor-caret" id="followEditorCaretControl" title="Follow editor caret">
           <input id="followEditorCaretOption" type="checkbox" aria-label="Follow editor caret" checked>
-          <span>Follow<span class="editor-label"> editor</span><span class="caret-label"> caret</span></span>
+          <span class="caret-full-label" id="caretFullLabel">Follow editor caret</span>
+          <span class="caret-compact-label" aria-hidden="true">Follow<span> caret</span></span>
         </label>
       </div>
       <div class="panels">
@@ -472,12 +475,29 @@
       }
     }
 
+    function applyExplorerView(view) {
+      if (!view) return;
+      document.title = view.title;
+      document.querySelector("header h1").textContent = view.title;
+      document.querySelector(".inspector").setAttribute("aria-label", view.title);
+      tabs.querySelector("[data-panel=document]").textContent = view.document_tab;
+      followEditorCaretControl.title = view.follow_editor_caret;
+      followEditorCaretOption.setAttribute("aria-label", view.follow_editor_caret);
+      document.getElementById("caretFullLabel").textContent = view.follow_editor_caret;
+      documentLinks.querySelector("summary").textContent = view.linked_documents;
+      promptForm.querySelector("label").textContent = view.prompt_label;
+    }
+
+    function promptControl(target) {
+      return target && promptProjection?.view?.prompt_actions?.[target.action];
+    }
+
     function updatePromptComposer() {
       const draft = promptDraft.value.trim();
-      const labels = { exchange: "Ask agent", queue: "Add prompt", subprompt: "Add subprompt", navigate: "Navigation only" };
-      promptSubmit.textContent = labels[promptTarget?.action] || "Ask agent";
+      const control = promptControl(promptTarget);
+      promptSubmit.textContent = control?.label || "Ask agent";
       promptSubmit.disabled = !canRun || saving || loadedDoc !== selectedDoc || hasUnsavedEdits()
-        || !promptTarget || promptTarget.action === "navigate"
+        || !control || control.disabled
         || !draft || [...draft].length > 1500
         || savedRevision !== '"' + promptProjection?.revision + '"';
     }
@@ -506,7 +526,7 @@
       } else {
         documentPrompts.append(promptForm);
       }
-      promptForm.hidden = !canRun || !target || target.action === "navigate";
+      promptForm.hidden = !canRun || promptControl(target)?.disabled !== false;
       updatePromptComposer();
     }
 
@@ -535,6 +555,7 @@
       const scroll = promptTree.scrollTop;
       const previous = promptTarget;
       promptProjection = projection;
+      applyExplorerView(projection?.view);
       const nodes = projection?.nodes || [];
       const selected = nodes.find((target) => previous?.selection_key && target.selection_key === previous.selection_key)
         || (!previous?.selection_key && nodes.find((target) => target.id === previous?.id)) || nodes[0] || null;
@@ -554,8 +575,7 @@
           const badge = document.createElement("span");
           badge.className = "prompt-task-state";
           badge.dataset.state = target.task.state;
-          badge.textContent = target.task.state === "running" ? "Working"
-            : target.task.state[0].toUpperCase() + target.task.state.slice(1).replaceAll("_", " ");
+          badge.textContent = target.task.label;
           button.append(badge);
         }
         button.style.paddingInlineStart = indent;
@@ -594,7 +614,7 @@
       const line = editor.value.slice(0, editor.selectionStart).split("\n").length;
       let target = null;
       for (const node of promptProjection.nodes) {
-        if (node.action === "navigate" || node.line > line || node.end_line < line || node.end_line == null) continue;
+        if (promptControl(node)?.disabled !== false || node.line > line || node.end_line < line || node.end_line == null) continue;
         if (!target || node.depth > target.depth || (node.depth === target.depth && node.line >= target.line)) {
           target = node;
         }

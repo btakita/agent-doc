@@ -20,7 +20,7 @@ const ANCHOR_PREFIX: &str = "<!-- repo-context-target:";
 #[derive(Serialize)]
 pub(super) struct PromptTask {
     request_id: String,
-    state: PromptTaskState,
+    pub(super) state: PromptTaskState,
 }
 
 #[derive(Clone, Copy, Serialize, PartialEq, Eq)]
@@ -36,6 +36,23 @@ pub(super) enum PromptTaskState {
     Waiting,
     Skipped,
     Interrupted,
+}
+
+impl PromptTaskState {
+    pub(super) fn label(self) -> &'static str {
+        match self {
+            Self::Submitted => "Submitted",
+            Self::Queued => "Queued",
+            Self::Running => "Working",
+            Self::Reported => "Reported",
+            Self::Answered => "Answered",
+            Self::Closed => "Closed",
+            Self::Blocked => "Blocked",
+            Self::Waiting => "Waiting for you",
+            Self::Skipped => "Skipped",
+            Self::Interrupted => "Interrupted",
+        }
+    }
 }
 
 struct ExchangeRequest<'a> {
@@ -109,9 +126,11 @@ fn exchange_request(node: &ExchangeNode) -> Option<ExchangeRequest<'_>> {
     let header = header.trim().strip_prefix('❯')?.trim_start();
     let active = header.strip_prefix("🚧 ");
     let header = active.unwrap_or(header);
-    let header = header
-        .strip_prefix(super::PROMPT_HEADER)
-        .or_else(|| header.strip_prefix(super::LEGACY_PROMPT_HEADER))?;
+    let header = header.strip_prefix(super::PROMPT_HEADER).or_else(|| {
+        super::LEGACY_PROMPT_HEADERS
+            .iter()
+            .find_map(|prefix| header.strip_prefix(prefix))
+    })?;
     let id = request_id(header)?;
     let (context, _) = header.rsplit_once(ANSWER_INSTRUCTION)?;
     let context = context

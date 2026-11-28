@@ -22,6 +22,7 @@ use highlight::{Highlights, SourcePreview};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
+use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -179,11 +180,19 @@ impl DraftAttempt {
     }
 }
 
+#[derive(Clone, Copy, Default)]
+enum Focus {
+    #[default]
+    Outline,
+    Preview,
+}
+
 struct Explorer {
     file: PathBuf,
     snapshot: Snapshot,
     selected: usize,
     source_scroll: usize,
+    focus: Focus,
     pane_sizes: PaneSizes,
     status: String,
     composing: bool,
@@ -194,18 +203,24 @@ struct Explorer {
 
 impl Explorer {
     fn open(file: PathBuf) -> Result<Self> {
-        Ok(Self {
-            snapshot: Snapshot::load(&file)?,
+        let snapshot = Snapshot::load(&file)?;
+        Ok(Self::new(file, snapshot))
+    }
+
+    fn new(file: PathBuf, snapshot: Snapshot) -> Self {
+        Self {
             file,
+            snapshot,
             selected: 0,
             source_scroll: 0,
+            focus: Focus::default(),
             pane_sizes: PaneSizes::default(),
             status: String::new(),
             composing: false,
             draft: String::new(),
             draft_attempt: None,
             running: None,
-        })
+        }
     }
 
     fn selected_row(&self) -> Option<&Row> {
@@ -272,27 +287,18 @@ impl Explorer {
             return false;
         }
 
-        let before = self.selected;
-        let last = self.snapshot.projection.nodes.len().saturating_sub(1);
         let panes = self.pane_sizes.fit(width, height);
-        let page = panes.source_height.saturating_sub(1).max(1);
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return true,
-            KeyCode::Up | KeyCode::Char('k') => self.selected = before.saturating_sub(1),
-            KeyCode::Down | KeyCode::Char('j') => self.selected = (before + 1).min(last),
-            KeyCode::Home => self.selected = 0,
-            KeyCode::End => self.selected = last,
+            KeyCode::Tab | KeyCode::BackTab => {
+                self.focus = match self.focus {
+                    Focus::Outline => Focus::Preview,
+                    Focus::Preview => Focus::Outline,
+                };
+            }
             KeyCode::Char('[') => self.pane_sizes.resize(&panes, false),
             KeyCode::Char(']') => self.pane_sizes.resize(&panes, true),
             KeyCode::Char('=') => self.pane_sizes = PaneSizes::default(),
-            KeyCode::PageUp => self.source_scroll = self.source_scroll.saturating_sub(page.into()),
-            KeyCode::PageDown => {
-                if let Some(row) = self.selected_row() {
-                    let last = row.end_line.unwrap_or(row.line);
-                    let available = last.saturating_sub(row.line);
-                    self.source_scroll = (self.source_scroll + usize::from(page)).min(available);
-                }
-            }
             KeyCode::Char('r') => self.refresh(),
             KeyCode::Char('p') => {
                 if self
@@ -305,16 +311,54 @@ impl Explorer {
                     self.status = action.hint.clone();
                 }
             }
-            _ => {}
-        }
-        if matches!(
-            key.code,
-            KeyCode::Up | KeyCode::Down | KeyCode::Char('j' | 'k') | KeyCode::Home | KeyCode::End
-        ) && self.selected != before
-        {
-            self.source_scroll = 0;
+            code => self.navigate(code, &panes),
         }
         false
+    }
+
+    fn navigate(&mut self, code: KeyCode, panes: &Panes) {
+        let selection_before = self.selected;
+        let (position, last, page) = match self.focus {
+            Focus::Outline => (
+                &mut self.selected,
+                self.snapshot.projection.nodes.len().saturating_sub(1),
+                usize::from(panes.outline_height.max(1)),
+            ),
+            Focus::Preview => {
+                let last = panes.source_scroll_limit(self.source_lines().len());
+                (
+                    &mut self.source_scroll,
+                    last,
+                    usize::from(panes.source_height.saturating_sub(1).max(1)),
+                )
+            }
+        };
+        let current = (*position).min(last);
+        *position = match code {
+            KeyCode::Up | KeyCode::Char('k') => current.saturating_sub(1),
+            KeyCode::Down | KeyCode::Char('j') => (current + 1).min(last),
+            KeyCode::PageUp => current.saturating_sub(page),
+            KeyCode::PageDown => (current + page).min(last),
+            KeyCode::Home => 0,
+            KeyCode::End => last,
+            _ => return,
+        };
+        if self.selected != selection_before {
+            self.source_scroll = 0;
+        }
+    }
+
+    fn source_lines(&self) -> Range<usize> {
+        self.selected_row().map_or(0..0, |row| {
+            let line_count = self.snapshot.preview.line_count();
+            let first = row.line.saturating_sub(1).min(line_count);
+            let end = row
+                .end_line
+                .unwrap_or(row.line)
+                .max(row.line)
+                .min(line_count);
+            first..end
+        })
     }
 
     fn refresh(&mut self) {
@@ -485,7 +529,14 @@ impl Explorer {
             let keys = if self.composing {
                 "Ctrl+S send · Ctrl+R refresh · Esc keep draft and return"
             } else {
-                "↑/↓ select · [ ] resize · = reset · q quit · PgUp/PgDn source · p prompt · r refresh"
+                match self.focus {
+                    Focus::Outline => {
+                        "Outline · Tab switch · PgUp/Dn page · [ ] resize · q quit · ↑/↓ select · = reset · p prompt · r refresh"
+                    }
+                    Focus::Preview => {
+                        "Preview · Tab switch · PgUp/Dn page · [ ] resize · q quit · ↑/↓ scroll · = reset · p prompt · r refresh"
+                    }
+                }
             };
             print_at(output, 0, height - 1, width, keys)?;
         }
@@ -510,21 +561,19 @@ impl Explorer {
                 first + offset == self.selected,
             )?;
         }
-        if let Some(row) = self.selected_row() {
-            let first = row.line.saturating_sub(1) + self.source_scroll;
-            let last = row.end_line.unwrap_or(row.line).max(row.line);
-            let preview = &self.snapshot.preview;
-            for (offset, line) in
-                (0..panes.source_height).zip(first..last.min(preview.line_count()))
-            {
-                preview.print_line(
-                    output,
-                    panes.source_left,
-                    panes.source_top + offset,
-                    panes.source_width,
-                    line,
-                )?;
-            }
+        let lines = self.source_lines();
+        let first = lines.start
+            + self
+                .source_scroll
+                .min(panes.source_scroll_limit(lines.len()));
+        for (offset, line) in (0..panes.source_height).zip(first..lines.end) {
+            self.snapshot.preview.print_line(
+                output,
+                panes.source_left,
+                panes.source_top + offset,
+                panes.source_width,
+                line,
+            )?;
         }
         Ok(())
     }
@@ -559,6 +608,12 @@ struct Panes {
     source_left: u16,
     source_height: u16,
     source_width: u16,
+}
+
+impl Panes {
+    fn source_scroll_limit(&self, line_count: usize) -> usize {
+        line_count.saturating_sub(usize::from(self.source_height.max(1)))
+    }
 }
 
 #[derive(Default)]
@@ -789,6 +844,52 @@ mod tests {
                 .unwrap()
                 .ends_with("› **é界** plain [Pending]\x1b[0m")
         );
+    }
+
+    #[test]
+    fn navigation_pages_the_focused_pane_and_keeps_preview_position_on_focus_change() {
+        let nodes = (0..8)
+            .map(|index| Row {
+                id: index.to_string(),
+                selection_key: None,
+                label: format!("Heading {index}"),
+                line: index + 1,
+                end_line: Some(index + 12),
+                depth: 0,
+                action: String::new(),
+                task: None,
+                highlights: Vec::new(),
+            })
+            .collect();
+        let snapshot = Snapshot {
+            preview: SourcePreview::new("source\n".repeat(20), false),
+            projection: Projection {
+                revision: String::new(),
+                nodes,
+                view: View {
+                    title: String::new(),
+                    prompt_label: String::new(),
+                    prompt_actions: HashMap::new(),
+                },
+            },
+        };
+        let mut explorer = Explorer::new(PathBuf::new(), snapshot);
+        let mut press = |code, modifiers| {
+            assert!(!explorer.key(KeyEvent::new(code, modifiers), 66, 11));
+            (explorer.selected, explorer.source_scroll)
+        };
+        let plain = KeyModifiers::NONE;
+        assert_eq!(press(KeyCode::PageDown, plain), (4, 0));
+        assert_eq!(press(KeyCode::Tab, plain), (4, 0));
+        assert_eq!(press(KeyCode::PageDown, plain), (4, 3));
+        assert_eq!(press(KeyCode::Down, plain), (4, 4));
+        assert_eq!(press(KeyCode::BackTab, KeyModifiers::SHIFT), (4, 4));
+        assert_eq!(press(KeyCode::Tab, plain), (4, 4));
+        assert_eq!(press(KeyCode::End, plain), (4, 8));
+        assert_eq!(press(KeyCode::PageUp, plain), (4, 5));
+        assert_eq!(press(KeyCode::BackTab, KeyModifiers::SHIFT), (4, 5));
+        assert_eq!(press(KeyCode::PageDown, plain), (7, 0));
+        assert_eq!(press(KeyCode::PageUp, plain), (3, 0));
     }
 
     #[test]

@@ -6318,16 +6318,27 @@ fn test_state_backbone_extraction_stays_first_class_and_facade_free() {
 #[test]
 fn test_agent_doc_serve_active_cycle_reads_projection_aware_state() {
     let manifest_dir = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let serve_source = fs::read_to_string(manifest_dir.join("src/serve.rs")).unwrap();
+    let shared_source = fs::read_to_string(manifest_dir.join("src/document_explorer.rs")).unwrap();
+    assert!(
+        shared_source.contains("agent_doc_cycle_state_io::load_with_closeout_projection(doc)?"),
+        "Explorer active response/write routing should use closeout projections before compatibility cycle sidecars"
+    );
 
-    assert!(
-        serve_source.contains("agent_doc_cycle_state_io::load_with_closeout_projection(doc)?"),
-        "serve active response/write routing should use closeout projections before compatibility cycle sidecars"
-    );
-    assert!(
-        !serve_source.contains("agent_doc_cycle_state_io::load(doc)?"),
-        "serve active response/write routing must not use raw compatibility cycle sidecars"
-    );
+    for (path, active_cycle_call) in [
+        ("src/serve.rs", "load_open_cycle(doc)?"),
+        ("src/explore.rs", "load_open_cycle(file)"),
+        ("src/document_explorer.rs", "load_open_cycle(&owned_doc)"),
+    ] {
+        let source = fs::read_to_string(manifest_dir.join(path)).unwrap();
+        let production = source
+            .split_once("#[cfg(test)]\nmod tests {")
+            .map_or(source.as_str(), |(production, _)| production);
+        assert!(
+            production.contains(active_cycle_call)
+                && !production.contains("agent_doc_cycle_state_io::load("),
+            "{path} must use the shared projection-aware active-cycle lookup"
+        );
+    }
 }
 
 #[test]

@@ -179,7 +179,11 @@ internal fun createRepoContextTabs(
     repository: JComponent,
 ): JBTabs = JBTabsFactory.createTabs(project, disposable).apply {
     presentation.setSideComponentVertical(false).setSideComponentOnTabs(true)
-    addTab(TabInfo(documentTree).setText("Document").setSideComponent(documentTree.followEditorCaret))
+    val documentTabControls = JPanel(BorderLayout()).apply {
+        isOpaque = false
+        add(documentTree.followEditorCaret, BorderLayout.EAST)
+    }
+    addTab(TabInfo(documentTree).setText("Document").setSideComponent(documentTabControls))
     addTab(TabInfo(repository).setText("Repository"))
 }
 

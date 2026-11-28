@@ -10600,8 +10600,25 @@ The completed response is already committed.\n\
 
         assert_eq!(response, StopResponse::AllowExit);
         let content = fs::read_to_string(&doc).unwrap();
-        assert!(content.contains("Operator revised the completion note."));
+        assert!(content.contains("<!-- completed work archived in tasks/task.done.md -->"));
+        assert!(!content.contains("Operator revised the completion note."));
+        assert!(!content.contains("Original operator completion note."));
         assert!(content.contains("Preserved the operator correction."));
+        let expected_archive =
+            "# Agent Doc Completed Work\n\nOperator revised the completion note.\n";
+        assert_eq!(fs::read_to_string(&archive).unwrap(), expected_archive);
+        assert_eq!(
+            agent_doc_git_io::revision::show_head(&archive)
+                .unwrap()
+                .as_deref(),
+            Some(expected_archive),
+            "the committed archive must record only the current operator note"
+        );
+        assert_eq!(
+            agent_doc_git_io::revision::show_head(&doc).unwrap(),
+            Some(content),
+            "Stop must commit the response and the Done routing marker"
+        );
         let cycle = agent_doc_cycle_state_io::load(&doc).unwrap().unwrap();
         assert_ne!(
             cycle.cycle_id, previous.cycle_id,

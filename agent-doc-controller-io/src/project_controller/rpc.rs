@@ -2476,6 +2476,44 @@ pub fn subscribe_document_delivery_wakes_for_file(
     after: Option<ControllerStatePlaneCursor>,
     timeout: Duration,
 ) -> Result<DocumentDeliveryWakeSubscription> {
+    subscribe_document_delivery_wakes(
+        file,
+        after,
+        timeout,
+        "idle_watch_document_delivery_subscription",
+        request_controller_with_timeout,
+    )
+}
+
+/// Observe the same delivery frontier from a read-only client. If there is no
+/// controller, leave it stopped. The client can reconnect when an editor or
+/// session starts it.
+pub fn subscribe_existing_document_delivery_wakes_for_file(
+    file: &Path,
+    after: Option<ControllerStatePlaneCursor>,
+    timeout: Duration,
+    source: &str,
+) -> Result<DocumentDeliveryWakeSubscription> {
+    subscribe_document_delivery_wakes(
+        file,
+        after,
+        timeout,
+        source,
+        request_existing_controller_with_timeout,
+    )
+}
+
+fn subscribe_document_delivery_wakes(
+    file: &Path,
+    after: Option<ControllerStatePlaneCursor>,
+    timeout: Duration,
+    source: &str,
+    request_on_controller: impl FnOnce(
+        &Path,
+        ControllerRequest,
+        Duration,
+    ) -> Result<ControllerStatePlaneSubscription>,
+) -> Result<DocumentDeliveryWakeSubscription> {
     let project_root = agent_doc_project_root_io::project_root_containing(file)
         .with_context(|| format!("no project root found for {}", file.display()))?;
     let canonical = file.canonicalize().unwrap_or_else(|_| file.to_path_buf());
@@ -2497,7 +2535,7 @@ pub fn subscribe_document_delivery_wakes_for_file(
         window_id: None,
         generation: None,
         state: None,
-        caller: Some("idle_watch_document_delivery_subscription".to_string()),
+        caller: Some(source.to_string()),
         reason: None,
         supervisor_pid: None,
         supervisor_socket: None,
@@ -2505,7 +2543,7 @@ pub fn subscribe_document_delivery_wakes_for_file(
         diagnostic_payload: Some(serde_json::to_string(&invocation)?),
         sequence: None,
     };
-    let subscription: ControllerStatePlaneSubscription = request_controller_with_timeout(
+    let subscription = request_on_controller(
         &project_root,
         request,
         timeout.saturating_add(Duration::from_secs(2)),
@@ -26022,10 +26060,12 @@ pub(crate) fn handle_request_locked(
         ),
         "reliable_sync" => controller_envelope(handle_reliable_sync(
             &bootstrap_snapshot.project_root,
+            Some(runtime.as_ref()),
             request,
         )),
         "reliable_sync_outbox" => controller_envelope(handle_reliable_sync_outbox(
             &bootstrap_snapshot.project_root,
+            Some(runtime.as_ref()),
             request,
         )),
         "reliable_sync_status" => {
@@ -27739,6 +27779,7 @@ document_hash={} client_id={} identity={} removed={} live_editors_after={}",
 /// `ack_through` lets the plugin outbox prune / resume from the frontier.
 struct InProcessReliableSyncTransport<'a> {
     project_root: &'a Path,
+    runtime: Option<&'a ControllerRuntime>,
     file: Option<&'a Path>,
 }
 
@@ -27748,6 +27789,7 @@ impl agent_doc_reliable_sync_io::push::LivenessPushTransport
     fn push(&self, _document_hash: &str, epoch: u64, envelope: &serde_json::Value) -> Result<u64> {
         let response = handle_reliable_sync(
             self.project_root,
+            self.runtime,
             ControllerRequest {
                 command: "reliable_sync".to_string(),
                 file: self.file.map(Path::to_path_buf),
@@ -27790,6 +27832,7 @@ fn reliable_sync_outbox_channel_lock(
 
 fn handle_reliable_sync_outbox(
     project_root: &Path,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<ControllerReliableSyncResponse> {
     let payload: ControllerReliableSyncOutboxPayload = serde_json::from_str(
@@ -27832,6 +27875,7 @@ fn handle_reliable_sync_outbox(
         endpoint
             .flush(&InProcessReliableSyncTransport {
                 project_root,
+                runtime,
                 file: request.file.as_deref(),
             })?
             .acked_through
@@ -27848,6 +27892,7 @@ fn handle_reliable_sync_outbox(
 
 fn handle_reliable_sync(
     project_root: &Path,
+    runtime: Option<&ControllerRuntime>,
     request: ControllerRequest,
 ) -> Result<ControllerReliableSyncResponse> {
     let payload_str = request
@@ -27919,6 +27964,7 @@ fn handle_reliable_sync(
         );
     }
 
+    let mut changed_document = None;
     if let Some(file) = request.file.as_deref()
         && let Some(decoded) =
             agent_doc_reliable_sync_io::document_op::decode_document_op_frame(&message)
@@ -27936,7 +27982,7 @@ fn handle_reliable_sync(
                 agent_doc_merge::crdt_sync::encode_update_ops(&batch.ops).with_context(|| {
                     format!("reliable_sync_document_op_reencode_failed hash={document_hash}")
                 })?;
-            agent_doc_crdt_relay_io::apply_document_op_delta_for_file_in_lineage(
+            let outcome = agent_doc_crdt_relay_io::apply_document_op_delta_for_file_in_lineage(
                 file,
                 batch.lineage.as_deref(),
                 &delta,
@@ -27944,6 +27990,16 @@ fn handle_reliable_sync(
             .with_context(|| {
                 format!("reliable_sync_document_op_fold_failed hash={document_hash}")
             })?;
+            if matches!(
+                outcome,
+                Some(
+                    agent_doc_document_realtime::crdt_relay::DocumentOpDeltaOutcome::Applied {
+                        changed: true
+                    }
+                )
+            ) {
+                changed_document = Some(file);
+            }
         } else if note_non_session_document_op_ignored(file) {
             agent_doc_ops_log_io::log_op(
                 file,
@@ -28004,6 +28060,23 @@ journal_key={reconciled_key} ack_through={ack_through} (#runfrontendissue)"
     // never runs while holding it.
     if folded_liveness {
         publish_editor_replica_rebuild_targets(project_root, "liveness_edge");
+    }
+    // A durable edit can be visible before the editor's best-effort replica
+    // RPC or any disk save. Feed the same document-scoped delivery Source.
+    if let (Some(runtime), Some(file)) = (runtime, changed_document)
+        && let Err(error) = observe_retained_delivery_after_replica_event(
+            runtime,
+            file,
+            agent_doc_crdt_relay_io::crdt_authority_for_file(file),
+        )
+    {
+        agent_doc_ops_log_io::log_op(
+            file,
+            &format!(
+                "retained_delivery_observation_deferred file={} method=reliable_sync reason={error:#}",
+                file.display(),
+            ),
+        );
     }
 
     Ok(ControllerReliableSyncResponse {
@@ -76471,7 +76544,7 @@ mod tests {
         // The authoritative plane folds the inbound liveness frame and advances
         // the durable ACK cursor; there is no disabled compatibility mode.
         let dir = tempfile::tempdir().unwrap();
-        let resp = handle_reliable_sync(dir.path(), reliable_sync_open_request("docwire-on"))
+        let resp = handle_reliable_sync(dir.path(), None, reliable_sync_open_request("docwire-on"))
             .expect("handler ok");
         assert!(resp.accepted);
         assert_eq!(resp.document_hash, "docwire-on");
@@ -76551,6 +76624,7 @@ mod tests {
         let dead_pid = u64::from(pid);
         handle_reliable_sync(
             root_a.path(),
+            None,
             reliable_sync_ops_request(
                 &document_hash,
                 &[
@@ -76703,6 +76777,7 @@ mod tests {
         let envelope = agent_doc_reliable_sync_io::encode_envelope(&channel, &frame).unwrap();
         let response = handle_reliable_sync(
             dir.path(),
+            None,
             ControllerRequest {
                 command: "reliable_sync".to_string(),
                 file: Some(file.clone()),
@@ -77742,7 +77817,7 @@ body
             sequence: None,
         };
 
-        let enqueued = handle_reliable_sync_outbox(dir.path(), request(Some(frame), false))
+        let enqueued = handle_reliable_sync_outbox(dir.path(), None, request(Some(frame), false))
             .expect("controller durably enqueues raw frame");
         assert_eq!(enqueued.ack_through, 0);
         let outbox = lazily::SqliteOutbox::open(
@@ -77753,7 +77828,7 @@ body
         assert_eq!(outbox.retained_epochs(), vec![1]);
         drop(outbox);
 
-        let flushed = handle_reliable_sync_outbox(dir.path(), request(None, true))
+        let flushed = handle_reliable_sync_outbox(dir.path(), None, request(None, true))
             .expect("controller reopens and flushes its durable channel");
         assert_eq!(flushed.ack_through, 1);
         let outbox = lazily::SqliteOutbox::open(
@@ -77836,7 +77911,7 @@ body
         ])
         .unwrap();
         assert_eq!(
-            handle_reliable_sync_outbox(dir.path(), request(Some(opened), true))
+            handle_reliable_sync_outbox(dir.path(), None, request(Some(opened), true))
                 .unwrap()
                 .ack_through,
             1
@@ -77879,7 +77954,7 @@ body
             .unwrap(),
         );
         drop(outbox);
-        let flushed = handle_reliable_sync_outbox(dir.path(), request(None, true))
+        let flushed = handle_reliable_sync_outbox(dir.path(), None, request(None, true))
             .expect("a re-used epoch must not wedge the channel");
         assert_eq!(flushed.ack_through, 3);
         let outbox = lazily::SqliteOutbox::open(&database_path, document_hash.to_string()).unwrap();
@@ -77904,7 +77979,7 @@ body
             tag: "old-reopen".to_string(),
         }])
         .unwrap();
-        handle_reliable_sync_outbox(dir.path(), request(Some(reopened), false)).unwrap();
+        handle_reliable_sync_outbox(dir.path(), None, request(Some(reopened), false)).unwrap();
         let outbox = lazily::SqliteOutbox::open(&database_path, document_hash.to_string()).unwrap();
         assert_eq!(
             outbox.retained_epochs(),
@@ -77913,7 +77988,7 @@ body
         );
         drop(outbox);
         assert_eq!(
-            handle_reliable_sync_outbox(dir.path(), request(None, true))
+            handle_reliable_sync_outbox(dir.path(), None, request(None, true))
                 .unwrap()
                 .ack_through,
             5
@@ -77960,12 +78035,12 @@ body
         let document_hash = "docwire-durable-receiver";
         let mut newest = reliable_sync_open_request(document_hash);
         newest.generation = Some(12);
-        let first = handle_reliable_sync(dir.path(), newest).expect("newest frame");
+        let first = handle_reliable_sync(dir.path(), None, newest).expect("newest frame");
         assert_eq!(first.ack_through, 12);
 
         let mut stale = reliable_sync_open_request(document_hash);
         stale.generation = Some(3);
-        let replay = handle_reliable_sync(dir.path(), stale).expect("stale replay");
+        let replay = handle_reliable_sync(dir.path(), None, stale).expect("stale replay");
         assert_eq!(replay.ack_through, 12, "receiver ACK must be monotone");
 
         let snapshot = agent_doc_sqlite::reliable_sync_inbox::load(
@@ -78481,7 +78556,7 @@ body
             request.generation = Some(41);
             request.caller = Some("test".to_string());
             request.diagnostic_payload = Some(envelope.to_string());
-            let response = handle_reliable_sync(dir.path(), request)
+            let response = handle_reliable_sync(dir.path(), None, request)
                 .expect("an ignored document-op frame is a terminal receive outcome");
             assert_eq!(response.ack_through, 41, "{tag}: the sender must not wedge");
             let folded = agent_doc_crdt_relay_io::existing_hub_canonical_text_for_file(&canonical);
@@ -78531,6 +78606,98 @@ body
                 );
             }
         }
+    }
+
+    #[test]
+    fn reliable_sync_document_change_wakes_viewers_before_a_disk_save() {
+        use agent_doc_reliable_sync_io::liveness::{LivenessOp, encode_liveness_frame};
+
+        let _env = reliable_sync_env_lock();
+        let dir = tempfile::TempDir::new().unwrap();
+        let bootstrap = crate::project_controller::test_bootstrap(&dir);
+        let runtime = ControllerRuntime::new_arc(bootstrap).unwrap();
+        let file = dir.path().join("task.md");
+        let original = "---\nagent_doc_session: sample\n---\n\n# Sample\n";
+        std::fs::write(&file, original).unwrap();
+        let file = file.canonicalize().unwrap();
+        let document_hash = agent_doc_hash::document_id_for_path(&file);
+        let pid = std::process::id();
+        let tag = "unsaved-explorer-edit";
+        let open = encode_liveness_frame(&[LivenessOp::Open {
+            document_hash: document_hash.clone(),
+            pid: u64::from(pid),
+            tag: tag.into(),
+        }])
+        .unwrap();
+        controller_liveness_plane()
+            .lock()
+            .ingest(&document_hash, 1, &open)
+            .unwrap();
+        let identity = format!("jetbrains-{pid}-{tag}");
+        agent_doc_crdt_relay_io::register_editor_replica_for_file_incremental(
+            &file, &identity, None, pid,
+        )
+        .unwrap()
+        .unwrap();
+        let (lineage, state) = agent_doc_crdt_relay_io::with_hub(&file, |hub| {
+            (hub.lineage().to_string(), hub.canonical_encoded_state())
+        })
+        .unwrap();
+        let editor = agent_doc_merge::crdt_sync::ReplicaState::from_encoded(91, &state).unwrap();
+        let before = editor.state_vector();
+        let edit = "An unsaved editor change.\n";
+        editor.apply_local_edit(original.len() as u32, 0, edit);
+        let ops =
+            agent_doc_merge::crdt_sync::decode_update_ops(&editor.diff(&before).unwrap()).unwrap();
+        let frame = agent_doc_reliable_sync_io::document_op::encode_document_op_frame_in_lineage(
+            Some(&lineage),
+            &ops,
+        )
+        .unwrap();
+        let envelope = agent_doc_reliable_sync_io::encode_envelope(
+            &format!("{document_hash}:document-op"),
+            &frame,
+        )
+        .unwrap();
+        let mut request = replica_rpc_request(&file, serde_json::Value::Null);
+        request.command = "reliable_sync".into();
+        request.generation = Some(1);
+        request.diagnostic_payload = Some(envelope.to_string());
+        handle_reliable_sync(dir.path(), Some(&runtime), request.clone()).unwrap();
+
+        let channel = document_delivery_wake_channel(&document_hash);
+        let receipt = runtime.subscribe_state_plane(&channel, None, 0, Duration::ZERO);
+        assert_eq!(receipt.frames.len(), 1);
+        let message = serde_json::from_str(&receipt.frames[0].message_json).unwrap();
+        let payload =
+            state_plane_snapshot_payload(&message, &channel, DOCUMENT_DELIVERY_WAKE_TYPE_TAG)
+                .unwrap();
+        let wake: DocumentDeliveryWakeProjection = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(
+            wake.content_hash.unwrap(),
+            agent_doc_hash::content_hash(&format!("{original}{edit}"))
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+        handle_reliable_sync(dir.path(), Some(&runtime), request).unwrap();
+        let replay = runtime.subscribe_state_plane(
+            &channel,
+            Some(receipt.controller_generation),
+            receipt.latest_version,
+            Duration::ZERO,
+        );
+        assert!(replay.frames.is_empty());
+
+        agent_doc_crdt_relay_io::deregister_editor_replica_for_file(&file, &identity, pid).unwrap();
+        let close = encode_liveness_frame(&[LivenessOp::Close {
+            document_hash: document_hash.clone(),
+            pid: u64::from(pid),
+            observed_tags: vec![tag.into()],
+        }])
+        .unwrap();
+        controller_liveness_plane()
+            .lock()
+            .ingest(&document_hash, 2, &close)
+            .unwrap();
     }
 
     #[test]
@@ -79128,6 +79295,7 @@ body
         // Fold an Open frame so the shadow plane derives one open doc.
         handle_reliable_sync(
             &bootstrap.project_root,
+            None,
             reliable_sync_open_request_for_pid("docwire-status", status_pid),
         )
         .expect("fold");

@@ -6,6 +6,9 @@ mod highlight;
 use crate::document_explorer::{
     PromptFailure, explorer_active_prompts, load_open_cycle, persist_prompt, spawn_prompt_run,
 };
+use agent_doc_controller_io::project_controller::{
+    ControllerStatePlaneCursor, subscribe_existing_document_delivery_wakes_for_file,
+};
 use agent_doc_editor_surface_io::{DocumentPromptSubmission, project_document_prompts_with_active};
 use agent_doc_markdown_ast::overlay::parse_open_marker_line;
 use agent_doc_watch_io::{ResourceAwareWatcher, WatchFallback};
@@ -29,7 +32,7 @@ use std::io::{self, IsTerminal, Write};
 use std::ops::Range;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::mpsc::{self, Receiver, TryRecvError};
+use std::sync::mpsc::{self, Receiver, Sender, TryRecvError, TrySendError};
 use std::thread;
 use std::time::Duration;
 use unicode_width::UnicodeWidthChar;
@@ -45,24 +48,55 @@ pub(crate) fn run(file: &Path) -> Result<()> {
         .canonicalize()
         .with_context(|| format!("open {}", file.display()))?;
     ensure!(file.is_file(), "expected a document file");
-    let updates = match DocumentUpdates::watch(&file) {
-        Ok(updates) => Some(updates),
-        Err(error) => {
-            eprintln!("[explore] automatic refresh unavailable: {error:#}");
-            None
-        }
-    };
+    let updates = DocumentUpdates::watch(&file);
     let mut explorer = Explorer::open(file)?;
     let mut screen = Terminal::enter()?;
     explorer.interact(&mut screen, updates)
 }
 
 struct DocumentUpdates {
+    disk: Option<DiskUpdates>,
+    authority: Option<AuthorityUpdates>,
+}
+
+impl DocumentUpdates {
+    fn watch(file: &Path) -> Self {
+        let disk = DiskUpdates::watch(file)
+            .inspect_err(|error| eprintln!("[explore] file watch unavailable: {error:#}"))
+            .ok();
+        let authority = if agent_doc_project_root_io::project_root_containing(file).is_some() {
+            AuthorityUpdates::watch(file.to_path_buf())
+                .inspect_err(|error| eprintln!("[explore] authority watch unavailable: {error:#}"))
+                .ok()
+        } else {
+            None
+        };
+        Self { disk, authority }
+    }
+
+    fn is_active(&self) -> bool {
+        self.disk.is_some() || self.authority.is_some()
+    }
+
+    fn take_change(&mut self, file: &Path) -> bool {
+        let disk = self
+            .disk
+            .as_mut()
+            .is_some_and(|watch| watch.take_change(file));
+        let authority = self
+            .authority
+            .as_ref()
+            .is_some_and(|watch| watch.take_change());
+        disk || authority
+    }
+}
+
+struct DiskUpdates {
     watcher: ResourceAwareWatcher,
     events: Receiver<notify::Result<FileEvent>>,
 }
 
-impl DocumentUpdates {
+impl DiskUpdates {
     fn watch(file: &Path) -> Result<Self> {
         let directory = file.parent().context("find document directory")?;
         let (sender, events) = mpsc::channel();
@@ -90,6 +124,75 @@ impl DocumentUpdates {
             }
         }
         changed
+    }
+}
+
+struct AuthorityUpdates {
+    changes: Receiver<()>,
+    _close: Sender<()>,
+}
+
+impl AuthorityUpdates {
+    fn watch(file: PathBuf) -> io::Result<Self> {
+        // A burst only invalidates the displayed snapshot once. The terminal
+        // will read the current authority after both wake sources are drained.
+        let (signal_change, changes) = mpsc::sync_channel(1);
+        let (close, closed) = mpsc::channel::<()>();
+        thread::Builder::new()
+            .name("explore-authority".into())
+            .spawn(move || {
+                let mut cursor: Option<ControllerStatePlaneCursor> = None;
+                let mut connected = false;
+                while matches!(closed.try_recv(), Err(TryRecvError::Empty)) {
+                    match subscribe_existing_document_delivery_wakes_for_file(
+                        &file,
+                        cursor,
+                        Duration::from_secs(30),
+                        SOURCE,
+                    ) {
+                        Ok(wake) => {
+                            let generation_changed = cursor.is_some_and(|previous| {
+                                previous.controller_generation != wake.controller_generation
+                            });
+                            cursor = Some(ControllerStatePlaneCursor {
+                                controller_generation: wake.controller_generation,
+                                plane_version: wake.latest_version,
+                            });
+                            connected = true;
+                            if (wake.changed || generation_changed)
+                                && matches!(
+                                    signal_change.try_send(()),
+                                    Err(TrySendError::Disconnected(()))
+                                )
+                            {
+                                return;
+                            }
+                        }
+                        Err(error) => {
+                            if connected {
+                                eprintln!("[explore] authority watch disconnected: {error:#}");
+                                connected = false;
+                            }
+                            // Wait only when transport is unavailable, such as
+                            // before an editor has started the controller.
+                            if !matches!(
+                                closed.recv_timeout(Duration::from_secs(2)),
+                                Err(mpsc::RecvTimeoutError::Timeout)
+                            ) {
+                                return;
+                            }
+                        }
+                    }
+                }
+            })?;
+        Ok(Self {
+            changes,
+            _close: close,
+        })
+    }
+
+    fn take_change(&self) -> bool {
+        self.changes.try_recv().is_ok()
     }
 }
 
@@ -457,19 +560,13 @@ impl Explorer {
         (rows[index].id.strip_prefix("prompt-answer:") == Some(receipt)).then_some(index)
     }
 
-    fn interact(
-        &mut self,
-        screen: &mut Terminal,
-        mut updates: Option<DocumentUpdates>,
-    ) -> Result<()> {
+    fn interact(&mut self, screen: &mut Terminal, mut updates: DocumentUpdates) -> Result<()> {
         let mut redraw = true;
         let mut refresh_pending = false;
         loop {
             let dispatch_finished = self.observe_run();
             refresh_pending |= dispatch_finished;
-            if let Some(updates) = &mut updates {
-                refresh_pending |= updates.take_change(&self.file);
-            }
+            refresh_pending |= updates.take_change(&self.file);
             // Review owns the captured revision until Ctrl+R or exit. A
             // background document update must not silently rebase a draft.
             if refresh_pending && self.review_top.is_none() {
@@ -481,9 +578,9 @@ impl Explorer {
                 self.render(&mut screen.output, width, height)?;
                 redraw = false;
             }
-            // Multiplex terminal input with the file-watcher and dispatch
+            // Multiplex terminal input with document update and dispatch
             // channels. Only their events trigger an authoritative text read.
-            if (updates.is_some() || self.running.is_some())
+            if (updates.is_active() || self.running.is_some())
                 && !event::poll(Duration::from_millis(125))?
             {
                 continue;

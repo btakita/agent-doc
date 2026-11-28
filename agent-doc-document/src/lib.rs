@@ -14,6 +14,7 @@ pub mod compact_projection;
 pub mod component_exclusivity;
 pub mod component_patches;
 pub mod element_models;
+pub mod markdown_highlight;
 pub mod outline_projection;
 pub mod place;
 pub mod queue_projection;

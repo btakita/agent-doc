@@ -173,7 +173,6 @@ dependencies = [
  "parking_lot",
  "predicates",
  "proptest",
- "pulldown-cmark",
  "serde",
  "serde_json",
  "serde_yaml",

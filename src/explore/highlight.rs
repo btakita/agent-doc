@@ -1,13 +1,13 @@
 //! Presentation of one authoritative document snapshot in the terminal.
 
 use super::{clip_to_width, printable};
+use agent_doc_document::markdown_highlight::{MarkdownSyntax, markdown_syntax_ranges};
 use agent_doc_syntax::{VisualTokenKind, collect_visual_tokens};
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::{
     Attribute, Color, ContentStyle, Print, ResetColor, SetAttributes, SetForegroundColor,
 };
-use pulldown_cmark::{Event, Options, Parser, Tag};
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::io::{self, Write};
 use std::ops::Range;
@@ -131,15 +131,14 @@ enum Syntax {
 }
 
 impl Syntax {
-    fn markdown(event: Event<'_>) -> Option<Self> {
-        match event {
-            Event::Start(Tag::Heading { .. }) => Some(Self::Heading),
-            Event::Start(Tag::Emphasis) => Some(Self::Italic),
-            Event::Start(Tag::Strong) => Some(Self::Bold),
-            Event::Start(Tag::Strikethrough) => Some(Self::Strike),
-            Event::Start(Tag::Link { .. } | Tag::Image { .. }) => Some(Self::Link),
-            Event::Start(Tag::CodeBlock(_)) | Event::Code(_) => Some(Self::Code),
-            _ => None,
+    fn markdown(kind: MarkdownSyntax) -> Self {
+        match kind {
+            MarkdownSyntax::Heading => Self::Heading,
+            MarkdownSyntax::Emphasis => Self::Italic,
+            MarkdownSyntax::Strong => Self::Bold,
+            MarkdownSyntax::Strikethrough => Self::Strike,
+            MarkdownSyntax::Link => Self::Link,
+            MarkdownSyntax::Code => Self::Code,
         }
     }
 
@@ -188,12 +187,8 @@ impl Syntax {
 }
 
 fn highlight_ranges(content: &str) -> Vec<(Range<usize>, ContentStyle)> {
-    let markdown = Parser::new_ext(
-        content,
-        Options::ENABLE_STRIKETHROUGH | Options::ENABLE_YAML_STYLE_METADATA_BLOCKS,
-    )
-    .into_offset_iter()
-    .filter_map(|(event, range)| Syntax::markdown(event).map(|syntax| (range, syntax)));
+    let markdown =
+        markdown_syntax_ranges(content).map(|(range, kind)| (range, Syntax::markdown(kind)));
     let agent_doc = collect_visual_tokens(content)
         .into_iter()
         .filter_map(|token| Syntax::agent_doc(token.kind).map(|s| (token.start..token.end, s)));

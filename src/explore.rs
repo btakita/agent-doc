@@ -184,6 +184,7 @@ struct Explorer {
     snapshot: Snapshot,
     selected: usize,
     source_scroll: usize,
+    pane_sizes: PaneSizes,
     status: String,
     composing: bool,
     draft: String,
@@ -198,6 +199,7 @@ impl Explorer {
             file,
             selected: 0,
             source_scroll: 0,
+            pane_sizes: PaneSizes::default(),
             status: String::new(),
             composing: false,
             draft: String::new(),
@@ -272,13 +274,17 @@ impl Explorer {
 
         let before = self.selected;
         let last = self.snapshot.projection.nodes.len().saturating_sub(1);
-        let page = Panes::fit(width, height).source_height.saturating_sub(1);
+        let panes = self.pane_sizes.fit(width, height);
+        let page = panes.source_height.saturating_sub(1).max(1);
         match key.code {
             KeyCode::Char('q') | KeyCode::Esc => return true,
             KeyCode::Up | KeyCode::Char('k') => self.selected = before.saturating_sub(1),
             KeyCode::Down | KeyCode::Char('j') => self.selected = (before + 1).min(last),
             KeyCode::Home => self.selected = 0,
             KeyCode::End => self.selected = last,
+            KeyCode::Char('[') => self.pane_sizes.resize(&panes, false),
+            KeyCode::Char(']') => self.pane_sizes.resize(&panes, true),
+            KeyCode::Char('=') => self.pane_sizes = PaneSizes::default(),
             KeyCode::PageUp => self.source_scroll = self.source_scroll.saturating_sub(page.into()),
             KeyCode::PageDown => {
                 if let Some(row) = self.selected_row() {
@@ -471,7 +477,7 @@ impl Explorer {
             if self.composing {
                 self.render_composer(output, width, height)?;
             } else {
-                self.render_panes(output, Panes::fit(width, height))?;
+                self.render_panes(output, self.pane_sizes.fit(width, height))?;
             }
             print_at(output, 0, height - 2, width, &self.status)?;
         }
@@ -479,7 +485,7 @@ impl Explorer {
             let keys = if self.composing {
                 "Ctrl+S send · Ctrl+R refresh · Esc keep draft and return"
             } else {
-                "↑/↓ select · PgUp/PgDn source · p prompt · r refresh · q quit"
+                "↑/↓ select · [ ] resize · = reset · q quit · PgUp/PgDn source · p prompt · r refresh"
             };
             print_at(output, 0, height - 1, width, keys)?;
         }
@@ -555,23 +561,35 @@ struct Panes {
     source_width: u16,
 }
 
-impl Panes {
-    fn fit(width: u16, height: u16) -> Self {
+#[derive(Default)]
+struct PaneSizes {
+    outline_columns: Option<u16>,
+    outline_rows: Option<u16>,
+}
+
+impl PaneSizes {
+    const MIN_COLUMNS: u16 = 16;
+    const MIN_ROWS: u16 = 1;
+
+    fn fit(&self, width: u16, height: u16) -> Panes {
         let rows = height.saturating_sub(3);
         if width >= 80 {
-            let outline = (width / 2).min(52);
-            Self {
+            let columns = width - 1;
+            let outline = self.outline_columns.unwrap_or((width / 2).min(52));
+            let outline = Self::clamp(outline, columns, Self::MIN_COLUMNS);
+            Panes {
                 outline_top: 1,
                 outline_height: rows,
                 outline_width: outline,
                 source_top: 1,
                 source_left: outline + 1,
                 source_height: rows,
-                source_width: width - outline - 1,
+                source_width: columns - outline,
             }
         } else {
-            let outline = rows.div_ceil(2);
-            Self {
+            let outline = self.outline_rows.unwrap_or(rows.div_ceil(2));
+            let outline = Self::clamp(outline, rows, Self::MIN_ROWS);
+            Panes {
                 outline_top: 1,
                 outline_height: outline,
                 outline_width: width,
@@ -581,6 +599,40 @@ impl Panes {
                 source_width: width,
             }
         }
+    }
+
+    fn resize(&mut self, panes: &Panes, grow_outline: bool) {
+        let (preference, current, available, step, minimum) = if panes.source_left > 0 {
+            (
+                &mut self.outline_columns,
+                panes.outline_width,
+                panes.outline_width + panes.source_width,
+                4,
+                Self::MIN_COLUMNS,
+            )
+        } else {
+            (
+                &mut self.outline_rows,
+                panes.outline_height,
+                panes.outline_height + panes.source_height,
+                1,
+                Self::MIN_ROWS,
+            )
+        };
+        let requested = if grow_outline {
+            current.saturating_add(step)
+        } else {
+            current.saturating_sub(step)
+        };
+        let size = Self::clamp(requested, available, minimum);
+        if size != current {
+            *preference = Some(size);
+        }
+    }
+
+    fn clamp(outline: u16, available: u16, minimum: u16) -> u16 {
+        let minimum = minimum.min(available / 2);
+        outline.clamp(minimum, available - minimum)
     }
 }
 
@@ -737,6 +789,49 @@ mod tests {
                 .unwrap()
                 .ends_with("› **é界** plain [Pending]\x1b[0m")
         );
+    }
+
+    #[test]
+    fn pane_sizes_remember_each_layout_and_fit_smaller_terminals() {
+        let mut sizes = PaneSizes::default();
+        let wide = sizes.fit(110, 30);
+        let narrow = sizes.fit(66, 30);
+        assert_eq!((wide.outline_width, wide.source_width), (52, 57));
+        assert_eq!((narrow.outline_height, narrow.source_height), (14, 13));
+
+        sizes.resize(&wide, true);
+        sizes.resize(&narrow, false);
+        let wide = sizes.fit(110, 30);
+        let narrow = sizes.fit(66, 30);
+        assert_eq!(
+            (wide.outline_width, wide.source_left, wide.source_width),
+            (56, 57, 53)
+        );
+        assert_eq!(
+            (
+                narrow.outline_height,
+                narrow.source_top,
+                narrow.source_height
+            ),
+            (13, 14, 14)
+        );
+
+        let smaller = sizes.fit(80, 5);
+        assert_eq!((smaller.outline_width, smaller.source_width), (56, 23));
+        let short = sizes.fit(66, 5);
+        assert_eq!((short.outline_height, short.source_height), (1, 1));
+        assert_eq!(sizes.fit(66, 30).outline_height, 13);
+
+        for _ in 0..100 {
+            let wide = sizes.fit(110, 30);
+            sizes.resize(&wide, false);
+            let narrow = sizes.fit(66, 30);
+            sizes.resize(&narrow, true);
+        }
+        let wide = sizes.fit(110, 30);
+        let narrow = sizes.fit(66, 30);
+        assert_eq!((wide.outline_width, wide.source_width), (16, 93));
+        assert_eq!((narrow.outline_height, narrow.source_height), (26, 1));
     }
 
     #[test]

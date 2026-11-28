@@ -497,6 +497,7 @@ It is the complement of `admin dashboard`, not a replacement: `admin dashboard` 
 
 - The outline has focus when the Explorer opens. Use Tab or Shift+Tab to switch between the outline and source preview. The footer names the focused pane.
 - Up and Down or `j` and `k` move by one item in the outline or one line in the preview. Page Up and Page Down page the focused pane. Home and End move to its start or end. Press `r` to refresh the document and task state.
+- In the outline, Left jumps to the parent and Right jumps to the first child. Ctrl+Up and Ctrl+Down jump between siblings under the same parent.
 - Press `[` to shrink the outline and grow the source preview, or `]` to grow the outline and shrink the preview. The Explorer remembers separate sizes for side-by-side and stacked layouts while it is open. Press `=` to reset both layouts.
 - The outline highlights Markdown and Agent Doc syntax in its labels, including headings, component names, and tracked IDs. The source pane also highlights links, emphasis, strikethrough, code, scratch comments, prompts, and queue-report annotations. Inline code and code blocks use a single code color. A nonempty `NO_COLOR` or `TERM=dumb` displays both panes without syntax styling.
 - Press `p` on a promptable item, type a draft, and press Ctrl+S to send. Enter adds a newline. Ctrl+R refreshes from the composer, and Escape returns to the outline with the draft intact. A changed document revision leaves the draft intact and requires a refresh before retrying.

@@ -2233,6 +2233,9 @@ Markdown links from the current session snapshot. Open a linked document in
 the editor or switch the document tree to a linked Agent Doc session. The
 Repository tab provides the code and Docs search described below.
 
+A matching saved answer appears as wrapped text under its prompt in the
+Document tree. The answer row opens the saved response in the editor.
+
 Explorer controls, labels, result lists, and answers use 70% of the IDE's UI
 font size and follow UI font and zoom changes. Result rows size themselves to
 the text with scaled padding.

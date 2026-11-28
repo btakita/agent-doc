@@ -77,6 +77,8 @@ struct Target {
     action: Action,
     #[serde(skip_serializing_if = "Option::is_none")]
     task: Option<PromptTask>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    answer_text: Option<String>,
     #[serde(skip)]
     offset: usize,
     #[serde(skip)]
@@ -379,6 +381,7 @@ impl<'a> Projection<'a> {
             depth,
             action: Action::Navigate,
             task: None,
+            answer_text: None,
             offset: start,
             indent: 0,
             context: None,
@@ -1019,7 +1022,9 @@ mod tests {
         let sample_projection = task_projection(&sample, RECEIPT, &[]).0;
         assert_eq!(sample_projection["nodes"][at]["task"]["state"], "submitted");
         assert_ne!(sample_projection["nodes"][at + 1]["label"], "Answer");
-        let answered = append(&format!("{receipt}\n\nReview complete.\nMore details."));
+        let answered = append(&format!(
+            "{receipt}\n\nReview complete.\n\n### Verification\nMore details.\n\n<!-- agent:boundary:sample -->"
+        ));
         let (result, at) = task_projection(&answered, RECEIPT, &[header.into()]);
         assert_eq!(
             result["nodes"][at - 1]["selection_key"],
@@ -1028,6 +1033,10 @@ mod tests {
         assert_eq!(result["nodes"][at]["task"]["state"], "answered");
         let answer = &result["nodes"][at + 1];
         assert_eq!(answer["label"], "Answer");
+        assert_eq!(
+            answer["answer_text"],
+            "Review complete.\n\n### Verification\nMore details."
+        );
         assert_eq!(answer["action"], "navigate");
         assert_eq!(
             answer["depth"].as_u64(),
@@ -1325,6 +1334,7 @@ mod tests {
         assert_eq!(view["nodes"][at]["task"]["state"], "answered");
         let response = &view["nodes"][at + 1];
         assert_eq!(response["label"], "Answer");
+        assert_eq!(response["answer_text"], "Worker checked it.");
         let first = response["line"].as_u64().unwrap() as usize - 1;
         let end = response["end_line"].as_u64().unwrap() as usize;
         assert!(

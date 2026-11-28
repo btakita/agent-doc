@@ -2,6 +2,7 @@ package com.github.btakita.agentdoc
 
 import com.github.btakita.agentdoc.shell.ImplAction
 import com.google.gson.JsonObject
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.Disposable
 import com.intellij.openapi.actionSystem.AnActionEvent
 import com.intellij.openapi.application.ReadAction
@@ -163,6 +164,8 @@ internal class RepoContextQuestionComposer(onSubmit: () -> Unit) : JPanel(Border
     }
 }
 
+private const val FOLLOW_EDITOR_CARET_KEY = "agentDoc.documentContextExplorer.followEditorCaret"
+
 private class RepoContextExplorerPanel(private val project: Project, private val projectPath: Path) :
     RepoContextTypography(BorderLayout(JBUI.scale(8), JBUI.scale(8))), Disposable {
 
@@ -215,7 +218,8 @@ private class RepoContextExplorerPanel(private val project: Project, private val
     private var answerWork: Future<*>? = null
     @Volatile private var disposed = false
     private val caretSync = RepoContextCaretSync(project, this, canFollow = {
-        !disposed && !submitting && documentTree.isShowing && tabs.selectedComponent === documentTree &&
+        documentTree.followEditorCaret.isSelected && !disposed && !submitting &&
+            documentTree.isShowing && tabs.selectedComponent === documentTree &&
             !documentTree.isEditingPrompt &&
             KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
                 ?.let(documentTree::isAncestorOf) != true
@@ -236,6 +240,11 @@ private class RepoContextExplorerPanel(private val project: Project, private val
         related.selectionMode = ListSelectionModel.SINGLE_SELECTION
         related.cellRenderer = RepoContextLocationRenderer()
         add(buttonRow(chooseSession, sessionLabel), BorderLayout.NORTH)
+        val preferences = PropertiesComponent.getInstance(project)
+        documentTree.followEditorCaret.apply {
+            isSelected = preferences.getBoolean(FOLLOW_EDITOR_CARET_KEY, true)
+            addActionListener { preferences.setValue(FOLLOW_EDITOR_CARET_KEY, isSelected, true) }
+        }
         tabs.addTab("Document", documentTree)
         tabs.addTab("Repository", JPanel(BorderLayout(0, JBUI.scale(5))).apply {
             add(JPanel(BorderLayout(JBUI.scale(6), 0)).apply {

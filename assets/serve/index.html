@@ -45,6 +45,7 @@
     .component-content { flex: 1; min-height: 0; margin: 0; overflow: auto; padding: 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: #d8dee9; font: 12px/1.5 ui-monospace, "SF Mono", Menlo, monospace; }
     .document-prompts { height: 100%; display: flex; flex-direction: column; }
     .document-prompts[hidden] { display: none; }
+    .follow-editor-caret { padding: 6px 8px; }
     .prompt-tree { flex: 1; min-height: 65px; overflow: auto; padding: 5px; }
     .prompt-row-button { min-height: 30px; width: 100%; text-align: left; overflow-wrap: anywhere; background: transparent; color: var(--fg); font-weight: 400; }
     .prompt-row-button[aria-pressed="true"] { background: #263248; }
@@ -103,6 +104,9 @@
       </div>
       <div class="panels">
         <section class="document-prompts" id="documentPrompts" aria-label="Document prompts">
+          <label class="follow-editor-caret">
+            <input id="followEditorCaretOption" type="checkbox" checked> Follow editor caret
+          </label>
           <details class="document-links" id="documentLinks" hidden>
             <summary>Linked documents</summary>
             <div id="documentLinkList"></div>
@@ -152,6 +156,9 @@
     const liveResponseBody = document.getElementById("liveResponseBody");
     const documentPrompts = document.getElementById("documentPrompts");
     const promptTree = document.getElementById("promptTree");
+    const followEditorCaretOption = document.getElementById("followEditorCaretOption");
+    const followEditorCaretKey = "agentDocServeFollowEditorCaret";
+    followEditorCaretOption.checked = window.localStorage.getItem(followEditorCaretKey) !== "false";
     const promptForm = document.getElementById("promptForm");
     const promptDraft = document.getElementById("promptDraft");
     const promptSubmit = document.getElementById("promptSubmit");
@@ -568,7 +575,7 @@
     }
 
     function followEditorCaret() {
-      if (document.activeElement !== editor || hasUnsavedEdits()
+      if (!followEditorCaretOption.checked || document.activeElement !== editor || hasUnsavedEdits()
           || savedRevision !== '"' + promptProjection?.revision + '"') return;
       const line = editor.value.slice(0, editor.selectionStart).split("\n").length;
       let target = null;
@@ -769,6 +776,9 @@
     });
     editor.addEventListener("scroll", () => {
       gutter.scrollTop = editor.scrollTop;
+    });
+    followEditorCaretOption.addEventListener("change", () => {
+      window.localStorage.setItem(followEditorCaretKey, String(followEditorCaretOption.checked));
     });
     editor.addEventListener("pointerup", followEditorCaret);
     editor.addEventListener("keyup", followEditorCaret);

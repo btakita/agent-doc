@@ -11,6 +11,7 @@ import org.junit.Test
 import java.awt.Component
 import java.awt.Container
 import java.lang.reflect.Proxy
+import javax.swing.JButton
 import javax.swing.SwingUtilities
 
 class RepoContextDocumentTreeTest {
@@ -105,6 +106,27 @@ class RepoContextDocumentTreeTest {
         assertEquals("", composer.editor.text)
         view.show(RepoContextDocumentOutline("after", listOf(alpha, refreshedBeta, navigation)), "session-a")
         assertEquals("Alpha keeps its own draft.", composer.editor.text)
+    }
+
+    @Test
+    fun `turning off caret following keeps manual tree navigation available`() = SwingUtilities.invokeAndWait {
+        var opened: DocumentPromptTarget? = null
+        val view = RepoContextDocumentTree({}, { opened = it })
+        val root = DocumentPromptTarget("document", "document", "Document", 1, 0, DocumentPromptAction.EXCHANGE)
+        val target = DocumentPromptTarget("target", "tracked:target", "Review", 4, 1, DocumentPromptAction.EXCHANGE)
+        view.show(RepoContextDocumentOutline("revision", listOf(root, target)))
+
+        assertTrue(view.followEditorCaret.isSelected)
+        view.followEditorCaret.doClick()
+        assertFalse(view.followEditorCaret.isSelected)
+        assertEquals(root, view.selection)
+
+        val tree = tree(view)
+        tree.selectionPath = (0 until tree.rowCount).map(tree::getPathForRow)
+            .single { it.lastPathComponent.toString() == target.label }
+        assertEquals(target, view.selection)
+        children(view).filterIsInstance<JButton>().single { it.text == "Open in editor" }.doClick()
+        assertEquals(target, opened)
     }
 
     private fun tree(view: RepoContextDocumentTree): Tree =

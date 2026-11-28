@@ -3,6 +3,7 @@ package com.github.btakita.agentdoc
 import com.google.gson.JsonObject
 import com.intellij.openapi.editor.Document
 import com.intellij.openapi.ui.ComboBox
+import com.intellij.ui.components.JBCheckBox
 import com.intellij.ui.components.JBLabel
 import com.intellij.ui.components.JBScrollPane
 import com.intellij.util.ui.JBUI
@@ -132,6 +133,7 @@ internal class RepoContextDocumentTree(
     onOpenLink: (String) -> Unit = {},
 ) : RepoContextTypography(BorderLayout(0, JBUI.scale(4))) {
     val question = RepoContextQuestionComposer(onSubmit)
+    val followEditorCaret = JBCheckBox("Follow editor caret", true)
     private val tree = RepoContextInlinePromptTree(question).apply {
         isRootVisible = false
         accessibleContext.accessibleName = "Session document"
@@ -169,13 +171,19 @@ internal class RepoContextDocumentTree(
         get() = question.editor.isFocusOwner
 
     init {
-        add(links, BorderLayout.NORTH)
+        add(JPanel(BorderLayout(0, JBUI.scale(4))).apply {
+            add(followEditorCaret, BorderLayout.NORTH)
+            add(links, BorderLayout.CENTER)
+        }, BorderLayout.NORTH)
         add(JBScrollPane(tree), BorderLayout.CENTER)
         add(JPanel(BorderLayout(JBUI.scale(4), 0)).apply {
             add(hint, BorderLayout.CENTER)
             add(open, BorderLayout.EAST)
         }, BorderLayout.SOUTH)
-        useCompactFont(tree, hint, open, question.label, question.editor, question.submit, linksLabel, linkedDocuments, openLink)
+        useCompactFont(
+            tree, hint, open, question.label, question.editor, question.submit,
+            followEditorCaret, linksLabel, linkedDocuments, openLink,
+        )
         tree.model = DefaultTreeModel(DefaultMutableTreeNode())
         tree.addTreeSelectionListener {
             if (!replacingModel) updateSelection()

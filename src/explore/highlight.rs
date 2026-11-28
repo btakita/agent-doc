@@ -6,7 +6,8 @@ use agent_doc_syntax::{VisualTokenKind, collect_visual_tokens};
 use crossterm::cursor::MoveTo;
 use crossterm::queue;
 use crossterm::style::{
-    Attribute, Color, ContentStyle, Print, ResetColor, SetAttributes, SetForegroundColor,
+    Attribute, Color, ContentStyle, Print, ResetColor, SetAttribute, SetAttributes,
+    SetForegroundColor,
 };
 use std::collections::{BTreeMap, btree_map::Entry};
 use std::io::{self, Write};
@@ -17,10 +18,12 @@ pub(super) fn enabled() -> bool {
         && std::env::var_os("TERM").as_deref() != Some("dumb".as_ref())
 }
 
+pub(super) type Highlights = Vec<(Range<usize>, ContentStyle)>;
+
 pub(super) struct SourcePreview {
     content: String,
     lines: Vec<Range<usize>>,
-    highlights: Vec<(Range<usize>, ContentStyle)>,
+    highlights: Highlights,
 }
 
 impl SourcePreview {
@@ -73,42 +76,120 @@ impl SourcePreview {
 
         let line = &self.lines[index];
         let end = line.start + clip_to_width(&self.content[line.clone()], &mut columns).len();
-        if line.start == end {
-            return Ok(());
-        }
-        let mut cursor = line.start;
-        let start = self
-            .highlights
-            .partition_point(|(range, _)| range.end <= cursor);
-        for (range, style) in self.highlights[start..]
-            .iter()
-            .take_while(|(range, _)| range.start < end)
-        {
-            if cursor < range.start {
-                self.print_text(output, cursor..range.start)?;
-                cursor = range.start;
-            }
-            if let Some(color) = style.foreground_color {
-                queue!(output, SetForegroundColor(color))?;
-            }
-            queue!(output, SetAttributes(style.attributes))?;
-            let next = range.end.min(end);
-            self.print_text(output, cursor..next)?;
-            queue!(output, ResetColor)?;
-            cursor = next;
-        }
-        if cursor < end {
-            self.print_text(output, cursor..end)?;
-        }
-        Ok(())
-    }
-
-    fn print_text(&self, output: &mut impl Write, range: Range<usize>) -> io::Result<()> {
-        queue!(
+        print_spans(
             output,
-            Print(printable(&self.content[range]).collect::<String>())
+            &self.content,
+            line.start..end,
+            &self.highlights,
+            false,
         )
     }
+
+    pub(super) fn outline_highlights(&self, label: &str, line: usize) -> Highlights {
+        let Some(source) = self.lines.get(line) else {
+            return highlight_ranges(label);
+        };
+        let source_text = &self.content[source.clone()];
+        if let Some((heading, marker)) = label.rsplit_once(" · ")
+            && projected_component_marker(source_text, marker)
+        {
+            let mut highlights = self.label_highlights(heading, source);
+            highlights.push((label.len() - marker.len()..label.len(), marker_style()));
+            highlights
+        } else if projected_component_marker(source_text, label) {
+            vec![(0..label.len(), marker_style())]
+        } else {
+            self.label_highlights(label, source)
+        }
+    }
+
+    fn label_highlights(&self, label: &str, source: &Range<usize>) -> Highlights {
+        let source_text = &self.content[source.clone()];
+        // The outline compacts its labels and can add an ellipsis or project
+        // text from a different line. Reuse source spans where the text aligns.
+        let matching_text = match source_text.find(label) {
+            Some(offset) => Some((offset, label.len())),
+            None => label.strip_suffix('…').and_then(|prefix| {
+                source_text
+                    .find(prefix)
+                    .map(|offset| (offset, prefix.len()))
+            }),
+        };
+        let Some((offset, len)) = matching_text else {
+            return highlight_ranges(label);
+        };
+        let start = source.start + offset;
+        intersecting_spans(&self.highlights, start..start + len)
+            .map(|(range, style)| (range.start - start..range.end - start, style))
+            .collect()
+    }
+}
+
+fn projected_component_marker(source: &str, label: &str) -> bool {
+    let name = label.split_once(" (").map_or(label, |(name, _)| name);
+    name.starts_with("agent:")
+        && source.split_once("<!--").is_some_and(|(_, marker)| {
+            marker.trim_start().strip_prefix(name).is_some_and(|rest| {
+                rest.starts_with(char::is_whitespace) || rest.starts_with("-->")
+            })
+        })
+}
+
+fn marker_style() -> ContentStyle {
+    ContentStyle {
+        foreground_color: Syntax::Marker.style().0,
+        ..ContentStyle::default()
+    }
+}
+
+fn intersecting_spans(
+    highlights: &[(Range<usize>, ContentStyle)],
+    visible: Range<usize>,
+) -> impl Iterator<Item = (Range<usize>, ContentStyle)> + '_ {
+    let start = highlights.partition_point(|(range, _)| range.end <= visible.start);
+    let end = visible.end;
+    highlights[start..]
+        .iter()
+        .take_while(move |(range, _)| range.start < end)
+        .map(move |(range, style)| (range.start.max(visible.start)..range.end.min(end), *style))
+}
+
+pub(super) fn print_spans(
+    output: &mut impl Write,
+    text: &str,
+    visible: Range<usize>,
+    highlights: &[(Range<usize>, ContentStyle)],
+    selected: bool,
+) -> io::Result<()> {
+    if visible.is_empty() {
+        return Ok(());
+    }
+    let mut cursor = visible.start;
+    let end = visible.end;
+    for (range, style) in intersecting_spans(highlights, visible) {
+        if cursor < range.start {
+            print_text(output, &text[cursor..range.start])?;
+        }
+        if let Some(color) = style.foreground_color {
+            queue!(output, SetForegroundColor(color))?;
+        }
+        queue!(output, SetAttributes(style.attributes))?;
+        print_text(output, &text[range.clone()])?;
+        queue!(output, ResetColor)?;
+        // ResetColor emits SGR 0 on ANSI terminals and clears reverse video.
+        if selected {
+            queue!(output, SetAttribute(Attribute::Reverse))?;
+        }
+        cursor = range.end;
+    }
+    if cursor < end {
+        print_text(output, &text[cursor..end])?;
+    }
+    Ok(())
+}
+
+fn print_text(output: &mut impl Write, text: &str) -> io::Result<()> {
+    queue!(output, Print(printable(text).collect::<String>()))
 }
 
 // Later variants take foreground precedence. Attributes can compose, so a
@@ -186,7 +267,7 @@ impl Syntax {
     }
 }
 
-fn highlight_ranges(content: &str) -> Vec<(Range<usize>, ContentStyle)> {
+fn highlight_ranges(content: &str) -> Highlights {
     let markdown =
         markdown_syntax_ranges(content).map(|(range, kind)| (range, Syntax::markdown(kind)));
     let agent_doc = collect_visual_tokens(content)
@@ -249,6 +330,56 @@ fn active_style(active: &BTreeMap<Syntax, usize>) -> ContentStyle {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn outline_uses_source_syntax_and_styles_projected_component_labels() {
+        let source = concat!(
+            "## Plan **now** <!-- agent:run id=main -->\n",
+            "- ~~Ship~~ [#item] and [Docs][ref]\n",
+            "\n[ref]: https://example.test\n",
+        );
+        let preview = SourcePreview::new(source.to_owned(), true);
+        let at = |spans: &Highlights, byte| {
+            spans
+                .iter()
+                .find(|(range, _)| range.contains(&byte))
+                .unwrap()
+                .1
+        };
+
+        let heading = "Plan **now** · agent:run (main)";
+        let spans = preview.outline_highlights(heading, 0);
+        assert_eq!(at(&spans, 0).foreground_color, Some(Color::Cyan));
+        assert_eq!(
+            at(&spans, heading.find("agent:run").unwrap()).foreground_color,
+            Some(Color::Magenta),
+        );
+        assert_eq!(
+            preview.outline_highlights("agent:run (main)", 0),
+            [(0..16, marker_style())],
+        );
+
+        let row = "~~Ship~~ [#item] and [Docs][ref]";
+        let spans = preview.outline_highlights(row, 1);
+        assert!(
+            at(&spans, row.find("Ship").unwrap())
+                .attributes
+                .has(Attribute::CrossedOut)
+        );
+        assert_eq!(
+            at(&spans, row.find("[#item]").unwrap()).foreground_color,
+            Some(Color::Yellow),
+        );
+        assert_eq!(
+            at(&spans, row.find("[Docs]").unwrap()).foreground_color,
+            Some(Color::Blue),
+        );
+
+        let spans = preview.outline_highlights("~~Ship~~ [#item]…", 1);
+        assert_eq!(spans.last().unwrap().0.end, "~~Ship~~ [#item]".len());
+        let spans = preview.outline_highlights("`fallback`", 2);
+        assert_eq!(at(&spans, 0).foreground_color, Some(Color::DarkCyan));
+    }
 
     #[test]
     fn highlights_markdown_and_agent_doc_without_interpreting_code_contents() {

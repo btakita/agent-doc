@@ -18,7 +18,7 @@ use crossterm::terminal::{
     LeaveAlternateScreen,
 };
 use crossterm::{execute, queue};
-use highlight::SourcePreview;
+use highlight::{Highlights, SourcePreview};
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::io::{self, IsTerminal, Write};
@@ -62,6 +62,37 @@ struct Row {
     depth: usize,
     action: String,
     task: Option<Task>,
+    #[serde(skip)]
+    highlights: Highlights,
+}
+
+impl Row {
+    fn render(&self, output: &mut impl Write, y: u16, width: u16, active: bool) -> io::Result<()> {
+        let indent = self.depth.saturating_mul(2).min(usize::from(width / 2));
+        let prefix = format!("{}{}", if active { "› " } else { "  " }, " ".repeat(indent));
+        let mut columns = usize::from(width);
+        let visible_prefix = clip_to_width(&prefix, &mut columns);
+        if active {
+            queue!(output, SetAttribute(Attribute::Reverse))?;
+        }
+        queue!(output, MoveTo(0, y), Print(visible_prefix))?;
+        if visible_prefix.len() == prefix.len() {
+            let label_len = clip_to_width(&self.label, &mut columns).len();
+            highlight::print_spans(output, &self.label, 0..label_len, &self.highlights, active)?;
+            if label_len == self.label.len()
+                && let Some(task) = &self.task
+            {
+                let badge = format!(" [{}]", task.label);
+                let visible_badge: String =
+                    printable(clip_to_width(&badge, &mut columns)).collect();
+                queue!(output, Print(visible_badge))?;
+            }
+        }
+        if active {
+            queue!(output, SetAttribute(Attribute::Reset))?;
+        }
+        Ok(())
+    }
 }
 
 #[derive(Deserialize)]
@@ -102,13 +133,22 @@ impl Snapshot {
             .flat_map(explorer_active_prompts)
             .cloned()
             .collect::<Vec<_>>();
-        let projection = serde_json::from_value(project_document_prompts_with_active(
-            &content,
-            &active_prompts,
-        )?)
+        let mut projection: Projection = serde_json::from_value(
+            project_document_prompts_with_active(&content, &active_prompts)?,
+        )
         .context("decode the Document Explorer view")?;
+        let colored = highlight::enabled();
+        let preview = SourcePreview::new(content, colored);
+        if colored {
+            for row in &mut projection.nodes {
+                if row.id != "document" {
+                    row.highlights =
+                        preview.outline_highlights(&row.label, row.line.saturating_sub(1));
+                }
+            }
+        }
         Ok(Self {
-            preview: SourcePreview::new(content, highlight::enabled()),
+            preview,
             projection,
         })
     }
@@ -457,35 +497,12 @@ impl Explorer {
             .take(panes.outline_height.into())
             .enumerate()
         {
-            let active = first + offset == self.selected;
-            let indent = row
-                .depth
-                .saturating_mul(2)
-                .min(usize::from(panes.outline_width / 2));
-            let task = row
-                .task
-                .as_ref()
-                .map_or(String::new(), |task| format!(" [{}]", task.label));
-            let line = format!(
-                "{}{}{}{}",
-                if active { "› " } else { "  " },
-                " ".repeat(indent),
-                row.label,
-                task
-            );
-            if active {
-                queue!(output, SetAttribute(Attribute::Reverse))?;
-            }
-            print_at(
+            row.render(
                 output,
-                0,
                 panes.outline_top + offset as u16,
                 panes.outline_width,
-                &line,
+                first + offset == self.selected,
             )?;
-            if active {
-                queue!(output, SetAttribute(Attribute::Reset))?;
-            }
         }
         if let Some(row) = self.selected_row() {
             let first = row.line.saturating_sub(1) + self.source_scroll;
@@ -677,6 +694,49 @@ mod tests {
             "Question revised",
         );
         assert_ne!(selected_other_row.receipt, edited_receipt);
+    }
+
+    #[test]
+    fn outline_selection_covers_highlights_and_task_badges_without_leaking_style() {
+        let label = "**é界** plain";
+        let preview = SourcePreview::new(label.to_owned(), true);
+        let mut row = Row {
+            id: String::new(),
+            selection_key: None,
+            label: label.to_owned(),
+            line: 1,
+            end_line: None,
+            depth: 0,
+            action: String::new(),
+            task: Some(Task {
+                label: "Pending".into(),
+            }),
+            highlights: preview.outline_highlights(label, 0),
+        };
+        let mut output = Vec::new();
+        row.render(&mut output, 0, 28, true).unwrap();
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .ends_with("› \x1b[1m**é界**\x1b[0m\x1b[7m plain [Pending]\x1b[0m")
+        );
+
+        let mut output = Vec::new();
+        row.render(&mut output, 0, 6, false).unwrap();
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .ends_with("  \x1b[1m**é\x1b[0m")
+        );
+
+        row.highlights.clear();
+        let mut output = Vec::new();
+        row.render(&mut output, 0, 28, true).unwrap();
+        assert!(
+            String::from_utf8(output)
+                .unwrap()
+                .ends_with("› **é界** plain [Pending]\x1b[0m")
+        );
     }
 
     #[test]
